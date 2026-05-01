@@ -204,9 +204,10 @@ export class ReviewsService {
         questionId: string,
         kuId: string,
     ) {
-        // 1. Local Check
+        // 1. Local Check — strip trailing Japanese/ASCII punctuation before comparing
+        const normalize = (s: string) => s.toLowerCase().replace(/[。、！？,.!?\s]+$/u, '').trim();
         const isLocalMatch = expectedAnswers.some(
-            (ans) => ans.toLowerCase() === userAnswer.toLowerCase(),
+            (ans) => normalize(ans) === normalize(userAnswer),
         );
 
         if (isLocalMatch) {
