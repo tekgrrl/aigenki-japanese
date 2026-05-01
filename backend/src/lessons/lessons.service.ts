@@ -156,6 +156,10 @@ export class LessonsService {
         updates['data.definition'] = vocabLesson.definition;
       }
 
+      if (vocabLesson.conjugationType) {
+        updates['data.conjugationType'] = vocabLesson.conjugationType;
+      }
+
       if (Object.keys(updates).length > 0) {
         try {
           this.logger.log(`Updating KU ${kuId} with lesson data: ${JSON.stringify(updates)}`);

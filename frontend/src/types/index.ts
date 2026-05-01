@@ -104,6 +104,7 @@ export interface VocabLesson {
   definitions: string[];
   definition?: string; // Deprecated, kept for backward compatibility
   partOfSpeech: PartOfSpeech;
+  conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
   context_examples?: { sentence: string; translation: string }[];
@@ -168,6 +169,7 @@ export interface GlobalVocabLesson {
   definitions: string[];
   definition?: string;
   partOfSpeech: PartOfSpeech;
+  conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
   context_examples?: { sentence: string; translation: string }[];
@@ -295,6 +297,7 @@ export interface VocabKnowledgeUnit extends KnowledgeUnitBase {
   data: {
     reading?: string;
     definition?: string;
+    conjugationType?: 'godan' | 'ichidan' | 'irregular';
     jlptLevel?: string | null;
     wanikaniLevel?: number | null;
     [key: string]: any;
@@ -375,7 +378,7 @@ export type PartOfSpeech =
   | "transitive-verb"
   | "intransitive-verb"
   | "i-adjective"
-  | "na-  "
+  | "na-adjective"
   | "noun"
   | "noun-prenominal"
   | "proper-noun"
@@ -387,7 +390,7 @@ export type PartOfSpeech =
   | "suffix"
   | "conjunction"
   | "grammar"
-  | "expresssion";
+  | "expression";
 
 export interface GlobalKnowledgeUnit {
   id: string;

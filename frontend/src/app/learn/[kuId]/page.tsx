@@ -2,10 +2,13 @@
 
 import React, { useState, useEffect, useRef } from "react"; // <-- Import useRef
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { KnowledgeUnit, Lesson, VocabLesson, KanjiLesson, GrammarLesson, UserGrammarLesson } from "@/types";
+import { KnowledgeUnit, Lesson, VocabLesson, VocabKnowledgeUnit, KanjiLesson, GrammarLesson, UserGrammarLesson } from "@/types";
 import VocabLessonView from "@/components/lessons/VocabLessonView";
 import KanjiLessonView from "@/components/lessons/KanjiLessonView";
 import GrammarLessonView from "@/components/lessons/GrammarLessonView";
+import KuMetaTags from "@/components/lessons/KuMetaTags";
+import { FuriganaText } from "@/components/FuriganaText";
+import { buildFuriganaMarkup } from "@/lib/furigana";
 import { apiFetch } from "@/lib/api-client";
 
 const stripFurigana = (s: string) => s.replace(/\[[^\]]*\]/g, '').trim();
@@ -605,85 +608,104 @@ export default function LearnItemPage() {
                   <span className="ml-3 text-lg text-gray-900 dark:text-white">Audio Comprehension</span>
                 </label>
               )}
+              {!existingFacetTypes.has("AI-Generated-Question") && (
+                <label className="flex items-center p-4 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                    checked={!!selectedFacets["AI-Generated-Question"]}
+                    onChange={() => handleCheckboxChange("AI-Generated-Question")}
+                  />
+                  <span className="ml-3 text-lg text-gray-900 dark:text-white">General usage patterns</span>
+                </label>
+              )}
 
-              {(lesson as VocabLesson).component_kanji?.map((kanji, index) => {
-                const status = kanjiStatuses[kanji.kanji];
-                return (
-                  <div key={`${kanji.kanji}-${index}`} className="p-4 bg-gray-300 dark:bg-gray-800 rounded-md">
-                    <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Component Kanji</h3>
-                    <p className="text-gray-600 dark:text-gray-400 mb-3">
-                      The kanji is <span className="font-bold text-lg">{kanji.kanji}</span>, which generally means "{kanji.meaning}".
-                    </p>
-                    {status ? (
-                      <div className="p-2 bg-gray-400 dark:bg-gray-700 rounded-md">
-                        <p className="text-lg text-gray-800 dark:text-gray-200">
-                          {status === "learning"
-                            ? `You already have a lesson queued for ${kanji.kanji}.`
-                            : `You are already learning ${kanji.kanji}.`}
-                        </p>
-                      </div>
-                    ) : (
-                      <>
+              {(availableKanjiComponents.length > 0 || hasContextExamples) && (
+                <div className="pt-5 mt-2 border-t border-gray-300 dark:border-gray-600 space-y-4">
+                  <h3 className="text-base font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
+                    Choose additional learning items and activities
+                  </h3>
+
+                  {(lesson as VocabLesson).component_kanji?.map((kanji, index) => {
+                    const status = kanjiStatuses[kanji.kanji];
+                    return (
+                      <div key={`${kanji.kanji}-${index}`} className="p-4 bg-gray-300 dark:bg-gray-800 rounded-md">
+                        <h4 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-2">Component Kanji</h4>
                         <p className="text-gray-600 dark:text-gray-400 mb-3">
-                          In this word, it uses the reading <span className="font-bold text-lg">{kanji.reading}</span>.
+                          The kanji <span className="font-bold text-lg">{kanji.kanji}</span> generally means "{kanji.meaning}".
                         </p>
-                        <label className="flex items-center p-2 rounded-md hover:bg-gray-400 dark:hover:bg-gray-700 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 rounded bg-gray-400 dark:bg-gray-900 border-gray-500 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                            checked={!!selectedFacets[`Kanji-Component-${kanji.kanji}`]}
-                            onChange={() => handleCheckboxChange(`Kanji-Component-${kanji.kanji}`)}
-                          />
-                          <span className="ml-3 text-lg text-gray-900 dark:text-white">Add {kanji.kanji}</span>
-                        </label>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-
-              {hasContextExamples && (
-                <div className="p-4 bg-gray-300 dark:bg-gray-800 rounded-md">
-                  <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Context Example Scenarios</h3>
-                  <p className="text-gray-600 dark:text-gray-400 mb-3 block">
-                    Select examples to instantly architect roleplay scenarios where you must use the word <strong>{ku?.content}</strong> in context.
-                  </p>
-                  <div className="space-y-3">
-                    {(lesson as VocabLesson).context_examples?.map((ex, index) => {
-                      const existing = kuScenarios[ex.sentence];
-                      if (existing) {
-                        return (
-                          <div key={index} className="flex items-start p-3 rounded-md bg-gray-400 dark:bg-gray-700">
-                            <span className="mt-1 h-5 w-5 flex items-center justify-center text-green-600 dark:text-green-400 font-bold text-sm flex-shrink-0">✓</span>
-                            <div className="ml-3 flex flex-col">
-                              <span className="text-lg text-gray-900 dark:text-white">{stripFurigana(ex.sentence)}</span>
-                              <span className="text-sm text-gray-600 dark:text-gray-400">{stripFurigana(ex.translation)}</span>
-                              <a
-                                href={`/scenarios/${existing.id}`}
-                                className="mt-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                → View scenario
-                              </a>
-                            </div>
+                        {status ? (
+                          <div className="p-2 bg-gray-400 dark:bg-gray-700 rounded-md">
+                            <p className="text-lg text-gray-800 dark:text-gray-200">
+                              {status === "learning"
+                                ? `You already have a lesson queued for ${kanji.kanji}.`
+                                : `You are already learning ${kanji.kanji}.`}
+                            </p>
                           </div>
-                        );
-                      }
-                      return (
-                        <label key={index} className="flex items-start p-3 rounded-md hover:bg-gray-400 dark:hover:bg-gray-700 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="mt-1 h-5 w-5 rounded bg-gray-400 dark:bg-gray-900 border-gray-500 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                            checked={!!selectedFacets[`Context-Example-${index}`]}
-                            onChange={() => handleCheckboxChange(`Context-Example-${index}`)}
-                          />
-                          <span className="ml-3 text-lg text-gray-900 dark:text-white flex flex-col">
-                            <span>{stripFurigana(ex.sentence)}</span>
-                            <span className="text-sm text-gray-600 dark:text-gray-400">{stripFurigana(ex.translation)}</span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
+                        ) : (
+                          <>
+                            <p className="text-gray-600 dark:text-gray-400 mb-3">
+                              In this word it uses the reading <span className="font-bold text-lg">{kanji.reading}</span>.
+                            </p>
+                            <label className="flex items-center p-2 rounded-md hover:bg-gray-400 dark:hover:bg-gray-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-5 w-5 rounded bg-gray-400 dark:bg-gray-900 border-gray-500 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                                checked={!!selectedFacets[`Kanji-Component-${kanji.kanji}`]}
+                                onChange={() => handleCheckboxChange(`Kanji-Component-${kanji.kanji}`)}
+                              />
+                              <span className="ml-3 text-lg text-gray-900 dark:text-white">Add {kanji.kanji}</span>
+                            </label>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {hasContextExamples && (
+                    <div className="p-4 bg-gray-300 dark:bg-gray-800 rounded-md">
+                      <h4 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-2">Context Example Scenarios</h4>
+                      <p className="text-gray-600 dark:text-gray-400 mb-3 block">
+                        Select examples to instantly architect roleplay scenarios where you must use the word <strong>{ku?.content}</strong> in context.
+                      </p>
+                      <div className="space-y-3">
+                        {(lesson as VocabLesson).context_examples?.map((ex, index) => {
+                          const existing = kuScenarios[ex.sentence];
+                          if (existing) {
+                            return (
+                              <div key={index} className="flex items-start p-3 rounded-md bg-gray-400 dark:bg-gray-700">
+                                <span className="mt-1 h-5 w-5 flex items-center justify-center text-green-600 dark:text-green-400 font-bold text-sm flex-shrink-0">✓</span>
+                                <div className="ml-3 flex flex-col">
+                                  <span className="text-lg text-gray-900 dark:text-white">{stripFurigana(ex.sentence)}</span>
+                                  <span className="text-sm text-gray-600 dark:text-gray-400">{stripFurigana(ex.translation)}</span>
+                                  <a
+                                    href={`/scenarios/${existing.id}`}
+                                    className="mt-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                                  >
+                                    → View scenario
+                                  </a>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <label key={index} className="flex items-start p-3 rounded-md hover:bg-gray-400 dark:hover:bg-gray-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-5 w-5 rounded bg-gray-400 dark:bg-gray-900 border-gray-500 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                                checked={!!selectedFacets[`Context-Example-${index}`]}
+                                onChange={() => handleCheckboxChange(`Context-Example-${index}`)}
+                              />
+                              <span className="ml-3 text-lg text-gray-900 dark:text-white flex flex-col">
+                                <span>{stripFurigana(ex.sentence)}</span>
+                                <span className="text-sm text-gray-600 dark:text-gray-400">{stripFurigana(ex.translation)}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -713,19 +735,18 @@ export default function LearnItemPage() {
                   <span className="ml-3 text-lg text-gray-900 dark:text-white">Reading (Kanji {"->"} On/Kun)</span>
                 </label>
               )}
+              {!existingFacetTypes.has("AI-Generated-Question") && (
+                <label className="flex items-center p-4 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                    checked={!!selectedFacets["AI-Generated-Question"]}
+                    onChange={() => handleCheckboxChange("AI-Generated-Question")}
+                  />
+                  <span className="ml-3 text-lg text-gray-900 dark:text-white">General usage patterns</span>
+                </label>
+              )}
             </>
-          )}
-
-          {!existingFacetTypes.has("AI-Generated-Question") && (
-            <label className="flex items-center p-4 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                checked={!!selectedFacets["AI-Generated-Question"]}
-                onChange={() => handleCheckboxChange("AI-Generated-Question")}
-              />
-              <span className="ml-3 text-lg text-gray-900 dark:text-white">General usage patterns</span>
-            </label>
           )}
         </div>
         )}
@@ -760,20 +781,24 @@ export default function LearnItemPage() {
           <h1 className="text-6xl font-bold text-gray-900 dark:text-white mb-2 break-all">
             {isLoading
               ? "..."
-              : lesson?.type === "Kanji" && (lesson as KanjiLesson).kanji
-                ? (lesson as KanjiLesson).kanji
-                : lesson?.type === "Grammar"
-                  ? (lesson as GrammarLesson).pattern
-                  : ku?.content || "..."}
+              : lesson?.type === "Vocab"
+                ? <FuriganaText text={buildFuriganaMarkup(
+                    ku?.content ?? "",
+                    (lesson as VocabLesson).component_kanji ?? [],
+                  )} />
+                : lesson?.type === "Kanji" && (lesson as KanjiLesson).kanji
+                  ? (lesson as KanjiLesson).kanji
+                  : lesson?.type === "Grammar"
+                    ? (lesson as GrammarLesson).pattern
+                    : ku?.content || "..."}
           </h1>
           {lesson && lesson?.type === "Vocab" && (
-            <p className="text-2xl text-gray-500 dark:text-gray-400 capitalize">
-              {lesson?.partOfSpeech
-                ? lesson.partOfSpeech
-                : ku
-                  ? ku.type
-                  : "..."}{" "}
-            </p>
+            <KuMetaTags
+              partOfSpeech={(lesson as VocabLesson).partOfSpeech}
+              conjugationType={(lesson as VocabLesson).conjugationType}
+              jlptLevel={ku?.type === "Vocab" ? (ku as VocabKnowledgeUnit).data.jlptLevel : null}
+              wanikaniLevel={ku?.type === "Vocab" ? (ku as VocabKnowledgeUnit).data.wanikaniLevel : null}
+            />
           )}
           {lesson && lesson?.type === "Grammar" && (
             <p className="text-2xl text-gray-500 dark:text-gray-400">
