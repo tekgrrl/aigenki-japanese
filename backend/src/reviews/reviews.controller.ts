@@ -48,14 +48,13 @@ export class ReviewsController {
   @Post('generate')
   async generateReviewFacets(
     @UserId() uid: string,
-    @Body() body: { kuId: string, facetsToCreate: { key: string; data?: any }[] }
+    @Body() body: { kuId: string; facetsToCreate: { key: string; data?: any }[]; selfCertifiedFacets?: string[] }
   ) {
     if (!body.kuId || !body.facetsToCreate || body.facetsToCreate.length === 0) {
       throw new BadRequestException('Missing kuId or facetsToCreate');
     }
 
-    console.log(`Generating review facets for KU ${body.kuId}`);
-    return this.reviewsService.generateReviewFacets(uid, body.kuId, body.facetsToCreate);
+    return this.reviewsService.generateReviewFacets(uid, body.kuId, body.facetsToCreate, body.selfCertifiedFacets ?? []);
   }
 
   @Get('facets')

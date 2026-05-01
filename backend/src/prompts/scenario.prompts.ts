@@ -58,7 +58,7 @@ ${dto.userRole && dto.aiRole
     }
 6. **Data Formatting (CRITICAL):**
    - \`title\`, \`description\` and all \`setting\` object fields should be in English
-   - **NO ROMAJI**. Never include Romaji in any field.
+   - **NO ROMAJI**. Never include Romaji in any field — including grammar explanations. Write Japanese words in Japanese script (e.g. です, の) not romanised text (e.g. 'desu', 'no').
    - **Extracted KUs:**
      - \`content\`: Japanese text ONLY (e.g., "本屋"). No readings or definitions in this field.
      - \`reading\`: Kana reading ONLY (e.g., "ほんや"). No Romaji.
@@ -209,13 +209,13 @@ ${dto.conversationText}
    - If the conversation uses labels (A/B, names, numbers), map them to the correct role.
    - Add an accurate English translation for each line.
 2. **Setting:** Infer location, participants, goal, timeOfDay, and visualPrompt from the conversation.${dto.sceneNotes ? ' Use the provided scene context as your primary guide.' : ''}
-3. **Vocabulary:** Extract 3-8 key vocabulary items the learner needs to participate in this conversation.
+3. **Vocabulary:** Extract 3-5 key vocabulary items the learner needs to participate in this conversation.
 4. **Grammar Notes:** Identify 1-3 grammar patterns used in the conversation and explain them Genki-style.
 5. **Title & Description:** Write a short English title and description for this scenario.
 
 **Data Formatting Rules:**
 - \`title\`, \`description\`, and all \`setting\` fields in English.
-- NO ROMAJI anywhere.
+- **NO ROMAJI**. Never include Romaji in any field — including grammar explanations. Write Japanese words in Japanese script (e.g. です, の) not romanised text (e.g. 'desu', 'no').
 - Extracted KUs: \`content\` = Japanese only, \`reading\` = kana only, \`meaning\` = English definition, \`jlptLevel\` = one of N5/N4/N3/N2/N1.
 - Grammar note fragments: ${FRAGMENT_CONTRACT}
 - ${ACCEPTED_ALTERNATIVES_DEF}

@@ -251,7 +251,7 @@ export default function ConceptPage() {
 
           <div className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-widest text-shodo-ink/40">
-              AI-Generated Questions
+              General Usage Patterns
             </h3>
             <label className="flex items-start gap-3 p-4 border border-shodo-ink/10 rounded-lg hover:bg-shodo-ink/[0.02] cursor-pointer transition-colors">
               <input
@@ -261,8 +261,8 @@ export default function ConceptPage() {
                 onChange={() => setIncludeAiQuestion(prev => !prev)}
               />
               <div className="min-w-0">
-                <p className="text-sm font-medium text-shodo-ink">AI-Generated Questions</p>
-                <p className="text-sm text-shodo-ink/50 mt-0.5">Practice applying this concept through AI-generated quiz questions</p>
+                <p className="text-sm font-medium text-shodo-ink">General usage patterns</p>
+                <p className="text-sm text-shodo-ink/50 mt-0.5">Practice applying this concept through varied usage questions</p>
               </div>
             </label>
           </div>

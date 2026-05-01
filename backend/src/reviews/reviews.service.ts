@@ -11,7 +11,7 @@ import {
     REVIEW_FACETS_COLLECTION,
     USER_STATS_COLLECTION,
 } from '../firebase/firebase.module';
-import { ADMIN_USER_ID } from '../lib/constants';
+import { ADMIN_USER_ID, MASTERED_STAGE, SELF_CERTIFIED_STAGE } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
 import { ReviewFacet } from '@/types';
@@ -19,6 +19,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
+import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
 
 @Injectable()
@@ -47,6 +48,7 @@ export class ReviewsService {
         private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
         private readonly statsService: StatsService,
         private readonly scenariosService: ScenariosService,
+        private readonly learningProgressService: LearningProgressService,
     ) { }
 
     private facetsColRef(uid: string): CollectionReference {
@@ -132,18 +134,12 @@ export class ReviewsService {
                 newStage: nextSrsStage,
                 nextReview: nextReviewDate,
                 kuId: facetData.kuId,
-                reachedMastered: nextSrsStage === 8,
             };
         });
 
-        // Post-transaction: propagate mastered status to UKU (outside transaction — queries not allowed inside)
-        if (txResult.reachedMastered && txResult.kuId) {
-            try {
-                await this.userKnowledgeUnitsService.update(uid, txResult.kuId, { status: 'mastered' });
-                this.logger.log(`Marked UKU mastered for uid=${uid} kuId=${txResult.kuId}`);
-            } catch (e) {
-                this.logger.error(`Failed to mark UKU mastered for uid=${uid} kuId=${txResult.kuId}`, e);
-            }
+        // Post-transaction: recompute and cache UKU status from facet SRS data
+        if (txResult.kuId) {
+            await this.learningProgressService.recomputeAndCache(uid, txResult.kuId);
         }
 
         // Post-transaction: check if a linked scenario's vocab is now all drill-ready
@@ -244,6 +240,7 @@ export class ReviewsService {
         uid: string,
         kuId: string,
         facetsToCreate: { key: string; data?: any }[],
+        selfCertifiedFacets: string[] = [],
     ) {
         // Pre-fetch existing facets for the parent KU to prevent duplicates on re-submission
         const existingParentFacets = await this.getFacetsByKuId(uid, kuId);
@@ -254,6 +251,9 @@ export class ReviewsService {
         let kanjiLinked = 0;                  // Kanji component stubs linked
         const kanjiLinkedKuIds: { kuId: string; newFacetCount: number }[] = [];
         const now = Timestamp.now();
+        const selfCertifiedNextReview = Timestamp.fromMillis(
+            Date.now() + this.INTERVALS[SELF_CERTIFIED_STAGE] * 60 * 60 * 1000,
+        );
 
         for (const facet of facetsToCreate) {
             const { key, data } = facet;
@@ -327,15 +327,20 @@ export class ReviewsService {
             }
 
             // --- Create the Facet (Batch) ---
+            const isSelfCertified = selfCertifiedFacets.includes(key);
+            const startStage = isSelfCertified ? SELF_CERTIFIED_STAGE : 0;
+            const nextReviewAt = isSelfCertified ? selfCertifiedNextReview : now;
+
             const newFacetRef = this.facetsColRef(uid).doc();
             batch.set(newFacetRef, {
                 kuId: targetKuId,
                 facetType: key,
-                srsStage: 0,
-                nextReviewAt: now,
+                srsStage: startStage,
+                nextReviewAt,
                 createdAt: now,
                 history: [],
                 source: { type: 'lesson', id: kuId },
+                ...(isSelfCertified ? { selfCertified: true } : {}),
                 ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
                 ...(modifiedData ? { data: modifiedData } : {}),
             });
@@ -345,27 +350,29 @@ export class ReviewsService {
 
         await batch.commit();
 
-        // Update parent UKU (vocab/grammar) if any facets or kanji components were selected
+        // Update facet_count on parent UKU and recompute derived status
         if (count > 0 || kanjiLinked > 0) {
             try {
-                await this.userKnowledgeUnitsService.update(uid, kuId, {
-                    status: 'reviewing',
-                    ...(count > 0 ? { facet_count: FieldValue.increment(count) } : {}),
-                });
-                this.logger.log(`Updated UKU for uid=${uid} kuId=${kuId}: status=reviewing${count > 0 ? `, facet_count+=${count}` : ''}`);
+                if (count > 0) {
+                    await this.userKnowledgeUnitsService.update(uid, kuId, {
+                        facet_count: FieldValue.increment(count),
+                    });
+                }
+                await this.learningProgressService.recomputeAndCache(uid, kuId);
             } catch (e) {
                 this.logger.error(`Failed to update UKU for uid=${uid} kuId=${kuId}`, e);
             }
         }
 
-        // Update each Kanji UKU to reviewing in parallel
+        // Update each Kanji UKU in parallel
         await Promise.all(kanjiLinkedKuIds.map(async ({ kuId: kanjiKuId, newFacetCount }) => {
             try {
-                await this.userKnowledgeUnitsService.update(uid, kanjiKuId, {
-                    status: 'reviewing',
-                    ...(newFacetCount > 0 ? { facet_count: FieldValue.increment(newFacetCount) } : {}),
-                });
-                this.logger.log(`Updated Kanji UKU for uid=${uid} kuId=${kanjiKuId}: status=reviewing${newFacetCount > 0 ? `, facet_count+=${newFacetCount}` : ''}`);
+                if (newFacetCount > 0) {
+                    await this.userKnowledgeUnitsService.update(uid, kanjiKuId, {
+                        facet_count: FieldValue.increment(newFacetCount),
+                    });
+                }
+                await this.learningProgressService.recomputeAndCache(uid, kanjiKuId);
             } catch (e) {
                 this.logger.error(`Failed to update Kanji UKU for uid=${uid} kuId=${kanjiKuId}`, e);
             }

@@ -337,6 +337,73 @@ Intended use: dashboard queries such as `where('state','==','drill').where('voca
 
 ---
 
+## Learning Progress & Mastery
+
+### Design Principle
+
+Learning state for a KU is not a field to be manually managed — it is derived from evidence. `LearningProgressService` is the single service that owns the rules for interpreting that evidence and is the **only** place that may write `UKU.status`. The SRS is the single arbiter of whether a user actually knows something; the service interprets SRS data into a coherent status.
+
+The current `UKU.status` field is a hodge-podge of manually-set values that can drift out of sync with actual facet SRS data. Under this design it becomes a **materialized view** — computed by `LearningProgressService` and cached on the UKU document, never set directly by other services.
+
+---
+
+### LearningProgressService
+
+A dedicated service, separate from `ReviewsService`. `ReviewsService` owns the mechanics (facet CRUD, SRS scheduling, due reviews). `LearningProgressService` owns the *interpretation* of those mechanics.
+
+Responsibilities:
+- **Define what each UKU status level means** in terms of facet SRS data
+- **Compute and cache `UKU.status`** after every facet creation or SRS update
+- **Own the facet creation rules** applied when a user submits the lesson page
+
+Nothing else computes or sets `UKU.status` directly. All status transitions flow through this service.
+
+---
+
+### Lesson Page — "What Do You Already Know?"
+
+The lesson page UX is inverted from the original design. Instead of asking the user what they *want* to learn, it asks what they *already know*.
+
+For each possible review facet, the user makes a binary choice:
+
+| Selection | Meaning | Facet created at |
+|---|---|---|
+| **Checked** | "I already know this" | Stage N-1 (one below mastered) |
+| **Unchecked** | "I need to learn this" | Stage 0 |
+
+Every visible facet gets created — the only difference is the starting stage. A user who checks nothing gets all facets at stage 0 and works through them normally. A user who checks everything self-certifies and the SRS verifies that claim on their next review.
+
+The SRS is the single arbiter. If the user was right, they'll burn through high-stage facets quickly. If they were wrong, they'll fail reviews and fall back into active learning.
+
+**Note:** Kanji component facets follow user selection on the lesson page, but Kanji mastery is not a tracked learning goal and is never gated on. Users may choose to learn Kanji via SRS but it is outside the scope of `LearningProgressService`.
+
+---
+
+### UKU Status Rules
+
+Computed by `LearningProgressService` from facet data. `MASTERED_STAGE` is a named constant (currently 7).
+
+| Status | Condition |
+|---|---|
+| `learning` | UKU exists; no review facets — appears in learning queue |
+| `reviewing` | Has facets; at least one facet below `MASTERED_STAGE` |
+| `mastered` | Has facets; all facets at or above `MASTERED_STAGE` |
+
+---
+
+### Scenario vocabReady Gate
+
+The gate threshold remains `minSrsStage >= 1` across all vocab KUs linked to the scenario.
+
+| Facet starting stage | Gate behaviour |
+|---|---|
+| Stage N-1 (self-certified) | Satisfies gate immediately on creation — scenario unlocks without requiring a review |
+| Stage 0 (learning from scratch) | Requires one successful review to reach stage 1 before the gate is satisfied |
+
+A user who claims to know all linked vocab can proceed to roleplay immediately. A user learning from scratch must complete at least one review per KU first.
+
+---
+
 ## Migration History
 
 **Note**: This section is very much outdated but should be used to summarize the history of the project. 
@@ -524,6 +591,18 @@ Library page (`/learn`): Kanji items now show `data.meaning` in the hint column 
 - `generateEvaluation` — normalises `roles.ai` to string (`join(', ')`) for the evaluation context passed to Gemini.
 - Import form — "Other Role" input is now a dynamic list; "Add another role" link appends a new row; `×` removes. Sends `aiRoles: string[]`.
 - Gemini chat response schema already had `speaker: STRING` — now used to populate `ChatMessage.roleName`.
+
+---
+
+**LearningProgressService + lesson page UX overhaul (2026-05-01)**
+
+- **`MASTERED_STAGE = 7`, `SELF_CERTIFIED_STAGE = 6`** added to `backend/src/lib/constants.ts`.
+- **`LearningProgressService`** (`backend/src/learning-progress/`) — new `@Global()` service and module registered in `AppModule`. Single owner of `UKU.status`; `recomputeAndCache(uid, kuId)` derives status from facet SRS data and writes to UKU. `ReviewsService` is the only caller — invoked after every facet creation and every SRS update. No other service may write `UKU.status` directly.
+- **`ReviewsService.generateReviewFacets`** — now accepts `selfCertifiedFacets: string[]`. Self-certified facets created at stage 6 with `nextReviewAt = now + 730 h` and `selfCertified: true` flag on the Firestore doc. Unchecked facets created at stage 0 as before. Direct `status: 'reviewing'` write removed; replaced with `recomputeAndCache`.
+- **`ReviewsService.updateFacetSrs`** — direct `status: 'mastered'` write removed; replaced with `recomputeAndCache`.
+- **`POST /api/reviews/generate`** — body now accepts `selfCertifiedFacets?: string[]`.
+- **Lesson page UX inverted** (`/learn/[kuId]`): heading changed to "What do you already know?"; all standard facets always enrolled on submit — checked = self-certified (stage 6), unchecked = learn from scratch (stage 0). Kanji component stubs and context-example scenarios remain opt-in. `getAvailableStandardFacetKeys()` helper centralises available-facet computation used by both render and submit. Button: "Enroll in Review Queue".
+- **`AI-Generated-Question` display label** renamed to "General usage patterns" on the lesson page, concepts page, and grammar lesson view; "Usage patterns" on the review card header. Firestore `facetType` value `"AI-Generated-Question"` unchanged.
 
 ---
 

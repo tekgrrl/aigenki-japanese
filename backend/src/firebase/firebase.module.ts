@@ -35,7 +35,9 @@ export const FieldValue = admin.firestore.FieldValue;
           });
         }
         const firestoreDbName = configService.get<string>('FIRESTORE_DB') || '(default)';
-        return getFirestore(admin.app(), firestoreDbName);
+        const db = getFirestore(admin.app(), firestoreDbName);
+        db.settings({ ignoreUndefinedProperties: true });
+        return db;
       },
     },
   ],
