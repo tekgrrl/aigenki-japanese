@@ -203,27 +203,55 @@ export default function LearnItemPage() {
     }));
   };
 
+  // All standard (non-context-example, non-kanji-component-stub) facet keys available for this lesson.
+  // Used to enroll every facet on submit; checked ones are self-certified, unchecked start at stage 0.
+  const getAvailableStandardFacetKeys = (existingFacetTypes: Set<string>): string[] => {
+    if (!lesson || !ku) return [];
+    if (lesson.type === "Vocab") {
+      const hasReadingFacet = ku.type === "Vocab" && (ku as any).data?.reading !== ku?.content;
+      const hasAudio = ((lesson as VocabLesson).context_examples?.length ?? 0) > 0;
+      return [
+        "Definition-to-Content",
+        "Content-to-Definition",
+        ...(hasReadingFacet ? ["Content-to-Reading"] : []),
+        ...(hasAudio ? ["audio"] : []),
+        "AI-Generated-Question",
+      ].filter(k => !existingFacetTypes.has(k));
+    }
+    if (lesson.type === "Kanji") {
+      return ["Kanji-Component-Meaning", "Kanji-Component-Reading", "AI-Generated-Question"]
+        .filter(k => !existingFacetTypes.has(k));
+    }
+    if (lesson.type === "Grammar") {
+      return ["sentence-assembly", "AI-Generated-Question", "Content-to-Definition"]
+        .filter(k => !existingFacetTypes.has(k));
+    }
+    return [];
+  };
+
   const handleSubmitFacets = async () => {
     if (!ku || !lesson) return;
     setIsSubmitting(true);
     setError(null);
 
-    const selectedFacetKeys = Object.keys(selectedFacets).filter(
-      (key) => selectedFacets[key],
+    const existingFacetTypes = new Set<string>((existingFacets ?? []).map((f: any) => f.facetType));
+    const allStandardKeys = getAvailableStandardFacetKeys(existingFacetTypes);
+    const selfCertifiedKeys = allStandardKeys.filter(key => selectedFacets[key]);
+
+    // Optional items still require explicit selection
+    const selectedOptionalKeys = Object.keys(selectedFacets).filter(key => selectedFacets[key]);
+    const contextExampleKeys = selectedOptionalKeys.filter(key => key.startsWith("Context-Example-"));
+    const kanjiComponentKeys = selectedOptionalKeys.filter(key =>
+      key.startsWith("Kanji-Component-") &&
+      key !== "Kanji-Component-Meaning" &&
+      key !== "Kanji-Component-Reading"
     );
 
-    if (selectedFacetKeys.length === 0) {
-      setError("Please select at least one facet to learn.");
-      setIsSubmitting(false);
-      return;
-    }
-
-    const contextExampleKeys = selectedFacetKeys.filter((key) =>
-      key.startsWith("Context-Example-"),
-    );
-    const reviewFacetKeys = selectedFacetKeys.filter(
-      (key) => !key.startsWith("Context-Example-"),
-    );
+    // Combine standard + kanji component stubs for the review facets payload
+    const reviewFacetKeys = [
+      ...allStandardKeys,
+      ...kanjiComponentKeys,
+    ];
 
     const promises: Promise<any>[] = [];
 
@@ -257,12 +285,12 @@ export default function LearnItemPage() {
       });
     }
 
-    // 2a. Grammar facets (handled separately — may emit multiple sentence-assembly facets)
-    if (ku?.type === "Grammar" && lesson?.type === "Grammar") {
+    // 2a. Grammar facets — always enroll all; checked ones are self-certified
+    if (ku?.type === "Grammar" && lesson?.type === "Grammar" && allStandardKeys.length > 0) {
       const grammarLesson = lesson as GrammarLesson;
       const grammarFacets: { key: string; data: Record<string, any> }[] = [];
 
-      if (selectedFacets["sentence-assembly"]) {
+      if (allStandardKeys.includes("sentence-assembly")) {
         grammarLesson.examples.forEach((ex) => {
           grammarFacets.push({
             key: "sentence-assembly",
@@ -278,7 +306,7 @@ export default function LearnItemPage() {
           });
         });
       }
-      if (selectedFacets["AI-Generated-Question"]) {
+      if (allStandardKeys.includes("AI-Generated-Question")) {
         grammarFacets.push({
           key: "AI-Generated-Question",
           data: {
@@ -289,7 +317,7 @@ export default function LearnItemPage() {
           },
         });
       }
-      if (selectedFacets["Content-to-Definition"]) {
+      if (allStandardKeys.includes("Content-to-Definition")) {
         grammarFacets.push({
           key: "Content-to-Definition",
           data: {
@@ -306,7 +334,11 @@ export default function LearnItemPage() {
           apiFetch("/api/reviews/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kuId: ku.id, facetsToCreate: grammarFacets }),
+            body: JSON.stringify({
+              kuId: ku.id,
+              facetsToCreate: grammarFacets,
+              selfCertifiedFacets: selfCertifiedKeys,
+            }),
           }).then(async (res) => {
             if (!res.ok) {
               const err = await res.json();
@@ -317,7 +349,7 @@ export default function LearnItemPage() {
       }
     }
 
-    // 2. Process Standard Review Facets (skip Grammar — all grammar facets handled in 2a above)
+    // 2. Process Standard Review Facets (skip Grammar — handled in 2a above)
     if (reviewFacetKeys.length > 0 && ku?.type !== "Grammar") {
       const facetsToCreatePayload = reviewFacetKeys.map((key) => {
         // Component kanji stub creation (Kanji-Component-食 etc.) — no facet created, just KU stub
@@ -387,6 +419,7 @@ export default function LearnItemPage() {
         body: JSON.stringify({
           kuId: ku.id,
           facetsToCreate: facetsToCreatePayload,
+          selfCertifiedFacets: selfCertifiedKeys,
         }),
       }).then(async (res) => {
         if (!res.ok) {
@@ -397,8 +430,7 @@ export default function LearnItemPage() {
       promises.push(reviewPromise);
     }
 
-    // Count review items being added (exclude Context-Example scenario generations only)
-    const learningItemCount = reviewFacetKeys.length;
+    const learningItemCount = allStandardKeys.length;
 
     try {
       await Promise.all(promises);
@@ -473,8 +505,6 @@ export default function LearnItemPage() {
         ? newKanjiKeys.length > 0
         : !existingFacetTypes.has("AI-Generated-Question");
 
-    const noneSelected = Object.values(selectedFacets).every(v => !v);
-
     const FACET_LABELS: Record<string, string> = {
       "Definition-to-Content": "Content",
       "Content-to-Definition": "Meaning",
@@ -482,15 +512,23 @@ export default function LearnItemPage() {
       "audio": "Audio Comprehension",
       "Kanji-Component-Meaning": "Meaning (Kanji → Meaning)",
       "Kanji-Component-Reading": "Reading (Kanji → On/Kun)",
-      "AI-Generated-Question": "AI-Generated Questions",
+      "AI-Generated-Question": "General usage patterns",
       "sentence-assembly": "Sentence Assembly",
     };
 
+    const availableStandardKeys = getAvailableStandardFacetKeys(existingFacetTypes);
+    const noneSelected = availableStandardKeys.length === 0 && Object.values(selectedFacets).every(v => !v);
+
     return (
       <div className="bg-gray-100 dark:bg-gray-800 p-6 rounded-lg shadow-lg">
-        <h2 className="text-2xl font-semibold mb-4 text-gray-900 dark:text-white">
-          {isAddMore ? "Select Additional Items to Review" : "Choose What to Learn"}
+        <h2 className="text-2xl font-semibold mb-2 text-gray-900 dark:text-white">
+          {isAddMore ? "Add More Review Items" : "What do you already know?"}
         </h2>
+        {!isAddMore && availableStandardKeys.length > 0 && (
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Check the items you already know. Everything gets added to your review queue — checked items start near mastered and the SRS will verify your claim.
+          </p>
+        )}
 
         {existingFacets && existingFacets.length > 0 && (
           <div className="mb-6">
@@ -686,7 +724,7 @@ export default function LearnItemPage() {
                 checked={!!selectedFacets["AI-Generated-Question"]}
                 onChange={() => handleCheckboxChange("AI-Generated-Question")}
               />
-              <span className="ml-3 text-lg text-gray-900 dark:text-white">AI-Generated Questions</span>
+              <span className="ml-3 text-lg text-gray-900 dark:text-white">General usage patterns</span>
             </label>
           )}
         </div>
@@ -698,7 +736,7 @@ export default function LearnItemPage() {
             disabled={isSubmitting || !lesson || noneSelected}
             className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed"
           >
-            {isSubmitting ? "Saving..." : isAddMore ? "Add Selected Facets" : "Start Learning Selected Items"}
+            {isSubmitting ? "Saving..." : isAddMore ? "Add Selected Items" : "Enroll in Review Queue"}
           </button>
         )}
       </div>
@@ -788,7 +826,7 @@ export default function LearnItemPage() {
                 disabled={isSubmitting || !lesson}
                 className="w-full py-4 text-lg bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSubmitting ? "Saving..." : existingFacets && existingFacets.length > 0 ? "Add Selected Facets" : "Start Learning Selected Items"}
+                {isSubmitting ? "Saving..." : existingFacets && existingFacets.length > 0 ? "Add Selected Items" : "Enroll in Review Queue"}
               </button>
             </div>
           );

@@ -24,7 +24,7 @@ export default function GrammarLessonView({
 
   const facetOptions = [
     { key: "sentence-assembly", label: "Sentence Assembly", description: "Reassemble example sentences" },
-    { key: "AI-Generated-Question", label: "AI Question", description: "Answer a dynamic question about this pattern" },
+    { key: "AI-Generated-Question", label: "General usage patterns", description: "Answer varied questions about how this pattern is used in context" },
     { key: "Content-to-Definition", label: "Pattern → Meaning", description: "See the pattern, recall its meaning" },
   ];
 

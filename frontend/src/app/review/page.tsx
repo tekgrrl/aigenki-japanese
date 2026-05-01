@@ -559,7 +559,7 @@ export default function ReviewPage() {
   const getQuestionType = (item: ReviewItem): string => {
     switch (item.facet.facetType) {
       case "AI-Generated-Question":
-        return `AI Quiz`;
+        return "Usage patterns";
       case "Content-to-Definition":
         return (item.facet.data?.kuType === "Grammar" || !item.facet.data?.reading)
           ? "Grammar Pattern → Meaning"
