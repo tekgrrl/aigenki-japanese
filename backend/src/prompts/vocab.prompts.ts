@@ -15,7 +15,7 @@ The lesson should be in English. Where you want to use Japanese text for example
 * Provide the standard **Kana Reading**.
 * Provide a list of **Concise Definitions** (suitable for valid acceptable answers in a quiz).
 * Identify the **Part of Speech**.
-* Identify the **Conjugation Type** (if applicable).
+* Identify the **Conjugation Type** for verbs only (null for all non-verbs).
 
 **Task 2: Lesson Generation**
 * Generate detailed explanations for meaning and reading.
@@ -28,8 +28,9 @@ The lesson should be in English. Where you want to use Japanese text for example
 For the \`partOfSpeech\` property, select one of:
 * noun, proper-noun, noun-suru, i-adjective, na-adjective, transitive-verb, intransitive-verb, adverb, counter, prefix, suffix, conjunction, particle
 
-For the \`conjugation_type\` property, select one of (or null):
-* godan, ichidan, irregular, suru, i-adjective, na-adjective, null
+For the \`conjugationType\` property (verbs only):
+* MUST be one of: godan, ichidan, irregular
+* MUST be null for all non-verbs (nouns, adjectives, adverbs, etc.)
 
 Do not explain the terms "kun'yomi" or "on'yomi", never use the term "sino-japanese"
 
@@ -41,7 +42,7 @@ You MUST return a valid JSON object matching this schema:
   "reading": "The canonical kana reading (e.g. ぜったい)",
   "definitions": ["definition 1", "definition 2"],
   "partOfSpeech": "The selected part of speech string",
-  "conjugation_type": "The selected conjugation type or null",
+  "conjugationType": "godan | ichidan | irregular | null — null for all non-verbs",
 
   "meaning_explanation": "A detailed explanation of the word's meaning and nuance.",
   "reading_explanation": "An explanation of the reading (e.g., nuance, rendaku).",
@@ -73,7 +74,7 @@ Output:
   "reading": "せんせい",
   "definitions": ["teacher", "instructor", "master", "doctor"],
   "partOfSpeech": "noun",
-  "conjugation_type": null,
+  "conjugationType": null,
   "meaning_explanation": "A term used to address or refer to teachers, doctors, lawyers, politicians, and other authority figures or experts. It literally means 'one born before'.",
   "reading_explanation": "Note that 'sei' (せい) is prolonged, so it sounds like 'sensee'. This is a common pronunciation change in Japanese.",
   "context_examples": [
@@ -106,7 +107,7 @@ Output:
   "reading": "たべる",
   "definitions": ["to eat"],
   "partOfSpeech": "transitive-verb",
-  "conjugation_type": "ichidan",
+  "conjugationType": "ichidan",
   "meaning_explanation": "The standard verb for 'to eat'. It is a transitive verb, so it takes an object marked by 'o' (を).",
   "reading_explanation": "The reading 'ta' comes from the kanji 食 and 'beru' is okurigana.",
   "context_examples": [
@@ -132,7 +133,7 @@ Output:
   "reading": "ゆうめい",
   "definitions": ["famous", "fame"],
   "partOfSpeech": "na-adjective",
-  "conjugation_type": "na-adjective",
+  "conjugationType": null,
   "meaning_explanation": "Describes something or someone that has a name widely known. It is a Na-adjective, so you use 'na' to modify nouns (e.g. 有名のな人 - famous person).",
   "reading_explanation": "Standard on'yomi readings. 'Yuu' (有) + 'Mei' (名).",
   "context_examples": [
@@ -165,7 +166,7 @@ Output:
   "reading": "べんきょうする",
   "definitions": ["to study", "to work hard"],
   "partOfSpeech": "noun-suru",
-  "conjugation_type": "suru",
+  "conjugationType": "irregular",
   "meaning_explanation": "The primary verb for 'to study'. It is composed of the noun 'Benkyou' (study) and the auxiliary verb 'suru' (to do).",
   "reading_explanation": "Ben (勉) + Kyou (強) + Suru. Note that 'strong' (強) is usually read 'kyo' as a standalone on'yomi, but here it is 'kyou'.",
   "context_examples": [
@@ -198,7 +199,7 @@ Output:
   "reading": "にほん",
   "definitions": ["Japan"],
   "partOfSpeech": "proper-noun",
-  "conjugation_type": null,
+  "conjugationType": null,
   "meaning_explanation": "The country of Japan. Literally 'sun origin' (Land of the Rising Sun).",
   "reading_explanation": "Usually read 'Nihon', but sometimes 'Nippon' (more formal or emphatic).",
   "context_examples": [
