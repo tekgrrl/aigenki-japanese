@@ -222,7 +222,7 @@ export default function LearnItemPage() {
       ].filter(k => !existingFacetTypes.has(k));
     }
     if (lesson.type === "Kanji") {
-      return ["Kanji-Component-Meaning", "Kanji-Component-Reading", "AI-Generated-Question"]
+      return ["Kanji-Component-Meaning", "Kanji-Component-Reading"]
         .filter(k => !existingFacetTypes.has(k));
     }
     if (lesson.type === "Grammar") {
@@ -499,7 +499,7 @@ export default function LearnItemPage() {
       "AI-Generated-Question",
     ] as string[]).filter(k => !existingFacetTypes.has(k)) : [];
 
-    const newKanjiKeys = lesson?.type === "Kanji" ? (["Kanji-Component-Meaning", "Kanji-Component-Reading", "AI-Generated-Question"] as string[])
+    const newKanjiKeys = lesson?.type === "Kanji" ? (["Kanji-Component-Meaning", "Kanji-Component-Reading"] as string[])
       .filter(k => !existingFacetTypes.has(k)) : [];
 
     const anythingLeft = lesson?.type === "Vocab"
@@ -733,17 +733,6 @@ export default function LearnItemPage() {
                     onChange={() => handleCheckboxChange("Kanji-Component-Reading")}
                   />
                   <span className="ml-3 text-lg text-gray-900 dark:text-white">Reading (Kanji {"->"} On/Kun)</span>
-                </label>
-              )}
-              {!existingFacetTypes.has("AI-Generated-Question") && (
-                <label className="flex items-center p-4 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                    checked={!!selectedFacets["AI-Generated-Question"]}
-                    onChange={() => handleCheckboxChange("AI-Generated-Question")}
-                  />
-                  <span className="ml-3 text-lg text-gray-900 dark:text-white">General usage patterns</span>
                 </label>
               )}
             </>
