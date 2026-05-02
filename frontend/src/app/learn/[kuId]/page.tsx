@@ -91,7 +91,7 @@ export default function LearnItemPage() {
 
         const statuses: Record<string, string> = {};
         data.forEach((ku) => {
-          if (kanjiChars.has(ku.content) && (ku as any).ukuStatus) {
+          if (ku.id !== kuId && kanjiChars.has(ku.content) && (ku as any).ukuStatus) {
             statuses[ku.content] = (ku as any).ukuStatus;
           }
         });
