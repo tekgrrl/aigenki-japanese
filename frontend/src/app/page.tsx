@@ -8,6 +8,8 @@ import { apiFetch } from "@/lib/api-client";
 
 interface DashboardStats {
   learnCount: number;
+  reviewingCount: number;
+  masteredCount: number;
   next24HoursCount: number;
   reviewCount: number;
   reviewsDue: number;
@@ -26,6 +28,8 @@ interface DashboardStats {
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
     learnCount: 0,
+    reviewingCount: 0,
+    masteredCount: 0,
     next24HoursCount: 0,
     reviewCount: 0,
     reviewsDue: 0,
@@ -87,7 +91,11 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
         <div className="h-full">
-          <Lessons lessonCount={stats.learnCount} />
+          <Lessons
+            learningCount={stats.learnCount}
+            reviewingCount={stats.reviewingCount}
+            masteredCount={stats.masteredCount}
+          />
         </div>
         <div className="h-full">
           <Reviews reviewsDue={stats.reviewsDue} />
