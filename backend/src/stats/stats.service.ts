@@ -1,9 +1,9 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Firestore, Timestamp, Transaction } from 'firebase-admin/firestore';
+import { FieldValue, Firestore, Timestamp, Transaction } from 'firebase-admin/firestore';
+import { FacetType, TutorVocabEntry } from '../types';
 import {
     FIRESTORE_CONNECTION,
     REVIEW_FACETS_COLLECTION,
-    USER_STATS_COLLECTION,
     USER_KUS_SUBCOLLECTION,
     SCENARIOS_COLLECTION,
 } from '../firebase/firebase.module';
@@ -38,8 +38,7 @@ export class StatsService {
             .count()
             .get();
 
-        // New: Fetch User Stats Document
-        const userStatsQuery = this.db.collection(USER_STATS_COLLECTION).doc(uid).get();
+        const userStatsQuery = this.db.collection('users').doc(uid).get();
 
         const scenariosCol = uid === ADMIN_USER_ID
             ? this.db.collection(SCENARIOS_COLLECTION)
@@ -60,8 +59,7 @@ export class StatsService {
         const reviewsDueCount = reviewsSnapshot.data().count;
         this.logger.log(`Reviews due for user ${uid}: ${reviewsDueCount}`);
 
-        const userStatsDocData = userStatsDoc.data();
-        const userStats = userStatsDocData ? userStatsDocData : {};
+        const userStats = userStatsDoc.data()?.stats ?? {};
 
         const rawReviewForecast = userStats.reviewForecast || {};
         const rawHourlyForecast = userStats.hourlyForecast || {};
@@ -152,9 +150,9 @@ export class StatsService {
         result: 'pass' | 'fail',
         transaction: Transaction
     ) {
-        const statsRef = this.db.collection(USER_STATS_COLLECTION).doc(userId);
-        const statsDoc = await transaction.get(statsRef);
-        const statsData = statsDoc.data() || {};
+        const userRef = this.db.collection('users').doc(userId);
+        const statsDoc = await transaction.get(userRef);
+        const statsData = statsDoc.data()?.stats || {};
 
         const currentStats = {
             reviewForecast: statsData.reviewForecast || {},
@@ -210,16 +208,124 @@ export class StatsService {
         const newTotal = currentStats.totalReviews + 1;
         const newPassed = currentStats.passedReviews + (result === 'pass' ? 1 : 0);
 
-        // 4. Write to DB
-        transaction.set(statsRef, {
-            userId, // Ensure userId is set
-            reviewForecast: currentStats.reviewForecast,
-            hourlyForecast: currentStats.hourlyForecast,
-            currentStreak: newStreak,
-            lastReviewDate: now, // Firestore will convert Date to Timestamp
-            totalReviews: newTotal,
-            passedReviews: newPassed,
-        }, { merge: true });
+        // 4. Write to users/{uid} using dot-notation to avoid clobbering other UserRoot fields
+        transaction.update(userRef, {
+            'stats.reviewForecast': currentStats.reviewForecast,
+            'stats.hourlyForecast': currentStats.hourlyForecast,
+            'stats.currentStreak': newStreak,
+            'stats.lastReviewDate': now,
+            'stats.totalReviews': newTotal,
+            'stats.passedReviews': newPassed,
+        });
+    }
+
+    /** Normalize "N5" / "JLPT-N5" / "JLPT N5" → "n5" for levelProgress map key. */
+    private jlptKey(level: string): string | null {
+        const m = level.match(/n(\d)/i);
+        return m ? `n${m[1]}` : null;
+    }
+
+    async recordKuEnrolled(uid: string, jlptLevel: string): Promise<void> {
+        const key = this.jlptKey(jlptLevel);
+        if (!key) return;
+        await this.db.collection('users').doc(uid).update({
+            [`stats.levelProgress.${key}.total`]: FieldValue.increment(1),
+        });
+    }
+
+    async recordKuMastered(uid: string, jlptLevel: string): Promise<void> {
+        const key = this.jlptKey(jlptLevel);
+        if (!key) return;
+        await this.db.collection('users').doc(uid).update({
+            [`stats.levelProgress.${key}.mastered`]: FieldValue.increment(1),
+        });
+    }
+
+    /** Merge facetTypes into an existing entry (by content) or add a new entry. */
+    private async mergeTutorVocabEntry(
+        uid: string,
+        field: 'frontierVocab' | 'leechVocab' | 'weakGrammarPoints',
+        content: string,
+        facetTypes: FacetType[],
+    ): Promise<void> {
+        const userRef = this.db.collection('users').doc(uid);
+        await this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(userRef);
+            const entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
+            const idx = entries.findIndex(e => e.content === content);
+            if (idx >= 0) {
+                const merged = Array.from(new Set([...entries[idx].facetTypes, ...facetTypes]));
+                entries[idx] = { content, facetTypes: merged };
+            } else {
+                entries.push({ content, facetTypes });
+            }
+            transaction.update(userRef, { [`tutorContext.${field}`]: entries });
+        });
+    }
+
+    /** Remove a specific facetType from an entry; drop the entry entirely if no facetTypes remain.
+     *  Pass facetType=undefined to remove the whole entry regardless. */
+    private async removeTutorVocabFacetType(
+        uid: string,
+        field: 'frontierVocab' | 'leechVocab' | 'weakGrammarPoints',
+        content: string,
+        facetType?: FacetType,
+    ): Promise<void> {
+        const userRef = this.db.collection('users').doc(uid);
+        await this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(userRef);
+            let entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
+            if (facetType === undefined) {
+                entries = entries.filter(e => e.content !== content);
+            } else {
+                const idx = entries.findIndex(e => e.content === content);
+                if (idx >= 0) {
+                    const remaining = entries[idx].facetTypes.filter(t => t !== facetType);
+                    if (remaining.length === 0) {
+                        entries.splice(idx, 1);
+                    } else {
+                        entries[idx] = { content, facetTypes: remaining };
+                    }
+                }
+            }
+            transaction.update(userRef, { [`tutorContext.${field}`]: entries });
+        });
+    }
+
+    async addToFrontierVocab(uid: string, content: string, facetTypes: FacetType[]): Promise<void> {
+        await this.mergeTutorVocabEntry(uid, 'frontierVocab', content, facetTypes);
+    }
+
+    async removeFromFrontierVocab(uid: string, content: string): Promise<void> {
+        await this.removeTutorVocabFacetType(uid, 'frontierVocab', content);
+    }
+
+    async addToLeechVocab(uid: string, content: string, facetType: FacetType): Promise<void> {
+        await this.mergeTutorVocabEntry(uid, 'leechVocab', content, [facetType]);
+    }
+
+    async removeFromLeechVocab(uid: string, content: string, facetType: FacetType): Promise<void> {
+        await this.removeTutorVocabFacetType(uid, 'leechVocab', content, facetType);
+    }
+
+    async addToAllowedGrammar(uid: string, pattern: string): Promise<void> {
+        await this.db.collection('users').doc(uid).update({
+            'tutorContext.allowedGrammar': FieldValue.arrayUnion(pattern),
+        });
+    }
+
+    async addToWeakGrammarPoints(uid: string, pattern: string, facetType: FacetType): Promise<void> {
+        await this.mergeTutorVocabEntry(uid, 'weakGrammarPoints', pattern, [facetType]);
+    }
+
+    async removeFromWeakGrammarPoints(uid: string, pattern: string, facetType: FacetType): Promise<void> {
+        await this.removeTutorVocabFacetType(uid, 'weakGrammarPoints', pattern, facetType);
+    }
+
+    async updateCurriculumNode(uid: string, jlptLevel: string): Promise<void> {
+        await this.db.collection('users').doc(uid).update({
+            'tutorContext.currentCurriculumNode': jlptLevel,
+        });
     }
 
     // Helper to generate bucket keys

@@ -11,8 +11,8 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) { }
 
   @Post('evaluate')
-  async evaluate(@UserId() uid: string, @Body() body: { userAnswer: string; expectedAnswers: string[]; question: string; topic: string; questionId: string; kuId: string }) {
-    const { userAnswer, expectedAnswers, question, topic, questionId, kuId } = body;
+  async evaluate(@UserId() uid: string, @Body() body: { userAnswer: string; expectedAnswers: string[]; question: string; topic: string; questionId: string; kuId: string; facetType?: string }) {
+    const { userAnswer, expectedAnswers, question, topic, questionId, kuId, facetType } = body;
 
     this.logger.log(`body ${JSON.stringify(body)}`);
 
@@ -29,7 +29,7 @@ export class ReviewsController {
       throw new BadRequestException('kuId is required when questionId is provided');
     }
 
-    return this.reviewsService.evaluateAnswer(uid, userAnswer, expectedAnswers, question, topic, questionId, kuId);
+    return this.reviewsService.evaluateAnswer(uid, userAnswer, expectedAnswers, question, topic, questionId, kuId, facetType as any);
   }
 
   @Put('facets/:id')

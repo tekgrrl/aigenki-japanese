@@ -14,7 +14,7 @@ import {
 import { ADMIN_USER_ID, MASTERED_STAGE, SELF_CERTIFIED_STAGE } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
-import { ReviewFacet } from '@/types';
+import { FacetType, ReviewFacet } from '@/types';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
@@ -110,6 +110,10 @@ export class ReviewsService {
                 transaction
             );
 
+            // Track consecutive failures on the facet for leech detection
+            const prevConsecutiveFailures = facetData.consecutiveFailures ?? 0;
+            const newConsecutiveFailures = result === 'pass' ? 0 : prevConsecutiveFailures + 1;
+
             // WRITE (Facet)
             this.logger.log(`Updating facet ${facetId} to stage ${nextSrsStage} (${result.toUpperCase()})`);
 
@@ -117,6 +121,7 @@ export class ReviewsService {
                 srsStage: nextSrsStage,
                 nextReviewAt: nextReviewDate,
                 lastReviewAt: now,
+                consecutiveFailures: newConsecutiveFailures,
                 history: FieldValue.arrayUnion({
                     stage: nextSrsStage,
                     timestamp: now,
@@ -134,6 +139,9 @@ export class ReviewsService {
                 newStage: nextSrsStage,
                 nextReview: nextReviewDate,
                 kuId: facetData.kuId,
+                facetType: facetData.facetType,
+                prevConsecutiveFailures,
+                newConsecutiveFailures,
             };
         });
 
@@ -152,6 +160,27 @@ export class ReviewsService {
             } catch (e) {
                 this.logger.error(`Failed to check vocabReady for uid=${uid} kuId=${txResult.kuId}`, e);
             }
+        }
+
+        // Post-transaction: update tutorContext leech/weak-grammar tracking
+        if (txResult.kuId && txResult.facetType) {
+            const { kuId, facetType, prevConsecutiveFailures, newConsecutiveFailures } = txResult;
+            const LEECH_THRESHOLD = 3;
+            void (async () => {
+                try {
+                    const ku = await this.knowledgeUnitsService.findOne(kuId);
+                    const isGrammar = ku.type === 'Grammar';
+                    if (newConsecutiveFailures >= LEECH_THRESHOLD) {
+                        await this.statsService.addToLeechVocab(uid, ku.content, facetType);
+                        if (isGrammar) await this.statsService.addToWeakGrammarPoints(uid, ku.content, facetType);
+                    } else if (result === 'pass' && prevConsecutiveFailures > 0) {
+                        await this.statsService.removeFromLeechVocab(uid, ku.content, facetType);
+                        if (isGrammar) await this.statsService.removeFromWeakGrammarPoints(uid, ku.content, facetType);
+                    }
+                } catch (e) {
+                    this.logger.error(`Failed to update tutorContext leech for uid=${uid} facetId=${facetId}`, e);
+                }
+            })();
         }
 
         return { success: txResult.success, facetId: txResult.facetId, newStage: txResult.newStage, nextReview: txResult.nextReview };
@@ -203,6 +232,7 @@ export class ReviewsService {
         topic: string,
         questionId: string,
         kuId: string,
+        facetType?: FacetType,
     ) {
         // 1. Local Check — strip trailing Japanese/ASCII punctuation before comparing
         const normalize = (s: string) => s.toLowerCase().replace(/[。、！？,.!?\s]+$/u, '').trim();
@@ -213,7 +243,7 @@ export class ReviewsService {
         if (isLocalMatch) {
             this.logger.log(`Local match passed for topic: ${topic}`);
             if (questionId) {
-                await this.questionsService.recordAnswer(uid, questionId, kuId, 'pass');
+                await this.questionsService.recordAnswer(uid, questionId, kuId, 'pass', facetType);
             }
             return { result: 'pass', explanation: 'Correct!' };
         }
@@ -231,7 +261,7 @@ export class ReviewsService {
         ) as { result: 'pass' | 'fail'; explanation: string };
 
         if (questionId) {
-            await this.questionsService.recordAnswer(uid, questionId, kuId, evalResult.result);
+            await this.questionsService.recordAnswer(uid, questionId, kuId, evalResult.result, facetType);
         }
 
         return evalResult;

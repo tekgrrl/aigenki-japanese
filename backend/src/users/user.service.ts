@@ -20,7 +20,6 @@ export class UserService {
         reviewForecast: {},
         hourlyForecast: {},
         currentStreak: 0,
-        lastReviewDate: Timestamp.now(),
         totalReviews: 0,
         passedReviews: 0,
         levelProgress: {

@@ -193,8 +193,8 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 | `questions` | **No** | Global question corpus — no `userId` on new docs. `rank` and `rejectionCount` fields drive selection. |
 | `users/{uid}/question-states` | Yes — sub-collection path | Per-user `UserQuestionState`: `rejected`, `consecutiveFailures`, `kuId` |
 | `users/{uid}/scenarios` | Yes — sub-collection path | Roleplay scenario state. Admin (`user_default`) uses root `scenarios` collection. `sourceKuId` field links back to the vocabulary KU that triggered generation from a context example. Requires composite index on `(sourceKuId, createdAt)`. |
-| `user-stats` | Yes — doc ID is uid | Legacy stats; `USER_STATS_COLLECTION.doc(uid)` |
-| `users` | Yes — doc path `users/{uid}` | `UserRoot` document (stats, tutorContext, preferences) |
+| `user-stats` | Yes — doc ID is uid | **Abandoned.** Stats now live in `users/{uid}.stats.*`. Old documents are stale and ignored. |
+| `users` | Yes — doc path `users/{uid}` | `UserRoot` document — single source of truth for `stats`, `tutorContext`, and `preferences` |
 | `concepts` | **No** | Global grammar concept corpus — no `userId` on docs; `createdBy` field for audit only |
 | `api-logs` | **No** | Centralised logging; no user field |
 
@@ -202,10 +202,15 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 
 ### Key Types
 
-- **`UserRoot`** (`backend/src/types/index.ts` ~line 34) — stored at `users/{uid}`. Contains `stats`, `tutorContext`, and two `preferences` fields: `tutorContext.preferences` (feed tuning — `dailyMaxNew`, `dailyMaxTotal`) and a top-level `preferences` object (`showFurigana: boolean`). Top-level preferences are written via `PATCH /api/users/me/preferences` and read on the `/profile` page.
+- **`UserRoot`** (`backend/src/types/index.ts` ~line 34) — stored at `users/{uid}`. Three top-level groups:
+  - `stats` — review forecasts, streak, totals, levelProgress. Written exclusively by `StatsService` via dot-notation Firestore updates inside the SRS transaction.
+  - `tutorContext` — AI personalisation data. Mechanical fields written by `StatsService` helpers; AI-inferred fields not yet implemented. See **UserRoot Stats & AI Tutor Context** section.
+  - `preferences` — top-level user-facing prefs (`showFurigana`, `jlptLevel`, `preferredUserRole`). Written via `PATCH /api/users/me/preferences`.
+  - `tutorContext.preferences` — feed-engine tuning (`dailyMaxNew`, `dailyMaxTotal`). Separate from top-level `preferences`.
+- **`TutorVocabEntry`** — `{ content: string; facetTypes: FacetType[] }`. Used for `frontierVocab`, `leechVocab`, and `weakGrammarPoints` arrays so per-facet-type granularity is preserved (e.g. a word can be frontier for meaning but a leech for reading).
 - **`KnowledgeUnit`** (~line 205) — has `userId` field (marked `@deprecated` as part of future migration to a separate `user-kus` sub-collection). `data` bag holds `jlptLevel`, `wanikaniLevel`, `reading`, `meaning`.
-- **`UserKnowledgeUnit`** (~line 235) — intended future shape: user metadata (`status`, `personalNotes`, `facet_count`) pointing at a global KU via `kuId`. **Not yet used in queries.**
-- **`ReviewFacet`** (~line 261) — bridges to `KnowledgeUnit` via `kuId`; carries `srsStage` (0–8) and `nextReviewAt`.
+- **`UserKnowledgeUnit`** (~line 235) — user metadata (`status`, `personalNotes`, `facet_count`) pointing at a global KU via `kuId`.
+- **`ReviewFacet`** (~line 261) — bridges to `KnowledgeUnit` via `kuId`; carries `srsStage` (0–8), `nextReviewAt`, and `consecutiveFailures` (per-facet failure counter, written in the SRS transaction, used for leech detection — survives question rotation).
 - **`QuestionItem`** — global question document. `rank: number` (0–100, starts 50, suitable threshold 30); `rejectionCount: number` (observability only). Deprecated fields (`userId`, `status`, `lastUsed`, `previousAnswers`) may exist on legacy docs but are ignored.
 - **`UserQuestionState`** — stored at `users/{uid}/question-states/{questionId}`. `rejected: boolean` (user never sees this question again); `consecutiveFailures: number` (persists across sessions, resets on correct answer, triggers rotation at 3); `kuId` (denormalised for querying).
 
@@ -401,6 +406,63 @@ The gate threshold remains `minSrsStage >= 1` across all vocab KUs linked to the
 | Stage 0 (learning from scratch) | Requires one successful review to reach stage 1 before the gate is satisfied |
 
 A user who claims to know all linked vocab can proceed to roleplay immediately. A user learning from scratch must complete at least one review per KU first.
+
+---
+
+## UserRoot Stats & AI Tutor Context
+
+### Stats
+
+All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level collection is abandoned. `StatsService` is the only writer; all updates use Firestore dot-notation so sibling fields are never clobbered.
+
+| Field | Written by | Trigger |
+|---|---|---|
+| `stats.reviewForecast` / `stats.hourlyForecast` | `StatsService.updateReviewScheduleStats` | Inside SRS transaction on every review answer |
+| `stats.currentStreak` / `stats.lastReviewDate` | same | same |
+| `stats.totalReviews` / `stats.passedReviews` | same | same |
+| `stats.levelProgress.{n5\|n4\|...}.total` | `StatsService.recordKuEnrolled` | `UserKnowledgeUnitsService.create` (non-blocking) |
+| `stats.levelProgress.{n5\|n4\|...}.mastered` | `StatsService.recordKuMastered` | `LearningProgressService.recomputeAndCache` on mastered transition |
+
+`stats.lastReviewDate` is optional on the document — the default user doc omits it so the first-ever review correctly sets the streak to 1.
+
+---
+
+### AI Tutor Context
+
+`tutorContext` fields provide the AI with a real-time picture of where the user is in their learning. Five fields are mechanically derivable; the remaining fields (`communicationStyle`, `semanticWeaknesses`, `suggestedThemes`) require AI inference and are not yet implemented.
+
+#### Mechanical fields
+
+| Field | Type | Semantics |
+|---|---|---|
+| `frontierVocab` | `TutorVocabEntry[]` | KUs recently promoted to `reviewing` — words the AI should actively reinforce |
+| `leechVocab` | `TutorVocabEntry[]` | KUs with ≥ 3 consecutive facet failures — words needing repair |
+| `allowedGrammar` | `string[]` | Grammar KU content strings the user has enrolled in |
+| `weakGrammarPoints` | `TutorVocabEntry[]` | Grammar KUs with ≥ 3 consecutive facet failures |
+| `currentCurriculumNode` | `string` | JLPT level of the most recently enrolled KU |
+
+#### Hook points
+
+| Field | Hook | Trigger |
+|---|---|---|
+| `frontierVocab` | `LearningProgressService.recomputeAndCache` | Added on `learning→reviewing`; removed on `→mastered`. `AI-Generated-Question` excluded from `facetTypes` (it's a question format, not a knowledge dimension). |
+| `leechVocab` / `weakGrammarPoints` | `ReviewsService.updateFacetSrs` (post-transaction, non-blocking) | Added when `ReviewFacet.consecutiveFailures` crosses 3; removed when user passes after prior failures. |
+| `allowedGrammar` | `UserKnowledgeUnitsService.create` (non-blocking) | Added when a Grammar KU is enrolled. |
+| `currentCurriculumNode` | `UserKnowledgeUnitsService.create` (non-blocking) | Set to jlptLevel of the enrolled KU. |
+
+#### Storage design
+
+`frontierVocab`, `leechVocab`, and `weakGrammarPoints` use `TutorVocabEntry[]` (`{ content, facetTypes }`) rather than `string[]`. This allows the same KU to appear in both arrays with different facet-type sets — e.g. 入れる can be frontier for `Content-to-Definition` and a leech for `Reading-to-Content` simultaneously.
+
+`FieldValue.arrayUnion/arrayRemove` cannot merge nested objects, so all mutations use Firestore transaction-based read-modify-write helpers in `StatsService`: `mergeTutorVocabEntry` (add/merge) and `removeTutorVocabFacetType` (remove one facet type, drop entry if none remain).
+
+`allowedGrammar` stays as `string[]` — no per-facet granularity needed.
+
+#### Leech detection: why `updateFacetSrs` not `recordAnswer`
+
+`QuestionsService.recordAnswer` tracks `UserQuestionState.consecutiveFailures` per-question, which controls question rotation (swap out a question after 3 failures). After rotation, a fresh question is issued and the per-question counter resets to 0 — so the leech threshold is never reached from the question side.
+
+`ReviewsService.updateFacetSrs` fires once per review submission regardless of which question was shown. The `ReviewFacet.consecutiveFailures` counter written there is scoped to the facet, not the question, and survives rotation. This is the correct hook for any "how is this user performing on this facet type?" logic.
 
 ---
 
@@ -603,6 +665,18 @@ Library page (`/learn`): Kanji items now show `data.meaning` in the hint column 
 - **`POST /api/reviews/generate`** — body now accepts `selfCertifiedFacets?: string[]`.
 - **Lesson page UX inverted** (`/learn/[kuId]`): heading changed to "What do you already know?"; all standard facets always enrolled on submit — checked = self-certified (stage 6), unchecked = learn from scratch (stage 0). Kanji component stubs and context-example scenarios remain opt-in. `getAvailableStandardFacetKeys()` helper centralises available-facet computation used by both render and submit. Button: "Enroll in Review Queue".
 - **`AI-Generated-Question` display label** renamed to "General usage patterns" on the lesson page, concepts page, and grammar lesson view; "Usage patterns" on the review card header. Firestore `facetType` value `"AI-Generated-Question"` unchanged.
+
+---
+
+**UserRoot stats + tutorContext implementation (2026-05-02)**
+
+- `user-stats/{uid}` collection abandoned. All stats now live in `users/{uid}.stats.*` via dot-notation Firestore updates in `StatsService`.
+- Five mechanical `tutorContext` fields implemented: `frontierVocab`, `leechVocab`, `allowedGrammar`, `weakGrammarPoints`, `currentCurriculumNode`. See **UserRoot Stats & AI Tutor Context** section.
+- `TutorVocabEntry = { content: string; facetTypes: FacetType[] }` introduced in both type files. Allows per-facet-type granularity within the same KU entry.
+- Leech detection moved from `QuestionsService.recordAnswer` (per-question scope — broken for AI-Generated-Question facets due to question rotation) to `ReviewsService.updateFacetSrs` (per-facet scope). `ReviewFacet.consecutiveFailures` field added.
+- `AI-Generated-Question` filtered from `frontierVocab.facetTypes` — it is a question format, not a knowledge dimension.
+- `facetType` now sent with `POST /reviews/evaluate` from the frontend and threaded through to `recordAnswer` for future use.
+- Review page answer input focus bug fixed for AI-Generated-Question facets: imperative `answerInputRef.current?.focus()` via `useEffect` on `isFetchingDynamicQuestion`/`dynamicQuestion` replaces reliance on `autoFocus` alone.
 
 ---
 

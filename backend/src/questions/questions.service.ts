@@ -303,7 +303,7 @@ export class QuestionsService {
     return this.toResponse(newQuestion, true);
   }
 
-  async recordAnswer(uid: string, questionId: string, kuId: string, result: 'pass' | 'fail') {
+  async recordAnswer(uid: string, questionId: string, kuId: string, result: 'pass' | 'fail', facetType?: string) {
     const questionRef = this.db.collection(QUESTIONS_COLLECTION).doc(questionId);
     const stateRef = this.questionStatesRef(uid).doc(questionId);
 
