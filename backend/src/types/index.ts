@@ -31,6 +31,12 @@ export interface ApiLog {
   };
 }
 
+/** A KU entry in a tutor context array, with per-facet-type granularity. */
+export interface TutorVocabEntry {
+  content: string;
+  facetTypes: FacetType[];
+}
+
 /**
  * Represents the root document for a user in the strict multi-tenant architecture.
  * Document path: users/{uid}
@@ -51,7 +57,7 @@ export interface UserRoot {
 
     // Engagement
     currentStreak: number;
-    lastReviewDate: Timestamp; // ISO Date
+    lastReviewDate?: Timestamp;
 
     // Performance
     totalReviews: number;
@@ -73,10 +79,10 @@ export interface UserRoot {
    */
   tutorContext: {
     /** Words learned recently that the AI should actively try to reinforce in scenarios/examples. */
-    frontierVocab: string[];
+    frontierVocab: TutorVocabEntry[];
 
     /** Words the user has failed often that need repair/re-evaluation through the AI tutor. */
-    leechVocab: string[];
+    leechVocab: TutorVocabEntry[];
 
     /** The current topic or structural node the user is tackling in their overall curriculum. */
     currentCurriculumNode: string;
@@ -85,7 +91,7 @@ export interface UserRoot {
     allowedGrammar: string[];
 
     /** Specific grammar points the user struggles with; AI should emphasize diagnosing and practicing these. */
-    weakGrammarPoints: string[];
+    weakGrammarPoints: TutorVocabEntry[];
 
     /** The user's identified conversational tendency, signaling how the AI should prompt for polite vs. casual context. */
     communicationStyle: 'too_formal' | 'too_casual' | 'balanced' | 'hesitant';
@@ -411,6 +417,8 @@ export interface ReviewFacet {
     stage: number;
   }>;
   currentQuestionId?: string;
+  /** Consecutive failures on this facet (resets on pass). Used for leech detection. */
+  consecutiveFailures?: number;
   /** @deprecated - failure tracking moved to UserQuestionState.consecutiveFailures */
   questionAttempts?: number;
   data?: any;

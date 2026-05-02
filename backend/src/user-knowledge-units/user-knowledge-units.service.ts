@@ -2,12 +2,16 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { KnowledgeUnit, UserKnowledgeUnit } from '../types';
+import { StatsService } from '../stats/stats.service';
 
 @Injectable()
 export class UserKnowledgeUnitsService {
   private readonly logger = new Logger(UserKnowledgeUnitsService.name);
 
-  constructor(@Inject(FIRESTORE_CONNECTION) private readonly db: Firestore) {}
+  constructor(
+    @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly statsService: StatsService,
+  ) {}
 
   private userKusRef(uid: string) {
     return this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION);
@@ -108,6 +112,25 @@ export class UserKnowledgeUnitsService {
 
     const ref = await this.userKusRef(uid).add(payload);
     this.logger.log(`Created UKU id=${ref.id} for uid=${uid} kuId=${kuId} source=${source?.type ?? 'none'}`);
+
+    // Non-blocking: update stats and tutorContext on enrollment
+    void (async () => {
+      try {
+        const kuDoc = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).get();
+        const kuData = kuDoc.data();
+        const jlptLevel = kuData?.data?.jlptLevel;
+        if (jlptLevel) {
+          await this.statsService.recordKuEnrolled(uid, jlptLevel);
+          await this.statsService.updateCurriculumNode(uid, jlptLevel);
+        }
+        if (kuData?.type === 'Grammar' && kuData?.content) {
+          await this.statsService.addToAllowedGrammar(uid, kuData.content);
+        }
+      } catch (e) {
+        this.logger.error(`Failed to record KU enrolled stats uid=${uid} kuId=${kuId}`, e);
+      }
+    })();
+
     return { id: ref.id, ...payload };
   }
 }

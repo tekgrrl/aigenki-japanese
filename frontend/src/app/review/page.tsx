@@ -102,6 +102,7 @@ export default function ReviewPage() {
 
   const lastFetchedIndex = useRef<number | null>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
+  const answerInputRef = useRef<HTMLInputElement>(null);
 
   // --- Focus Next Button Effect ---
   const FOCUS_TIMEOUT_MS = 50;
@@ -122,6 +123,17 @@ export default function ReviewPage() {
       }
     };
   }, [answerState]);
+
+  // Focus the answer input after AI-Generated question finishes loading
+  useEffect(() => {
+    if (
+      currentItem?.facet.facetType === "AI-Generated-Question" &&
+      !isFetchingDynamicQuestion &&
+      dynamicQuestion
+    ) {
+      answerInputRef.current?.focus();
+    }
+  }, [isFetchingDynamicQuestion, dynamicQuestion, currentItem]);
 
   // --- Fetch Dynamic Question Logic ---
   const fetchDynamicQuestion = async (
@@ -376,6 +388,7 @@ export default function ReviewPage() {
           questionType,
           questionId,
           kuId: currentItem.facet.kuId,
+          facetType: currentItem.facet.facetType,
         }),
       });
 
@@ -815,6 +828,7 @@ export default function ReviewPage() {
         {/* Answer Form */}
         <form onSubmit={handleEvaluateAnswer} className="relative">
           <input
+            ref={answerInputRef}
             key={currentItem.facet.id} // Force re-render (and autoFocus) on new item
             type="text"
             value={userAnswer}

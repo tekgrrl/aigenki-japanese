@@ -4,13 +4,12 @@ import { QuestionsController } from './questions.controller';
 import { GeminiModule } from '../gemini/gemini.module';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { KnowledgeUnitsModule } from '../knowledge-units/knowledge-units.module';
-
-@Global() // Optional: Makes it available everywhere without importing
+@Global()
 @Module({
     providers: [QuestionsService],
     exports: [QuestionsService],
     controllers: [QuestionsController],
     imports: [KnowledgeUnitsModule, GeminiModule,
-        forwardRef(() => ReviewsModule)], // Needed for GeminiService
+        forwardRef(() => ReviewsModule)],
 })
 export class QuestionsModule { }
