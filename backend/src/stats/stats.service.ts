@@ -29,6 +29,12 @@ export class StatsService {
             .count()
             .get();
 
+        const masteredQuery = this.db.collection('users').doc(uid)
+            .collection(USER_KUS_SUBCOLLECTION)
+            .where("status", "==", "mastered")
+            .count()
+            .get();
+
         const facetsCol = uid === ADMIN_USER_ID
             ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
             : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
@@ -48,9 +54,10 @@ export class StatsService {
             .count()
             .get();
 
-        const [ukuLearnSnapshot, reviewingSnapshot, reviewsSnapshot, userStatsDoc, simulateScenariosSnapshot] = await Promise.all([
+        const [ukuLearnSnapshot, reviewingSnapshot, masteredSnapshot, reviewsSnapshot, userStatsDoc, simulateScenariosSnapshot] = await Promise.all([
             ukuLearnQuery,
             reviewQuery,
+            masteredQuery,
             reviewsDueQuery,
             userStatsQuery,
             simulateScenariosQuery,
@@ -130,6 +137,8 @@ export class StatsService {
 
         return {
             learnCount: ukuLearnSnapshot.data().count,
+            reviewingCount: reviewingSnapshot.data().count,
+            masteredCount: masteredSnapshot.data().count,
             reviewCount: totalActive,
             reviewsDue: reviewsDueCount,
             simulateCount: simulateScenariosSnapshot.data().count,
