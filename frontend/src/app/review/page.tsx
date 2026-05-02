@@ -357,8 +357,26 @@ export default function ReviewPage() {
     setError(null);
     setAiExplanation("");
 
-    const expectedAnswers = getExpectedAnswer(currentItem); // Now using array
+    const expectedAnswers = getExpectedAnswer(currentItem);
     const question = getQuestion(currentItem);
+
+    // Short-circuit for reading facets: normalize both sides to hiragana and
+    // compare locally so an exact kana match never requires an AI round-trip.
+    const isReadingFacet =
+      currentItem.facet.facetType === "Kanji-Component-Reading" ||
+      currentItem.facet.facetType === "Content-to-Reading";
+    if (isReadingFacet && expectedAnswers.length > 0) {
+      const normalizedAnswer = wanakana.toHiragana(userAnswer.trim());
+      const matched = expectedAnswers.some(
+        (a) => wanakana.toHiragana(a) === normalizedAnswer,
+      );
+      if (matched) {
+        await handleUpdateSrs("pass");
+        setAiExplanation("");
+        setAnswerState("correct");
+        return;
+      }
+    }
     const topic = currentItem.facet.data?.content || '';
     const questionType = getQuestionType(currentItem); // Get the question type
     // Use dynamicQuestionId if available (for AI questions), otherwise fallback to facet's currentQuestionId (though that might be stale)
@@ -584,8 +602,13 @@ export default function ReviewPage() {
       case "Kanji-Component-Reading":
         return "Kanji Component Reading";
       case "Definition-to-Content":
+        return (item.facet.data?.definitions?.length ?? 0) > 0 || item.facet.data?.reading
+          ? "Vocab Word"
+          : "Kanji Character";
       case "Reading-to-Content":
-        return "Vocab/Kanji";
+        return item.facet.data?.reading
+          ? "Vocab Word"
+          : "Kanji Character";
       case "audio":
         return "Audio Comprehension";
       default:
@@ -600,6 +623,8 @@ export default function ReviewPage() {
     return (
       type === "Content-to-Reading" ||
       type === "Kanji-Component-Reading" ||
+      type === "Definition-to-Content" ||
+      type === "Reading-to-Content" ||
       type === "AI-Generated-Question"
     );
   };
