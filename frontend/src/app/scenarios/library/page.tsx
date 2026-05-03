@@ -100,7 +100,7 @@ function ScenarioLibraryContent() {
     setIsGenerating(true);
 
     try {
-      const res = await apiFetch(`${API_BASE_URL}/scenarios/generate`, {
+      const res = await apiFetch("/api/tutor/generate-scenario", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -124,12 +124,11 @@ function ScenarioLibraryContent() {
     // "Run Again as New" - uses the same settings but creates a fresh scenario
     setIsGenerating(true);
     try {
-      const res = await apiFetch(`${API_BASE_URL}/scenarios/generate`, {
+      const res = await apiFetch("/api/tutor/generate-scenario", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           difficulty: scenario.difficultyLevel,
-          // Use the original description/theme if setting goal is available, else title
           theme: scenario.setting.goal || scenario.title,
         }),
       });
