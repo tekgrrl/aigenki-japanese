@@ -136,6 +136,7 @@ export class ReviewsService {
             return {
                 success: true,
                 facetId,
+                prevStage: currentSrsStage,
                 newStage: nextSrsStage,
                 nextReview: nextReviewDate,
                 kuId: facetData.kuId,
@@ -162,9 +163,9 @@ export class ReviewsService {
             }
         }
 
-        // Post-transaction: update tutorContext leech/weak-grammar tracking
+        // Post-transaction: update tutorContext leech/weak-grammar tracking + record promotions
         if (txResult.kuId && txResult.facetType) {
-            const { kuId, facetType, prevConsecutiveFailures, newConsecutiveFailures } = txResult;
+            const { kuId, facetType, prevConsecutiveFailures, newConsecutiveFailures, prevStage, newStage } = txResult;
             const LEECH_THRESHOLD = 3;
             void (async () => {
                 try {
@@ -176,6 +177,14 @@ export class ReviewsService {
                     } else if (result === 'pass' && prevConsecutiveFailures > 0) {
                         await this.statsService.removeFromLeechVocab(uid, ku.content, facetType);
                         if (isGrammar) await this.statsService.removeFromWeakGrammarPoints(uid, ku.content, facetType);
+                    }
+                    if (result === 'pass' && newStage > prevStage) {
+                        await this.statsService.recordPromotion(uid, {
+                            kuId,
+                            content: ku.content,
+                            type: ku.type,
+                            srsStage: newStage,
+                        });
                     }
                 } catch (e) {
                     this.logger.error(`Failed to update tutorContext leech for uid=${uid} facetId=${facetId}`, e);

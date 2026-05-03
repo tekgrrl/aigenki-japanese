@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Lessons from "@/components/Lessons";
 import Reviews from "@/components/Reviews";
 import ReviewSchedule from "@/components/ReviewSchedule";
+import DailyCheckInDialog from "@/components/DailyCheckInDialog";
 import { apiFetch } from "@/lib/api-client";
 
 interface DashboardStats {
@@ -26,6 +27,9 @@ interface DashboardStats {
 }
 
 export default function DashboardPage() {
+  const [dailyPlan, setDailyPlan] = useState<any>(null);
+  const [showCheckIn, setShowCheckIn] = useState(false);
+
   const [stats, setStats] = useState<DashboardStats>({
     learnCount: 0,
     reviewingCount: 0,
@@ -56,6 +60,25 @@ export default function DashboardPage() {
   }, [fetchStats]);
 
   useEffect(() => {
+    async function checkDailyPlan() {
+      try {
+        const res = await apiFetch("/api/daily-plan/check", { method: "POST" });
+        if (!res.ok) return;
+        const { isNewDay, plan } = await res.json();
+        setDailyPlan(plan);
+        if (isNewDay) {
+          setShowCheckIn(true);
+          localStorage.setItem("lastDailyPlanDate", plan.date);
+          window.dispatchEvent(new Event("dailyPlanChecked"));
+        }
+      } catch {
+        // non-critical — silently ignore
+      }
+    }
+    checkDailyPlan();
+  }, []);
+
+  useEffect(() => {
     const handleRefreshStats = () => {
       console.log("Dashboard: Heard refreshStats event, refetching...");
       fetchStats();
@@ -82,9 +105,15 @@ export default function DashboardPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchStats]);
-  console.log(`stats: ${JSON.stringify(stats)}`);
   return (
     <div className="container mx-auto max-w-6xl px-4 py-8">
+      {showCheckIn && dailyPlan && (
+        <DailyCheckInDialog
+          plan={dailyPlan}
+          onClose={() => setShowCheckIn(false)}
+        />
+      )}
+
       <h1 className="text-3xl font-bold mb-8 text-center text-gray-800 dark:text-white">
         Dashboard
       </h1>

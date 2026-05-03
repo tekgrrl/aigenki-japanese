@@ -20,9 +20,10 @@ import { UserKnowledgeUnitsModule } from './user-knowledge-units/user-knowledge-
 import { ConceptsModule } from './concepts/concepts.module';
 import { LearningProgressModule } from './learning-progress/learning-progress.module';
 import { TutorModule } from './tutor/tutor.module';
+import { DailyPlanModule } from './daily-plan/daily-plan.module';
 
 @Module({
-  imports: [ReviewsModule, FirebaseModule, GeminiModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, TutorModule],
+  imports: [ReviewsModule, FirebaseModule, GeminiModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, TutorModule, DailyPlanModule],
   controllers: [AppController],
   providers: [AppService, QuestionsService],
 })
