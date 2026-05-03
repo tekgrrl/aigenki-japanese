@@ -267,7 +267,7 @@ export default function LearnItemPage() {
         const ex = vocabLesson.context_examples?.[index];
 
         if (ex && !kuScenarios[ex.sentence]) {
-          const p = apiFetch("/api/scenarios/generate", {
+          const p = apiFetch("/api/tutor/generate-scenario", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

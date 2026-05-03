@@ -153,6 +153,53 @@ export class ScenariosService {
     }
   }
 
+  async saveFromTutor(uid: string, data: any): Promise<{ id: string; success: true }> {
+    const docRef = this.scenariosColRef(uid).doc();
+    const id = docRef.id;
+
+    const cleanContent = (str: string) =>
+      str ? str.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim() : '';
+    const cleanMeaning = (str: string) =>
+      str ? str.replace(/^-/, '').trim() : '';
+
+    const newScenario: Scenario = {
+      id,
+      userId: uid,
+      title: data.title,
+      description: data.description,
+      difficultyLevel: data.difficultyLevel,
+      setting: data.setting,
+      roles: data.roles,
+      dialogue: data.dialogue,
+      extractedKUs: (data.extractedKUs ?? []).map((ku: any) => ({
+        content: cleanContent(ku.content),
+        reading: cleanContent(ku.reading),
+        meaning: cleanMeaning(ku.meaning),
+        type: 'vocab' as const,
+        status: 'new' as const,
+        jlptLevel: ku.jlptLevel ?? null,
+      })),
+      grammarNotes: data.grammarNotes ?? [],
+      state: 'encounter' as const,
+      createdAt: Timestamp.now(),
+      chatHistory: [],
+      isObjectiveMet: false,
+      isActive: true,
+      sourceType: data.sourceType ?? 'custom',
+      ...(data.sourceContextSentence && { sourceContextSentence: data.sourceContextSentence }),
+      ...(data.targetVocab && { targetVocab: data.targetVocab }),
+      ...(data.sourceKuId && { sourceKuId: data.sourceKuId }),
+    };
+
+    const cleanData = Object.fromEntries(
+      Object.entries(newScenario).filter(([, v]) => v !== undefined),
+    );
+
+    await docRef.set(cleanData);
+    this.logger.log(`saveFromTutor: created scenario ${id} for uid=${uid}`);
+    return { id, success: true };
+  }
+
   async importScenario(uid: string, dto: ImportScenarioDto): Promise<string> {
     const resolvedAiRoles = dto.aiRoles?.length ? dto.aiRoles : (dto.aiRole ? [dto.aiRole] : []);
     if (!dto.conversationText?.trim() || !dto.userRole?.trim() || resolvedAiRoles.length === 0) {
