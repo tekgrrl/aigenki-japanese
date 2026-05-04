@@ -66,10 +66,10 @@ export default function DashboardPage() {
         if (!res.ok) return;
         const { isNewDay, plan } = await res.json();
         setDailyPlan(plan);
+        localStorage.setItem("lastDailyPlanDate", plan.date);
+        window.dispatchEvent(new Event("dailyPlanChecked"));
         if (isNewDay) {
           setShowCheckIn(true);
-          localStorage.setItem("lastDailyPlanDate", plan.date);
-          window.dispatchEvent(new Event("dailyPlanChecked"));
         }
       } catch {
         // non-critical — silently ignore
