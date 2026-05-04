@@ -28,46 +28,47 @@ interface DailyPlan {
 
 interface Props {
   plan: DailyPlan;
+  learnCount: number;
   onClose: () => void;
 }
 
-const SRS_LABELS: Record<number, string> = {
-  0: "Sumi-suri I",
-  1: "Sumi-suri II",
-  2: "Sumi-suri III",
-  3: "Sumi-suri IV",
-  4: "Kaisho I",
-  5: "Kaisho II",
-  6: "Gyosho",
-  7: "Sosho",
-  8: "Mushin",
+const SHORT_LABELS: Record<number, string> = {
+  0: "I", 1: "II", 2: "III", 3: "IV",
+  4: "Kaisho I", 5: "Kaisho II", 6: "Gyosho", 7: "Sosho", 8: "Mushin",
 };
 
-// Background + text colour per stage, using the Shodo palette
-function stageStyle(stage: number): string {
-  if (stage <= 3) return "bg-shodo-stamp-red text-white";
-  if (stage <= 5) return "bg-shodo-indigo text-white";
-  if (stage === 6) return "bg-shodo-matcha text-white";
-  if (stage === 7) return "bg-shodo-persimmon text-white";
-  return "bg-shodo-gold text-shodo-ink"; // Mushin
+function stageTransition(stage: number): string {
+  const to = SHORT_LABELS[stage] ?? `${stage}`;
+  const from = SHORT_LABELS[stage - 1];
+  return from ? `${from} → ${to}` : to;
+}
+
+// Hex colours per stage — used as inline styles to bypass Tailwind purging
+function stageLabelColor(stage: number): string {
+  if (stage <= 3) return "#D64A38"; // stamp-red (Sumi-suri)
+  if (stage <= 5) return "#60a5fa"; // blue-400  (Kaisho)
+  if (stage === 6) return "#7B8D42"; // matcha    (Gyosho)
+  if (stage === 7) return "#E08A46"; // persimmon (Sosho)
+  return "#C7A04D";                  // gold      (Mushin)
 }
 
 function PromotionBox({ entry }: { entry: PromotedEntry }) {
   return (
-    <div
-      className={`flex flex-col items-center justify-center rounded-lg px-3 py-3 text-center min-w-0 ${stageStyle(entry.srsStage)}`}
-    >
-      <span className="text-lg font-bold leading-tight truncate w-full text-center">
+    <div className="flex flex-col items-center justify-center rounded-lg bg-shodo-ink px-3 py-3 text-center min-w-0">
+      <span className="text-lg font-bold leading-tight truncate w-full text-center text-white">
         {entry.content}
       </span>
-      <span className="mt-1 text-xs opacity-80 leading-tight">
-        {SRS_LABELS[entry.srsStage] ?? `Stage ${entry.srsStage}`}
+      <span
+        className="mt-1 text-xs font-medium leading-tight"
+        style={{ color: stageLabelColor(entry.srsStage) }}
+      >
+        {stageTransition(entry.srsStage)}
       </span>
     </div>
   );
 }
 
-export default function DailyCheckInDialog({ plan, onClose }: Props) {
+export default function DailyCheckInDialog({ plan, learnCount, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [showAllPromotions, setShowAllPromotions] = useState(false);
 
@@ -104,29 +105,50 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
           </button>
         </div>
 
-        {/* Reviews Due */}
-        <div className="rounded-xl border border-shodo-ink/10 bg-shodo-ink/[0.02] p-4">
-          <div className="text-sm font-medium text-shodo-ink/60 mb-1">Reviews due</div>
-          <div className={`text-3xl font-bold ${reviewColor}`}>
-            {plan.reviewsDue}
+        {/* Reviews Due + Available Lessons + image */}
+        <div className="flex gap-3 items-stretch">
+          {/* Reviews Due */}
+          <div className="flex-1 rounded-xl border border-shodo-ink/10 bg-shodo-ink/[0.02] p-4 flex flex-col">
+            <div className="text-sm font-medium text-shodo-ink/60 mb-1">Reviews due</div>
+            <div className={`text-3xl font-bold ${reviewColor}`}>
+              {plan.reviewsDue}
+            </div>
+            {plan.reviewsDue >= plan.threshold && (
+              <p className="mt-1 text-xs text-shodo-ink/70">
+                Focus on reviews before new material.
+              </p>
+            )}
+            {plan.reviewsDue === 0 && (
+              <p className="mt-1 text-xs text-shodo-matcha font-medium">All clear!</p>
+            )}
+            {plan.reviewsDue > 0 && (
+              <Link
+                href="/review"
+                onClick={onClose}
+                className="mt-auto pt-3 inline-block rounded-lg bg-shodo-ink px-3 py-2 text-sm font-medium text-shodo-paper hover:bg-shodo-ink/80 transition-colors text-center"
+              >
+                Start Reviews
+              </Link>
+            )}
           </div>
-          {plan.reviewsDue >= plan.threshold && (
-            <p className="mt-1 text-sm text-shodo-ink/70">
-              Focus on reviews before starting new material.
-            </p>
-          )}
-          {plan.reviewsDue > 0 && (
-            <Link
-              href="/review"
-              onClick={onClose}
-              className="mt-3 inline-block rounded-lg bg-shodo-ink px-4 py-2 text-sm font-medium text-shodo-paper hover:bg-shodo-ink/80 transition-colors"
+
+          {/* Available Lessons */}
+          <div className="flex-1 rounded-xl border border-shodo-ink/10 bg-shodo-ink/[0.02] p-4 flex flex-col">
+            <div className="text-sm font-medium text-shodo-ink/60 mb-1">Available lessons</div>
+            <div className="text-3xl font-bold text-shodo-ink">
+              {learnCount}
+            </div>
+            <button
+              className="mt-auto pt-3 rounded-lg bg-shodo-ink px-3 py-2 text-sm font-medium text-shodo-paper hover:bg-shodo-ink/80 transition-colors text-center w-full"
             >
-              Start Reviews
-            </Link>
-          )}
-          {plan.reviewsDue === 0 && (
-            <p className="mt-1 text-sm text-shodo-matcha font-medium">All clear!</p>
-          )}
+              Start Learning
+            </button>
+          </div>
+
+          {/* Portrait image */}
+          <div className="shrink-0 rounded-xl overflow-hidden w-20">
+            <img src="/daily.png" alt="" className="h-full w-full object-cover" />
+          </div>
         </div>
 
         {/* Recent Promotions */}
@@ -136,8 +158,8 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
               Promoted in the last 24h
             </div>
             <div className="grid grid-cols-4 gap-2">
-              {visiblePromotions.map((p) => (
-                <PromotionBox key={`${p.kuId}-${p.srsStage}`} entry={p} />
+              {visiblePromotions.map((p, i) => (
+                <PromotionBox key={`${p.kuId}-${p.srsStage}-${i}`} entry={p} />
               ))}
             </div>
 
@@ -153,8 +175,8 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
                 </button>
                 {showAllPromotions && (
                   <div className="mt-2 grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
-                    {hiddenPromotions.map((p) => (
-                      <PromotionBox key={`${p.kuId}-${p.srsStage}`} entry={p} />
+                    {hiddenPromotions.map((p, i) => (
+                      <PromotionBox key={`${p.kuId}-${p.srsStage}-${i}`} entry={p} />
                     ))}
                   </div>
                 )}
@@ -167,7 +189,7 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
         {plan.topLeeches.length > 0 && (
           <div>
             <div className="text-sm font-medium text-shodo-ink/60 mb-2">
-              Struggling with
+              Worth revisiting
             </div>
             <ul className="flex flex-col gap-1">
               {plan.topLeeches.map((l) => (
@@ -177,7 +199,7 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
                 >
                   <span className="font-medium text-shodo-ink">{l.content}</span>
                   <span className="text-xs text-shodo-stamp-red ml-2 shrink-0">
-                    {l.consecutiveFailures}× failed
+                    {l.consecutiveFailures} attempts
                   </span>
                 </li>
               ))}

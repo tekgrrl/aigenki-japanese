@@ -110,6 +110,7 @@ export default function DashboardPage() {
       {showCheckIn && dailyPlan && (
         <DailyCheckInDialog
           plan={dailyPlan}
+          learnCount={stats.learnCount}
           onClose={() => setShowCheckIn(false)}
         />
       )}

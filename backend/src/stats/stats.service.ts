@@ -337,7 +337,10 @@ export class StatsService {
             const doc = await transaction.get(userRef);
             const existing: import('../types').PromotedEntry[] = doc.data()?.stats?.recentlyPromoted ?? [];
             const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
-            const pruned = existing.filter(e => (e.promotedAt as Timestamp).toMillis() > cutoffMs);
+            // Prune stale entries and remove any existing entry for this kuId (we'll re-add with latest data)
+            const pruned = existing.filter(
+                e => (e.promotedAt as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId,
+            );
             pruned.push({ ...entry, promotedAt: Timestamp.now() });
             transaction.update(userRef, { 'stats.recentlyPromoted': pruned });
         });
