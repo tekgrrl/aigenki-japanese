@@ -1,13 +1,14 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
-import { KnowledgeUnit, Lesson, VocabLesson, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson } from '../types';
+import { KnowledgeUnit, Lesson, VocabLesson, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson, UserRoot } from '../types';
 import { performance } from 'perf_hooks';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { buildVocabLessonMessage, buildVocabCacheContext, buildKanjiLessonPrompt } from '../prompts/vocab.prompts';
 import { GRAMMAR_INSTRUCTIONS, buildGrammarLessonMessage } from '../prompts/grammar.prompts';
+import { ADMIN_USER_ID } from '../lib/constants';
 
 @Injectable()
 export class LessonsService {
@@ -247,6 +248,28 @@ export class LessonsService {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as unknown as UserGrammarLesson);
   }
 
+
+  async getQueue(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
+    const userDoc = await this.db.collection('users').doc(uid).get();
+    const jlptLevel = (userDoc.data() as UserRoot | undefined)?.preferences?.jlptLevel ?? 'N5';
+
+    const facetsCol = uid === ADMIN_USER_ID
+      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
+      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+
+    const facetsSnap = await facetsCol.get();
+    const startedKuIds = new Set(facetsSnap.docs.map(d => d.data().kuId as string).filter(Boolean));
+
+    const kuSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
+      .where('data.jlptLevel', '==', jlptLevel)
+      .limit(200)
+      .get();
+
+    return kuSnap.docs
+      .filter(d => !startedKuIds.has(d.id))
+      .slice(0, 10)
+      .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+  }
 
   async processBatch(uid: string, vocabValues: { id: string; content: string }[]) {
     const cacheName = await this.geminiService.createContextCache(
