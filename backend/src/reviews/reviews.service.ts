@@ -394,6 +394,7 @@ export class ReviewsService {
         if (count > 0 || kanjiLinked > 0) {
             try {
                 if (count > 0) {
+                    // create is idempotent — returns existing UKU if one already exists
                     await this.userKnowledgeUnitsService.create(uid, kuId);
                     await this.userKnowledgeUnitsService.update(uid, kuId, {
                         facet_count: FieldValue.increment(count),

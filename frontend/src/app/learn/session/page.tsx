@@ -154,6 +154,7 @@ function VocabExampleSlide({ loaded }: { loaded: LoadedItem }) {
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Example</span>
+      {/* content is server-generated lesson data, not user input */}
       <p className="text-3xl text-shodo-ink leading-relaxed"><FuriganaText text={ex.sentence} /></p>
       <p className="text-xl text-shodo-ink-light">{stripped(ex.translation)}</p>
     </div>
