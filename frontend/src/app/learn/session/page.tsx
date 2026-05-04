@@ -95,7 +95,7 @@ function VocabWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (tex
   const vl = loaded.lesson as VocabLesson;
   useEffect(() => { onAudio(vl.reading); }, []);
   return (
-    <div className="flex flex-col items-center justify-center gap-6 text-center">
+    <div className="w-full flex flex-col items-center justify-center gap-6 text-center">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">New Vocabulary</span>
       <div className="text-8xl font-bold text-shodo-ink leading-none">{loaded.item.content}</div>
       <div className="flex items-center gap-3">
@@ -162,7 +162,7 @@ function VocabExampleSlide({ loaded }: { loaded: LoadedItem }) {
 function KanjiCharacterSlide({ loaded }: { loaded: LoadedItem }) {
   const kl = loaded.lesson as KanjiLesson;
   return (
-    <div className="flex flex-col items-center justify-center gap-6 text-center">
+    <div className="w-full flex flex-col items-center justify-center gap-6 text-center">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">New Kanji</span>
       <div className="text-9xl font-bold text-shodo-stamp-red leading-none">{loaded.item.content}</div>
       <div className="text-2xl text-shodo-ink-light">{kl.meaning}</div>
@@ -231,7 +231,7 @@ function KanjiVocabSlide({ loaded }: { loaded: LoadedItem }) {
 function GrammarPatternSlide({ loaded }: { loaded: LoadedItem }) {
   const gl = loaded.lesson as GrammarLesson;
   return (
-    <div className="flex flex-col items-center justify-center gap-6 text-center">
+    <div className="w-full flex flex-col items-center justify-center gap-6 text-center">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Grammar Pattern</span>
       <div className="text-5xl font-bold text-shodo-matcha leading-snug">{gl.pattern}</div>
       <div className="text-2xl text-shodo-ink-light">{gl.title}</div>
@@ -337,6 +337,7 @@ export default function LessonSessionPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCache = useRef<Record<string, string>>({});
   const enrollmentPromises = useRef<Promise<void>[]>([]);
+  const fetchRef = useRef(false);
 
   const playAudio = useCallback(async (text: string) => {
     if (audioCache.current[text]) {
@@ -407,12 +408,12 @@ export default function LessonSessionPage() {
       setCurrentSlideIdx(0);
       return;
     }
-    // Finished all items
+    // Finished all items — switch screens immediately, save in background
     setEnrolling(true);
+    setPhase("complete");
     await Promise.allSettled(enrollmentPromises.current);
     window.dispatchEvent(new CustomEvent("refreshStats"));
     setEnrolling(false);
-    setPhase("complete");
   }, [currentItemIdx, currentSlideIdx, loadedItems, triggerEnrollment]);
 
   const retreat = useCallback(() => {
@@ -437,8 +438,8 @@ export default function LessonSessionPage() {
   // ─── Loading phase ────────────────────────────────────────────────────────
   if (queueEmpty) {
     return (
-      <main className="min-h-screen bg-shodo-paper flex items-center justify-center p-8">
-        <div className="text-center max-w-md">
+      <main className="container mx-auto max-w-2xl p-8">
+        <div>
           <div className="text-5xl mb-6">🎉</div>
           <h1 className="text-3xl font-bold text-shodo-ink mb-3">All caught up!</h1>
           <p className="text-shodo-ink-light mb-8">No new items available at your current level. Check back after reviewing what you have.</p>
@@ -452,8 +453,8 @@ export default function LessonSessionPage() {
 
   if (phase === "loading") {
     return (
-      <main className="min-h-screen bg-shodo-paper flex items-center justify-center p-8">
-        <div className="text-center max-w-sm w-full">
+      <main className="container mx-auto max-w-2xl p-8">
+        <div>
           <h1 className="text-2xl font-bold text-shodo-ink mb-2">Preparing your lesson</h1>
           <p className="text-shodo-ink-faint mb-8 text-sm">
             {totalCount === 0 ? "Finding items…" : `Generating ${loadedCount} of ${totalCount}`}
@@ -478,11 +479,11 @@ export default function LessonSessionPage() {
     const typeColor = TYPE_COLORS[loaded.item.type] ?? "#595048";
 
     return (
-      <main className="min-h-screen bg-shodo-paper flex flex-col">
+      <main className="container mx-auto max-w-2xl p-8">
         <audio ref={audioRef} />
 
-        {/* Top bar */}
-        <div className="px-8 pt-6 pb-4 flex items-center gap-4">
+        {/* Progress bar */}
+        <div className="flex items-center gap-4 mb-8">
           <div className="flex items-center gap-1.5">
             {loadedItems.map((_, i) => (
               <div
@@ -509,13 +510,17 @@ export default function LessonSessionPage() {
         {/* Slide content */}
         <div
           key={`${currentItemIdx}-${currentSlideIdx}`}
-          className="flex-1 flex items-center px-8 py-6 animate-in fade-in duration-300"
+          className="min-h-[400px] rounded-xl border p-8 animate-in fade-in duration-300"
+          style={{
+            backgroundColor: `${typeColor}0d`,
+            borderColor: `${typeColor}33`,
+          }}
         >
           {renderSlide(loaded, currentSlideIdx, playAudio)}
         </div>
 
-        {/* Bottom nav */}
-        <div className="px-8 pb-8 pt-4 flex items-center gap-4 border-t border-shodo-ink/5">
+        {/* Navigation */}
+        <div className="flex items-center gap-4 mt-8 pt-6 border-t border-shodo-ink/10">
           <button
             onClick={retreat}
             disabled={currentItemIdx === 0 && currentSlideIdx === 0}
@@ -548,13 +553,13 @@ export default function LessonSessionPage() {
 
   // ─── Complete phase ───────────────────────────────────────────────────────
   return (
-    <main className="min-h-screen bg-shodo-paper flex items-center justify-center p-8">
+    <main className="container mx-auto max-w-2xl p-8">
       {enrolling ? (
-        <div className="text-center">
+        <div>
           <p className="text-shodo-ink-light">Saving your progress…</p>
         </div>
       ) : (
-        <div className="text-center max-w-md">
+        <div>
           <div className="text-5xl mb-6">✨</div>
           <h1 className="text-3xl font-bold text-shodo-ink mb-2">Lesson complete!</h1>
           <p className="text-shodo-ink-light mb-2">
