@@ -91,6 +91,11 @@ export class LessonsController {
     return lesson;
   }
 
+  @Get('queue')
+  async getQueue(@UserId() uid: string) {
+    return this.lessonsService.getQueue(uid);
+  }
+
   @Get('user-grammar')
   async getUserGrammarLessons(@UserId() uid: string, @Query('kuId') kuId: string) {
     if (!kuId) {
