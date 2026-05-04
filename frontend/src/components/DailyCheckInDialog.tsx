@@ -136,7 +136,7 @@ export default function DailyCheckInDialog({ plan, learnCount, onClose }: Props)
           <div className="flex-1 rounded-xl border border-shodo-ink/10 bg-shodo-ink/[0.02] p-4 flex flex-col">
             <div className="text-sm font-medium text-shodo-ink/60 mb-1">Available lessons</div>
             <div className="text-3xl font-bold text-shodo-ink">
-              {learnCount}
+              {learnCount > 0 ? learnCount : "~10"}
             </div>
             <Link
               href="/learn/session"

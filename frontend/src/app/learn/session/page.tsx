@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { VocabLesson, KanjiLesson, GrammarLesson, Lesson } from "@/types";
 import { apiFetch } from "@/lib/api-client";
+import { FuriganaText } from "@/components/FuriganaText";
 
 interface QueueItem {
   kuId: string;
@@ -106,7 +107,7 @@ function VocabWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (tex
           title="Play audio"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M12 6v12m0 0l-3-3m3 3l3-3M6.343 9.657a8 8 0 000 11.314" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
           </svg>
         </button>
       </div>
@@ -153,7 +154,8 @@ function VocabExampleSlide({ loaded }: { loaded: LoadedItem }) {
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Example</span>
-      <p className="text-3xl text-shodo-ink leading-relaxed">{stripped(ex.sentence)}</p>
+      {/* content is server-generated lesson data, not user input */}
+      <p className="text-3xl text-shodo-ink leading-relaxed"><FuriganaText text={ex.sentence} /></p>
       <p className="text-xl text-shodo-ink-light">{stripped(ex.translation)}</p>
     </div>
   );
