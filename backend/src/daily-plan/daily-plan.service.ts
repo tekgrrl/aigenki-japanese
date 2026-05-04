@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Firestore, Query, Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION, REVIEW_FACETS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
-import { PromotedEntry, ReviewFacet } from '../types';
+import { PromotedEntry, ReviewFacet, UserRoot } from '../types';
 
 export interface LeechEntry {
   kuId: string;
@@ -40,7 +40,7 @@ export class DailyPlanService {
     const planRef = this.db.collection('daily-plans').doc(uid);
 
     const [userDoc, planDoc] = await Promise.all([userRef.get(), planRef.get()]);
-    const userData = userDoc.data();
+    const userData = userDoc.data() as UserRoot | undefined;
 
     if (userData?.lastDailyPlanDate === today && planDoc.exists) {
       this.logger.log(`Daily plan already generated for uid=${uid} date=${today}`);
@@ -58,7 +58,7 @@ export class DailyPlanService {
     return { isNewDay: true, plan };
   }
 
-  private async generatePlan(uid: string, userData: any, today: string): Promise<DailyPlan> {
+  private async generatePlan(uid: string, userData: UserRoot | undefined, today: string): Promise<DailyPlan> {
     const threshold: number = userData?.tutorContext?.preferences?.dailyMaxTotal ?? 20;
 
     const reviewsDueSnap = await this.facetsBaseQuery(uid)
