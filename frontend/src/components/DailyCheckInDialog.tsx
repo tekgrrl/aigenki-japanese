@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 interface PromotedEntry {
@@ -43,8 +43,33 @@ const SRS_LABELS: Record<number, string> = {
   8: "Mushin",
 };
 
+// Background + text colour per stage, using the Shodo palette
+function stageStyle(stage: number): string {
+  if (stage <= 3) return "bg-shodo-stamp-red text-white";
+  if (stage <= 5) return "bg-shodo-indigo text-white";
+  if (stage === 6) return "bg-shodo-matcha text-white";
+  if (stage === 7) return "bg-shodo-persimmon text-white";
+  return "bg-shodo-gold text-shodo-ink"; // Mushin
+}
+
+function PromotionBox({ entry }: { entry: PromotedEntry }) {
+  return (
+    <div
+      className={`flex flex-col items-center justify-center rounded-lg px-3 py-3 text-center min-w-0 ${stageStyle(entry.srsStage)}`}
+    >
+      <span className="text-lg font-bold leading-tight truncate w-full text-center">
+        {entry.content}
+      </span>
+      <span className="mt-1 text-xs opacity-80 leading-tight">
+        {SRS_LABELS[entry.srsStage] ?? `Stage ${entry.srsStage}`}
+      </span>
+    </div>
+  );
+}
+
 export default function DailyCheckInDialog({ plan, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const [showAllPromotions, setShowAllPromotions] = useState(false);
 
   useEffect(() => {
     dialogRef.current?.showModal();
@@ -52,10 +77,13 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
 
   const reviewColor =
     plan.reviewsDue === 0
-      ? "text-green-600"
+      ? "text-shodo-matcha"
       : plan.reviewsDue < plan.threshold
-      ? "text-amber-600"
-      : "text-red-600";
+      ? "text-shodo-persimmon"
+      : "text-shodo-stamp-red";
+
+  const visiblePromotions = plan.recentPromotions.slice(0, 4);
+  const hiddenPromotions = plan.recentPromotions.slice(4);
 
   return (
     <dialog
@@ -97,7 +125,7 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
             </Link>
           )}
           {plan.reviewsDue === 0 && (
-            <p className="mt-1 text-sm text-green-600 font-medium">All clear!</p>
+            <p className="mt-1 text-sm text-shodo-matcha font-medium">All clear!</p>
           )}
         </div>
 
@@ -107,19 +135,31 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
             <div className="text-sm font-medium text-shodo-ink/60 mb-2">
               Promoted in the last 24h
             </div>
-            <ul className="flex flex-col gap-1">
-              {plan.recentPromotions.map((p) => (
-                <li
-                  key={`${p.kuId}-${p.srsStage}`}
-                  className="flex items-center justify-between rounded-lg border border-shodo-ink/10 px-3 py-2 text-sm"
-                >
-                  <span className="font-medium text-shodo-ink">{p.content}</span>
-                  <span className="text-xs text-shodo-ink/50 ml-2 shrink-0">
-                    → {SRS_LABELS[p.srsStage] ?? `Stage ${p.srsStage}`}
-                  </span>
-                </li>
+            <div className="grid grid-cols-4 gap-2">
+              {visiblePromotions.map((p) => (
+                <PromotionBox key={`${p.kuId}-${p.srsStage}`} entry={p} />
               ))}
-            </ul>
+            </div>
+
+            {hiddenPromotions.length > 0 && (
+              <>
+                <button
+                  onClick={() => setShowAllPromotions(v => !v)}
+                  className="mt-2 text-xs text-shodo-indigo hover:underline underline-offset-2 transition-colors"
+                >
+                  {showAllPromotions
+                    ? "Show less"
+                    : `Show all ${plan.recentPromotions.length}`}
+                </button>
+                {showAllPromotions && (
+                  <div className="mt-2 grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                    {hiddenPromotions.map((p) => (
+                      <PromotionBox key={`${p.kuId}-${p.srsStage}`} entry={p} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -133,10 +173,10 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
               {plan.topLeeches.map((l) => (
                 <li
                   key={l.kuId}
-                  className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm"
+                  className="flex items-center justify-between rounded-lg border border-shodo-stamp-red/20 bg-shodo-stamp-red/5 px-3 py-2 text-sm"
                 >
                   <span className="font-medium text-shodo-ink">{l.content}</span>
-                  <span className="text-xs text-red-500 ml-2 shrink-0">
+                  <span className="text-xs text-shodo-stamp-red ml-2 shrink-0">
                     {l.consecutiveFailures}× failed
                   </span>
                 </li>
@@ -147,12 +187,12 @@ export default function DailyCheckInDialog({ plan, onClose }: Props) {
 
         {/* New content nudge */}
         {plan.suggestNewContent && (
-          <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+          <div className="rounded-xl border border-shodo-matcha/30 bg-shodo-matcha/10 p-4 text-sm text-shodo-ink">
             Your review load is under control — a good day to learn something new.
             <Link
               href="/learn"
               onClick={onClose}
-              className="ml-2 font-medium underline underline-offset-2 hover:text-green-900"
+              className="ml-2 font-medium text-shodo-matcha underline underline-offset-2 hover:opacity-80"
             >
               Go to Learn
             </Link>
