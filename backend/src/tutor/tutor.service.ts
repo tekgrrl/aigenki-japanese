@@ -36,8 +36,9 @@ Guidelines:
 - When you have gathered sufficient context, call create_scenario to produce and save the output.
 - You will be warned when you are on your final tool round. Heed that warning.
 
-Dialogue rules:
-- Write dialogue text as plain Japanese with no parenthetical annotations. Do NOT add readings or translations inside the dialogue (e.g. never write 渋谷駅（しぶやえき）— write 渋谷駅).
+Language rules:
+- Scenario metadata (title, description, location, goal, timeOfDay, visualPrompt) must always be written in English — never Japanese.
+- Dialogue text must be plain Japanese with no parenthetical annotations. Do NOT add readings or translations inside the dialogue (e.g. never write 渋谷駅（しぶやえき）— write 渋谷駅).
 - Readings belong only in extractedKUs[].reading — not in the dialogue text.
 - The user's lines must only use vocabulary and grammar that matches their level. Unfamiliar words in the user's lines defeat the purpose of the exercise.
 - The AI character's lines may use slightly harder vocabulary, but should still be comprehensible at the user's level.`;

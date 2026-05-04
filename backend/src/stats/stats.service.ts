@@ -331,6 +331,21 @@ export class StatsService {
         await this.removeTutorVocabFacetType(uid, 'weakGrammarPoints', pattern, facetType);
     }
 
+    async recordPromotion(uid: string, entry: Omit<import('../types').PromotedEntry, 'promotedAt'>): Promise<void> {
+        const userRef = this.db.collection('users').doc(uid);
+        await this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(userRef);
+            const existing: import('../types').PromotedEntry[] = doc.data()?.stats?.recentlyPromoted ?? [];
+            const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
+            // Prune stale entries and remove any existing entry for this kuId (we'll re-add with latest data)
+            const pruned = existing.filter(
+                e => (e.promotedAt as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId,
+            );
+            pruned.push({ ...entry, promotedAt: Timestamp.now() });
+            transaction.update(userRef, { 'stats.recentlyPromoted': pruned });
+        });
+    }
+
     async updateCurriculumNode(uid: string, jlptLevel: string): Promise<void> {
         await this.db.collection('users').doc(uid).update({
             'tutorContext.currentCurriculumNode': jlptLevel,

@@ -31,6 +31,14 @@ export interface ApiLog {
   };
 }
 
+export interface PromotedEntry {
+  kuId: string;
+  content: string;
+  type: string;
+  srsStage: number;
+  promotedAt: Timestamp;
+}
+
 /** A KU entry in a tutor context array, with per-facet-type granularity. */
 export interface TutorVocabEntry {
   content: string;
@@ -58,6 +66,7 @@ export interface UserRoot {
     // Engagement
     currentStreak: number;
     lastReviewDate?: Timestamp;
+    recentlyPromoted?: PromotedEntry[];
 
     // Performance
     totalReviews: number;
@@ -110,6 +119,9 @@ export interface UserRoot {
       dailyMaxNew?: number;
     };
   };
+
+  /** YYYY-MM-DD of the last day the daily plan was generated; used to gate first-dashboard-visit trigger. */
+  lastDailyPlanDate?: string;
 
   /** Top-level user-facing preferences stored directly on the UserRoot document. */
   preferences?: {

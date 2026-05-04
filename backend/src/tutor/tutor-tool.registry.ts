@@ -133,11 +133,11 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
       properties: {
         title: {
           type: 'string',
-          description: 'Short descriptive title (e.g. "At the Convenience Store").',
+          description: 'Short descriptive title in English (e.g. "At the Convenience Store").',
         },
         description: {
           type: 'string',
-          description: 'One-sentence description of the scenario and its goal.',
+          description: 'One-sentence description of the scenario and its goal. Write in English.',
         },
         difficultyLevel: {
           type: 'string',
@@ -149,7 +149,7 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
           properties: {
             location: {
               type: 'string',
-              description: 'Physical location (e.g. "convenience store", "train station").',
+              description: 'Physical location in English (e.g. "convenience store", "train station").',
             },
             participants: {
               type: 'array',
@@ -158,15 +158,15 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
             },
             goal: {
               type: 'string',
-              description: "The user's objective to accomplish in this scenario.",
+              description: "The user's objective to accomplish in this scenario. Write in English.",
             },
             timeOfDay: {
               type: 'string',
-              description: 'Time context (e.g. "morning", "late evening").',
+              description: 'Time context in English (e.g. "morning", "late evening").',
             },
             visualPrompt: {
               type: 'string',
-              description: 'Short description for scene illustration.',
+              description: 'Short description for scene illustration. Write in English.',
             },
           },
           required: ['location', 'participants', 'goal', 'timeOfDay', 'visualPrompt'],

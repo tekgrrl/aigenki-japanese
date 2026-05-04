@@ -14,6 +14,7 @@ import { applyFurigana, loadFurigana } from "@/lib/furigana";
 export default function Header() {
   const { user } = useAuth();
   const [stats, setStats] = useState({ learnCount: 0, reviewingCount: 0, reviewsDue: 0, simulateCount: 0 });
+  const [showDailyNudge, setShowDailyNudge] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -45,6 +46,24 @@ export default function Header() {
     return () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [fetchStats]);
+
+  useEffect(() => {
+    if (!user) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const last = localStorage.getItem("lastDailyPlanDate");
+    setShowDailyNudge(last !== today);
+
+    const handleStorage = () => {
+      setShowDailyNudge(localStorage.getItem("lastDailyPlanDate") !== today);
+    };
+    window.addEventListener("storage", handleStorage);
+    // Also listen for same-tab updates via a custom event
+    window.addEventListener("dailyPlanChecked", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("dailyPlanChecked", handleStorage);
+    };
+  }, [user]);
 
   // Apply saved furigana preference on load
   useEffect(() => {
@@ -79,9 +98,18 @@ export default function Header() {
       <nav className="container mx-auto max-w-4xl px-8 py-4 flex items-center">
         <Link
           href="/"
-          className="text-2xl font-bold text-shodo-ink hover:text-shodo-accent transition-colors duration-200 mr-auto"
+          className="relative text-2xl font-bold text-shodo-ink hover:text-shodo-accent transition-colors duration-200 mr-auto"
         >
           AIGENKI
+          {showDailyNudge && (
+            <span
+              className="absolute -top-1 -right-3 flex h-2.5 w-2.5"
+              title="Visit the dashboard for your daily check-in"
+            >
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-shodo-accent opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-shodo-accent" />
+            </span>
+          )}
         </Link>
 
         {/* Primary navigation */}
