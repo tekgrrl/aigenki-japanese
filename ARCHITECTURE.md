@@ -680,6 +680,28 @@ Library page (`/learn`): Kanji items now show `data.meaning` in the hint column 
 
 ---
 
+**Lesson session (`/learn/session`) + component kanji (2026-05-04)**
+
+- `frontend/src/app/learn/session/page.tsx` — new WaniKani-style lesson slideshow page. Fetches up to 10 items from `GET /api/lessons/queue`, generates lessons in parallel, then walks through slides (word → kanji building blocks → meaning → definitions → examples for Vocab; character → mnemonic → readings → vocab for Kanji; pattern → meaning → examples → notes for Grammar). Enrolls review facets on completion via `POST /api/reviews/generate`.
+- **Component kanji (Option B):** When a Vocab lesson has `component_kanji`, a "Building Blocks" slide is inserted after the word slide showing each kanji character, its meaning, and its reading within the word. Corresponding `Kanji-Component-{char}` facets are auto-enrolled alongside the standard vocab facets. `renderSlide()` uses dynamic index arithmetic (`s--` pattern) so the slide sequence is correct whether or not kanji are present.
+- **React Strict Mode guard:** `fetchRef.current` guard in the load `useEffect` prevents the double-invocation that was showing "16/10" or "20/10" in the progress bar.
+- `DailyCheckInDialog.tsx` — "Start Learning" button changed from `<button>` to `<Link href="/learn/session">`. Available lessons count shows actual `learnCount` or "~10" fallback.
+
+**Lesson queue contamination fix (2026-05-04)**
+
+- `LessonsService.getQueue(uid)` now fetches both `review-facets` AND `user-kus` sub-collections in parallel. Any KU that already has a `UserKnowledgeUnit` record for the user is excluded from the lesson queue — scenario-extracted words land in `user-kus` before they are formally taught, so this prevents them from appearing in the curated lesson stream regardless of how their `jlptLevel` was tagged.
+- `backend/scripts/cleanup-legacy-kus.mjs` — one-off admin script to identify legacy Vocab KUs (created before the WaniKani import), delete dupes whose content matches a WaniKani KU, and classify remaining unleveled KUs via Gemini. Uses the named Firestore database (`FIRESTORE_DB` env var, defaults to `aisrs-japanese-dev`).
+
+**Question generation with curriculum-aware function calling (2026-05-05)**
+
+- `backend/src/prompts/curriculum.ts` (new) — defines `JLPT_LEVEL_ORDER`, `getCumulativeGrammar(upToLevel)` (returns an array where each entry explicitly states it includes all previous levels), and `GET_USER_LEVEL_DECLARATION` (Gemini `FunctionDeclaration`).
+- `GeminiService.generateWithTools<T>(userMessage, systemPrompt, toolDeclarations, toolHandlers, responseSchema)` — general-purpose multi-turn tool-calling loop. Sends with function declarations, dispatches handler results back into the conversation, then makes a final structured-output call (no tools, with `responseSchema`) to get the typed result. Logs each tool call and result to stdout and captures a `toolCalls[]` array in the Firestore log `responseData`.
+- `QuestionsService` — `generateVocabQuestion` and `generateConceptQuestion` now call `generateWithTools` instead of `generateQuestionAI`. A `buildLevelToolHandler(uid)` private method queries `users/{uid}.preferences.jlptLevel` and returns `{ jlptLevel, cumulativeGrammar }`. `capturedLevel` side-channel captures the returned level so it can be written to `QuestionItem.data.difficulty` instead of the previous hardcoded `'JLPT-N5'`/`'JLPT-N4'`.
+- All three question prompts (`buildVocabQuestionPrompt`, `buildNounParticleQuestionPrompt`, `buildConceptQuestionPrompt`) updated: lead with "FIRST: Call get_user_level", hardcoded level references removed, "LEVEL CONSTRAINT (critical)" rule instructs the model to use only grammar from the returned cumulative schema for surrounding sentences while allowing the target item itself to be more advanced.
+- `ApiLog.responseData` extended with `toolCalls?: Array<{ fn, args, response }>` (both type files).
+
+---
+
 - **Firebase Console prerequisites** for project `gen-lang-client-0878434798`:
   1. Authentication → Sign-in method → **Email/Password** enabled.
   2. Authentication → Sign-in method → **Email link (passwordless sign-in)** enabled (sub-toggle under Email/Password).

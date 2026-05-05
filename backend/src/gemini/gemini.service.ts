@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, FunctionDeclaration, FunctionCallingConfigMode, createPartFromFunctionResponse, Content } from '@google/genai';
 import { ApiLog, Lesson, ScenarioEvaluation } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
@@ -768,6 +768,124 @@ export class GeminiService implements OnModuleInit {
           console.error('Failed to update cloze log', err)
         );
       }
+    }
+  }
+
+  /**
+   * Generates a structured response via a tool-calling loop.
+   *
+   * Flow:
+   *  1. Send the user message with the provided function declarations.
+   *  2. While the model returns function calls: dispatch to handlers, feed responses back.
+   *  3. Final turn: drop tools, enforce responseSchema, return parsed result.
+   *
+   * Tool handlers receive the function args and return a plain object that is
+   * sent back to the model as the function response.
+   */
+  async generateWithTools<T>(
+    userMessage: string,
+    systemPrompt: string,
+    toolDeclarations: FunctionDeclaration[],
+    toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>>,
+    responseSchema: Record<string, unknown>,
+    logContext?: Record<string, any>,
+  ): Promise<T> {
+    const startTime = performance.now();
+    let errorOccurred = false;
+    let capturedError: any;
+    let result: T | undefined;
+
+    const logRef = await this.apilogService.startLog({
+      timestamp: Timestamp.now(),
+      route: logContext?.route ?? '/questions/generate',
+      status: 'pending',
+      modelUsed: this.modelName,
+      requestData: { userMessage, systemPrompt, ...logContext },
+    });
+
+    const toolCallLog: Array<{ fn: string; args: Record<string, unknown>; response: Record<string, unknown> }> = [];
+
+    try {
+      const contents: Content[] = [
+        { role: 'user', parts: [{ text: userMessage }] },
+      ];
+
+      this.logger.log(`[generateWithTools] topic="${logContext?.topic ?? userMessage.slice(0, 40)}" tools=[${toolDeclarations.map(t => t.name).join(', ')}]`);
+
+      // Tool-calling loop (safety cap: 5 iterations)
+      for (let i = 0; i < 5; i++) {
+        const response = await this.client.models.generateContent({
+          model: this.modelName,
+          contents,
+          config: {
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            tools: [{ functionDeclarations: toolDeclarations }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+          },
+        });
+
+        const calls = response.functionCalls;
+        if (!calls || calls.length === 0) {
+          this.logger.log(`[generateWithTools] No function calls on turn ${i + 1} — proceeding to final turn`);
+          break;
+        }
+
+        this.logger.log(`[generateWithTools] Turn ${i + 1}: model called [${calls.map(c => c.name).join(', ')}]`);
+
+        // Append model turn
+        contents.push({ role: 'model', parts: response.candidates![0].content!.parts! });
+
+        // Dispatch each call and collect responses
+        const responseParts = await Promise.all(
+          calls.map(async (fc) => {
+            const handler = toolHandlers[fc.name!];
+            const args = (fc.args as Record<string, unknown>) ?? {};
+            const handlerResult = handler
+              ? await handler(args)
+              : { error: `Unknown function: ${fc.name}` };
+
+            this.logger.log(`[generateWithTools] ${fc.name}() → ${JSON.stringify(handlerResult).slice(0, 200)}`);
+            toolCallLog.push({ fn: fc.name!, args, response: handlerResult });
+
+            return createPartFromFunctionResponse(fc.id ?? fc.name!, fc.name!, handlerResult);
+          }),
+        );
+
+        contents.push({ role: 'user', parts: responseParts });
+      }
+
+      // Final turn: structured output, no tools
+      const finalResponse = await this.client.models.generateContent({
+        model: this.modelName,
+        contents,
+        config: {
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          responseMimeType: 'application/json',
+          responseSchema: responseSchema as any,
+        },
+      });
+
+      if (!finalResponse.text) throw new Error('Empty response from Gemini on final turn');
+      result = JSON.parse(finalResponse.text) as T;
+      this.logger.log(`[generateWithTools] result: ${JSON.stringify(result)}`);
+      return result;
+
+    } catch (error) {
+      errorOccurred = true;
+      capturedError = error;
+      this.logger.error('generateWithTools error:', error);
+      throw new InternalServerErrorException('Failed to generate with tools');
+    } finally {
+      const durationMs = performance.now() - startTime;
+      const updateData: Partial<ApiLog> = { durationMs };
+      if (errorOccurred) {
+        updateData.status = 'error';
+        updateData.errorData = { message: capturedError instanceof Error ? capturedError.message : String(capturedError) };
+      } else {
+        updateData.status = 'success';
+        updateData.responseData = { toolCalls: toolCallLog, parsedJson: result };
+      }
+      await this.apilogService.completeLog(logRef, updateData).catch(e => this.logger.error(e));
     }
   }
 

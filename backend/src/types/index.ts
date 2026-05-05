@@ -21,8 +21,9 @@ export interface ApiLog {
     [key: string]: any;
   };
   responseData?: {
-    rawText?: string; // The raw text from the AI
-    parsedJson?: any; // The parsed JSON object (if applicable)
+    rawText?: string;
+    parsedJson?: any;
+    toolCalls?: Array<{ fn: string; args: Record<string, unknown>; response: Record<string, unknown> }>;
   };
   errorData?: {
     message?: string;

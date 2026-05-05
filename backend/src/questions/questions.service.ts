@@ -24,6 +24,7 @@ import {
   buildConceptQuestionPrompt,
   ConceptMechanic,
 } from '../prompts/quiz.prompts';
+import { GET_USER_LEVEL_DECLARATION, getCumulativeGrammar, JlptLevel } from '../prompts/curriculum';
 
 const SUITABLE_RANK_THRESHOLD = 30;
 const RANK_CORRECT_DELTA = 5;
@@ -188,6 +189,30 @@ export class QuestionsService {
     return this.generateVocabQuestion(uid, topic, kuId, facetId);
   }
 
+  private buildLevelToolHandler(uid: string): Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>> {
+    return {
+      get_user_level: async () => {
+        const userDoc = await this.db.collection('users').doc(uid).get();
+        const level = ((userDoc.data() as any)?.preferences?.jlptLevel ?? 'N5') as JlptLevel;
+        return {
+          jlptLevel: level,
+          cumulativeGrammar: getCumulativeGrammar(level),
+        };
+      },
+    };
+  }
+
+  private readonly questionResponseSchema = {
+    type: 'OBJECT',
+    properties: {
+      question: { type: 'STRING' },
+      context: { type: 'STRING' },
+      answer: { type: 'STRING' },
+      accepted_alternatives: { type: 'ARRAY', items: { type: 'STRING' } },
+    },
+    required: ['question', 'answer'],
+  };
+
   private async generateVocabQuestion(uid: string, topic: string, kuId: string, facetId?: string): Promise<QuestionResponse> {
     let reading: string | undefined;
     let meaning: string | undefined;
@@ -210,7 +235,6 @@ export class QuestionsService {
 
     let systemPrompt: string;
     let fewShotTurns: Array<{ user: string; model: string }> | undefined;
-
     if (isVerb) {
       systemPrompt = buildVocabQuestionPrompt(pickRandomQuestionType(VOCAB_QUESTION_OPTIONS));
     } else {
@@ -223,18 +247,31 @@ export class QuestionsService {
       }
     }
 
+    // Capture the level returned by the tool for use in the saved difficulty field
+    let capturedLevel = 'N5';
+    const toolHandlers = {
+      ...this.buildLevelToolHandler(uid),
+      get_user_level: async (args: Record<string, unknown>) => {
+        const result = await this.buildLevelToolHandler(uid).get_user_level(args);
+        capturedLevel = result.jlptLevel as string;
+        return result;
+      },
+    };
+
     const userMessage = buildVocabQuestionUserMessage(topic, reading, meaning);
-
-    const questionString = await this.geminiService.generateQuestionAI(userMessage, systemPrompt, {}, fewShotTurns);
-
-    if (!questionString) throw new Error('AI response was empty.');
-
-    let parsed: { question: string; answer: string; context?: string; accepted_alternatives?: string[] };
-    try {
-      parsed = JSON.parse(questionString);
-    } catch {
-      throw new Error('Failed to parse AI JSON response');
-    }
+    const parsed = await this.geminiService.generateWithTools<{
+      question: string;
+      answer: string;
+      context?: string;
+      accepted_alternatives?: string[];
+    }>(
+      userMessage,
+      systemPrompt,
+      [GET_USER_LEVEL_DECLARATION],
+      toolHandlers,
+      this.questionResponseSchema,
+      { route: '/questions/generate', topic: topic, kuId },
+    );
 
     const ref = this.db.collection(QUESTIONS_COLLECTION).doc();
     const newQuestion: QuestionItem = {
@@ -245,7 +282,7 @@ export class QuestionsService {
         context: parsed.context,
         answer: parsed.answer,
         acceptedAlternatives: parsed.accepted_alternatives,
-        difficulty: 'JLPT-N5',
+        difficulty: `JLPT-${capturedLevel}` as import('@/types').LessonDifficulty,
       },
       rank: 50,
       rejectionCount: 0,
@@ -253,7 +290,7 @@ export class QuestionsService {
     };
 
     await ref.set(newQuestion);
-    this.logger.log(`Saved new question ${ref.id} for KU ${kuId}`);
+    this.logger.log(`Saved new question ${ref.id} for KU ${kuId} (level: ${capturedLevel})`);
 
     if (facetId) {
       await this.reviewsService.updateFacetQuestion(uid, facetId, ref.id);
@@ -266,16 +303,28 @@ export class QuestionsService {
     const selectedType = pickRandomQuestionType(CONCEPT_QUESTION_OPTIONS);
     const systemPrompt = buildConceptQuestionPrompt(mechanic, selectedType);
 
-    const questionString = await this.geminiService.generateQuestionAI('', systemPrompt, {});
+    let capturedLevel = 'N5';
+    const toolHandlers = {
+      get_user_level: async (args: Record<string, unknown>) => {
+        const result = await this.buildLevelToolHandler(uid).get_user_level(args);
+        capturedLevel = result.jlptLevel as string;
+        return result;
+      },
+    };
 
-    if (!questionString) throw new Error('AI response was empty.');
-
-    let parsed: { question: string; answer: string; context?: string; accepted_alternatives?: string[] };
-    try {
-      parsed = JSON.parse(questionString);
-    } catch {
-      throw new Error('Failed to parse AI JSON response for concept question');
-    }
+    const parsed = await this.geminiService.generateWithTools<{
+      question: string;
+      answer: string;
+      context?: string;
+      accepted_alternatives?: string[];
+    }>(
+      '',
+      systemPrompt,
+      [GET_USER_LEVEL_DECLARATION],
+      toolHandlers,
+      this.questionResponseSchema,
+      { route: '/questions/generate', topic: mechanic.goalTitle, kuId },
+    );
 
     const ref = this.db.collection(QUESTIONS_COLLECTION).doc();
     const newQuestion: QuestionItem = {
@@ -286,7 +335,7 @@ export class QuestionsService {
         context: parsed.context,
         answer: parsed.answer,
         acceptedAlternatives: parsed.accepted_alternatives,
-        difficulty: 'JLPT-N4',
+        difficulty: `JLPT-${capturedLevel}` as import('@/types').LessonDifficulty,
       },
       rank: 50,
       rejectionCount: 0,
@@ -294,7 +343,7 @@ export class QuestionsService {
     };
 
     await ref.set(newQuestion);
-    this.logger.log(`Saved new concept question ${ref.id} for KU ${kuId} (mechanic: ${mechanic.goalTitle})`);
+    this.logger.log(`Saved new concept question ${ref.id} for KU ${kuId} (mechanic: ${mechanic.goalTitle}, level: ${capturedLevel})`);
 
     if (facetId) {
       await this.reviewsService.updateFacetQuestion(uid, facetId, ref.id);
