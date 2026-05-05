@@ -54,4 +54,40 @@ export class ApilogService {
             } as ApiLog;
         });
     }
+
+    async getLatencyStats(sampleSize = 200): Promise<Array<{
+        route: string;
+        count: number;
+        avgMs: number;
+        p95Ms: number;
+        minMs: number;
+        maxMs: number;
+    }>> {
+        const snapshot = await this.db.collection(API_LOGS_COLLECTION)
+            .orderBy('timestamp', 'desc')
+            .limit(sampleSize)
+            .get();
+
+        const byRoute: Record<string, number[]> = {};
+        snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (typeof data.durationMs === 'number' && data.route) {
+                if (!byRoute[data.route]) byRoute[data.route] = [];
+                byRoute[data.route].push(data.durationMs);
+            }
+        });
+
+        return Object.entries(byRoute).map(([route, durations]) => {
+            const sorted = [...durations].sort((a, b) => a - b);
+            const p95Idx = Math.floor(sorted.length * 0.95);
+            return {
+                route,
+                count: durations.length,
+                avgMs: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+                p95Ms: sorted[p95Idx] ?? sorted[sorted.length - 1],
+                minMs: sorted[0],
+                maxMs: sorted[sorted.length - 1],
+            };
+        }).sort((a, b) => b.avgMs - a.avgMs);
+    }
 }

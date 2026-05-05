@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Patch, Param, Body, Query, Post, BadRequestException, NotFoundException, UseGuards, HttpCode } from '@nestjs/common';
+import { Controller, Get, Put, Patch, Delete, Param, Body, Query, Post, BadRequestException, NotFoundException, UseGuards, HttpCode } from '@nestjs/common';
 import { KnowledgeUnitsService } from './knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -71,6 +71,11 @@ export class KnowledgeUnitsController {
             throw new BadRequestException('Request body must be an array of Knowledge Units');
         }
         return this.knowledgeUnitsService.bulkIngest(body);
+    }
+
+    @Delete(':id')
+    async remove(@UserId() uid: string, @Param('id') id: string) {
+        return this.knowledgeUnitsService.cascadeDelete(uid, id);
     }
 
     @Post()

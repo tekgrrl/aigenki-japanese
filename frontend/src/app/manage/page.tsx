@@ -37,6 +37,10 @@ export default function KnowledgeManagementPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingKu, setEditingKu] = useState<KnowledgeUnit | null>(null);
 
+  // --- Delete State ---
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   // --- Search & Enroll State ---
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<KnowledgeUnit[]>([]);
@@ -178,6 +182,22 @@ export default function KnowledgeManagementPage() {
     }
   };
 
+  // --- Delete Handler ---
+  const handleDelete = async (kuId: string) => {
+    setDeletingId(kuId);
+    try {
+      const res = await apiFetch(`/api/knowledge-units/${kuId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      await fetchData();
+      window.dispatchEvent(new CustomEvent("refreshStats"));
+    } catch (err) {
+      setError("Failed to delete unit — please try again.");
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
+    }
+  };
+
   // --- Search & Enroll Handlers ---
   const handleSearchChange = (q: string) => {
     setSearchQuery(q);
@@ -256,6 +276,31 @@ export default function KnowledgeManagementPage() {
                 >
                   Edit
                 </button>
+
+                {confirmDeleteId === ku.id ? (
+                  <div className="ml-2 flex items-center gap-1">
+                    <button
+                      onClick={() => handleDelete(ku.id)}
+                      disabled={deletingId === ku.id}
+                      className="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white rounded transition-colors"
+                    >
+                      {deletingId === ku.id ? "Deleting…" : "Confirm"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="text-sm px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(ku.id)}
+                    className="ml-2 text-sm px-3 py-1 bg-gray-700 hover:bg-red-700 text-gray-300 hover:text-white rounded transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
 
               {ku.type === "Vocab" && ku.data.reading && (
