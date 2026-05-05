@@ -257,8 +257,16 @@ export class LessonsService {
       ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
       : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
 
-    const facetsSnap = await facetsCol.get();
-    const startedKuIds = new Set(facetsSnap.docs.map(d => d.data().kuId as string).filter(Boolean));
+    // Exclude KUs the user has already started (has review facets) OR that are already
+    // in their library via a UKU record (scenario-extracted words land here before being taught).
+    const [facetsSnap, ukuSnap] = await Promise.all([
+      facetsCol.get(),
+      this.db.collection('users').doc(uid).collection('user-kus').get(),
+    ]);
+    const seenKuIds = new Set([
+      ...facetsSnap.docs.map(d => d.data().kuId as string).filter(Boolean),
+      ...ukuSnap.docs.map(d => d.data().kuId as string).filter(Boolean),
+    ]);
 
     const kuSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
       .where('data.jlptLevel', '==', jlptLevel)
@@ -266,7 +274,7 @@ export class LessonsService {
       .get();
 
     return kuSnap.docs
-      .filter(d => !startedKuIds.has(d.id))
+      .filter(d => !seenKuIds.has(d.id))
       .slice(0, 10)
       .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
   }
