@@ -23,7 +23,8 @@ function slideCount(loaded: LoadedItem): number {
   const { item, lesson } = loaded;
   if (item.type === "Vocab" && lesson.type === "Vocab") {
     const vl = lesson as VocabLesson;
-    return 3 + ((vl.context_examples?.length ?? 0) > 0 ? 1 : 0);
+    const hasKanji = (vl.component_kanji?.length ?? 0) > 0;
+    return 3 + (hasKanji ? 1 : 0) + ((vl.context_examples?.length ?? 0) > 0 ? 1 : 0);
   }
   if (item.type === "Kanji") return 4;
   if (item.type === "Grammar" && lesson.type === "Grammar") {
@@ -65,6 +66,9 @@ async function enrollItem(item: QueueItem, lesson: Lesson): Promise<void> {
       facetsToCreate.push({ key: "audio", data: { ...base, contextExample: examples[Math.floor(Math.random() * examples.length)] } });
     }
     facetsToCreate.push({ key: "AI-Generated-Question", data: base });
+    for (const k of vl.component_kanji ?? []) {
+      facetsToCreate.push({ key: `Kanji-Component-${k.kanji}`, data: { meaning: k.meaning, onyomi: k.onyomi ?? [], kunyomi: k.kunyomi ?? [] } });
+    }
   } else if (lesson.type === "Kanji") {
     const kl = lesson as KanjiLesson;
     const base = { content: item.content, meaning: kl.meaning, onyomi: kl.onyomi, kunyomi: kl.kunyomi };
@@ -112,6 +116,28 @@ function VocabWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (tex
         </button>
       </div>
       <span className="text-sm text-shodo-ink-faint capitalize">{(vl.partOfSpeech ?? "").replace(/-/g, " ")}</span>
+    </div>
+  );
+}
+
+function VocabKanjiSlide({ loaded }: { loaded: LoadedItem }) {
+  const vl = loaded.lesson as VocabLesson;
+  const kanji = vl.component_kanji ?? [];
+  return (
+    <div className="flex flex-col gap-6 max-w-2xl mx-auto">
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Building Blocks</span>
+      <div className="text-4xl font-bold text-shodo-ink">{loaded.item.content}</div>
+      <div className="space-y-4">
+        {kanji.map((k, i) => (
+          <div key={i} className="flex items-baseline gap-4 border-b border-shodo-ink/5 pb-4 last:border-0 last:pb-0">
+            <span className="text-4xl font-bold text-shodo-stamp-red w-12 shrink-0">{k.kanji}</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-lg text-shodo-ink">{k.meaning}</span>
+              <span className="text-sm text-shodo-ink-faint">In this word: {k.reading}</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -291,12 +317,15 @@ function GrammarNotesSlide({ loaded }: { loaded: LoadedItem }) {
 function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text: string) => void) {
   const { item, lesson } = loaded;
   if (item.type === "Vocab" && lesson.type === "Vocab") {
-    switch (slideIdx) {
-      case 0: return <VocabWordSlide loaded={loaded} onAudio={onAudio} />;
-      case 1: return <VocabMeaningSlide loaded={loaded} />;
-      case 2: return <VocabDefinitionsSlide loaded={loaded} />;
-      case 3: return <VocabExampleSlide loaded={loaded} />;
-    }
+    const vl = lesson as VocabLesson;
+    const hasKanji = (vl.component_kanji?.length ?? 0) > 0;
+    let s = slideIdx;
+    if (s === 0) return <VocabWordSlide loaded={loaded} onAudio={onAudio} />;
+    s--;
+    if (hasKanji) { if (s === 0) return <VocabKanjiSlide loaded={loaded} />; s--; }
+    if (s === 0) return <VocabMeaningSlide loaded={loaded} />;
+    if (s === 1) return <VocabDefinitionsSlide loaded={loaded} />;
+    if (s === 2) return <VocabExampleSlide loaded={loaded} />;
   }
   if (item.type === "Kanji") {
     switch (slideIdx) {
@@ -362,6 +391,8 @@ export default function LessonSessionPage() {
 
   // Load queue and generate all lessons upfront
   useEffect(() => {
+    if (fetchRef.current) return;
+    fetchRef.current = true;
     (async () => {
       try {
         const queueRes = await apiFetch("/api/lessons/queue");
