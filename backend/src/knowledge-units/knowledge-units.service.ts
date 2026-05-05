@@ -1,5 +1,13 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
+import {
+    FIRESTORE_CONNECTION,
+    KNOWLEDGE_UNITS_COLLECTION,
+    LESSONS_COLLECTION,
+    QUESTIONS_COLLECTION,
+    REVIEW_FACETS_COLLECTION,
+    USER_KUS_SUBCOLLECTION,
+    QUESTION_STATES_SUBCOLLECTION,
+} from '../firebase/firebase.module';
 import { Firestore, Timestamp, DocumentReference } from '@google-cloud/firestore';
 import { Inject } from '@nestjs/common';
 // Removed CURRENT_USER_ID import
@@ -365,5 +373,52 @@ export class KnowledgeUnitsService {
         const ku = await this.findOneById(id);
         if (!ku) throw new NotFoundException(`Knowledge Unit ${id} not found`);
         return ku;
+    }
+
+    async cascadeDelete(uid: string, kuId: string): Promise<{ deleted: Record<string, number> }> {
+        const userRef = this.db.collection('users').doc(uid);
+        const deleted: Record<string, number> = {};
+
+        const deleteSubcollectionDocs = async (subcollection: string, field: string) => {
+            const snap = await userRef.collection(subcollection).where(field, '==', kuId).get();
+            if (snap.empty) return 0;
+            const batch = this.db.batch();
+            snap.docs.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+            return snap.size;
+        };
+
+        deleted['review-facets'] = await deleteSubcollectionDocs(REVIEW_FACETS_COLLECTION, 'kuId');
+        deleted['user-kus'] = await deleteSubcollectionDocs(USER_KUS_SUBCOLLECTION, 'kuId');
+        deleted['feed'] = await deleteSubcollectionDocs('feed', 'kuId');
+
+        // Global: questions (and their per-user question-states)
+        const questionsSnap = await this.db.collection(QUESTIONS_COLLECTION).where('kuId', '==', kuId).get();
+        if (!questionsSnap.empty) {
+            // Delete question-states for each question
+            const stateSnap = await userRef.collection(QUESTION_STATES_SUBCOLLECTION)
+                .where('kuId', '==', kuId).get();
+            const batch = this.db.batch();
+            questionsSnap.docs.forEach(d => batch.delete(d.ref));
+            stateSnap.docs.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+            deleted['questions'] = questionsSnap.size;
+            deleted['question-states'] = stateSnap.size;
+        }
+
+        // Global: lesson doc (keyed by kuId)
+        const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
+        const lessonSnap = await lessonRef.get();
+        if (lessonSnap.exists) {
+            await lessonRef.delete();
+            deleted['lessons'] = 1;
+        }
+
+        // Global: KU itself
+        await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).delete();
+        deleted['knowledge-units'] = 1;
+
+        this.logger.log(`Cascade deleted KU ${kuId} for user ${uid}: ${JSON.stringify(deleted)}`);
+        return { deleted };
     }
 }

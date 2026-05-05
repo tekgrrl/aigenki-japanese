@@ -28,9 +28,9 @@ export default function EditKnowledgeUnitModal({
   useEffect(() => {
     if (knowledgeUnit) {
       setContent(knowledgeUnit.content || "");
-      if (knowledgeUnit.type === "Vocab") {
+      if (knowledgeUnit.type === "Vocab" || knowledgeUnit.type === "Kanji") {
         setReading(knowledgeUnit.data?.reading || "");
-        setDefinition(knowledgeUnit.data?.definition || "");
+        setDefinition(knowledgeUnit.data?.definition || knowledgeUnit.data?.meaning || "");
         setJlptLevel(knowledgeUnit.data?.jlptLevel || "");
         setWanikaniLevel(knowledgeUnit.data?.wanikaniLevel || "");
       } else {
@@ -48,7 +48,7 @@ export default function EditKnowledgeUnitModal({
 
   const hasChanges = () => {
     if (!knowledgeUnit) return false;
-    const vocabData = knowledgeUnit.type === "Vocab" ? knowledgeUnit.data : null;
+    const vocabData = (knowledgeUnit.type === "Vocab" || knowledgeUnit.type === "Kanji") ? knowledgeUnit.data : null;
     const currentReading = vocabData?.reading || "";
     const currentDefinition = vocabData?.definition || "";
     const currentJlptLevel = vocabData?.jlptLevel || "";
@@ -145,8 +145,8 @@ export default function EditKnowledgeUnitModal({
             />
           </div>
 
-          {/* Vocab Specific Fields */}
-          {knowledgeUnit.type === "Vocab" && (
+          {/* Vocab / Kanji Fields */}
+          {(knowledgeUnit.type === "Vocab" || knowledgeUnit.type === "Kanji") && (
             <>
               <div className="grid grid-cols-2 gap-4">
                 <div>

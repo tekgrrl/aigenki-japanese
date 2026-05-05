@@ -1143,4 +1143,82 @@ export class GeminiService implements OnModuleInit {
       await this.apilogService.completeLog(logRef, updateData).catch(e => this.logger.error(e));
     }
   }
+
+  async runPromptTest(opts: {
+    systemPrompt: string;
+    userMessage: string;
+    toolDeclarations: FunctionDeclaration[];
+    toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>>;
+    responseSchema?: Record<string, unknown>;
+  }): Promise<{ rawText: string; parsedJson: any; toolCalls: Array<{ fn: string; args: any; response: any }>; durationMs: number }> {
+    const { systemPrompt, userMessage, toolDeclarations, toolHandlers, responseSchema } = opts;
+    const start = performance.now();
+    const toolCallLog: Array<{ fn: string; args: any; response: any }> = [];
+
+    const contents: Content[] = [
+      { role: 'user', parts: [{ text: userMessage || '(no user message)' }] },
+    ];
+
+    // Tool-calling loop (cap 5)
+    if (toolDeclarations.length > 0) {
+      for (let i = 0; i < 5; i++) {
+        const response = await this.client.models.generateContent({
+          model: this.modelName,
+          contents,
+          config: {
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            tools: [{ functionDeclarations: toolDeclarations }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+          },
+        });
+
+        const calls = response.functionCalls;
+        if (!calls || calls.length === 0) break;
+
+        contents.push({ role: 'model', parts: response.candidates![0].content!.parts! });
+
+        const responseParts = await Promise.all(
+          calls.map(async (fc) => {
+            const handler = toolHandlers[fc.name!];
+            const args = (fc.args as Record<string, unknown>) ?? {};
+            const handlerResult = handler
+              ? await handler(args)
+              : { error: `Unknown function: ${fc.name}` };
+            toolCallLog.push({ fn: fc.name!, args, response: handlerResult });
+            return createPartFromFunctionResponse(fc.id ?? fc.name!, fc.name!, handlerResult);
+          }),
+        );
+
+        contents.push({ role: 'user', parts: responseParts });
+      }
+    }
+
+    // Final generation
+    const finalConfig: any = {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+    };
+    if (responseSchema) {
+      finalConfig.responseMimeType = 'application/json';
+      finalConfig.responseSchema = responseSchema;
+    }
+
+    const finalResponse = await this.client.models.generateContent({
+      model: this.modelName,
+      contents,
+      config: finalConfig,
+    });
+
+    const rawText = finalResponse.text ?? '';
+    let parsedJson: any = null;
+    if (responseSchema) {
+      try { parsedJson = JSON.parse(rawText); } catch { /* leave null */ }
+    }
+
+    return {
+      rawText,
+      parsedJson,
+      toolCalls: toolCallLog,
+      durationMs: Math.round(performance.now() - start),
+    };
+  }
 }

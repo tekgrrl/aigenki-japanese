@@ -488,7 +488,7 @@ export default function LessonSessionPage() {
     return (
       <main className="container mx-auto max-w-2xl p-8">
         <div>
-          <h1 className="text-2xl font-bold text-shodo-ink mb-2">Preparing your lesson</h1>
+          <h1 className="text-2xl font-bold text-shodo-ink mb-2">Preparing your Lessons</h1>
           <p className="text-shodo-ink-faint mb-8 text-sm">
             {totalCount === 0 ? "Finding items…" : `Generating ${loadedCount} of ${totalCount}`}
           </p>
@@ -594,7 +594,7 @@ export default function LessonSessionPage() {
       ) : (
         <div>
           <div className="text-5xl mb-6">✨</div>
-          <h1 className="text-3xl font-bold text-shodo-ink mb-2">Lesson complete!</h1>
+          <h1 className="text-3xl font-bold text-shodo-ink mb-2">Lessons Complete</h1>
           <p className="text-shodo-ink-light mb-2">
             You studied {loadedItems.length} {loadedItems.length === 1 ? "item" : "items"}.
           </p>
