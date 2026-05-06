@@ -42,6 +42,16 @@ export interface GrammarNote {
     };
 }
 
+export interface GrammarMatch {
+    kuId: string;
+    exampleFromConversation: {
+        japanese: string;
+        english: string;
+        fragments: string[];
+        accepted_alternatives: string[];
+    };
+}
+
 export interface ScenarioEvaluation {
     success: boolean;
     rating: number;
@@ -93,7 +103,8 @@ export interface Scenario {
 
     dialogue: ScenarioDialogueLine[];
     extractedKUs: ExtractedKU[];
-    grammarNotes: GrammarNote[];
+    grammarNotes?: GrammarNote[];
+    grammarMatches?: GrammarMatch[];
 
     /** @deprecated - migrating to User state models */
     state: ScenarioState;
@@ -143,7 +154,8 @@ export interface ScenarioTemplate {
     };
     dialogue: ScenarioDialogueLine[];
     extractedKUs: ExtractedKU[];
-    grammarNotes: GrammarNote[];
+    grammarNotes?: GrammarNote[];
+    grammarMatches?: GrammarMatch[];
     roles?: {
         user: string;
         ai: string | string[];

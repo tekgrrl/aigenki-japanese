@@ -8,7 +8,7 @@ import {
     USER_KUS_SUBCOLLECTION,
     QUESTION_STATES_SUBCOLLECTION,
 } from '../firebase/firebase.module';
-import { Firestore, Timestamp, DocumentReference } from '@google-cloud/firestore';
+import { Firestore, Timestamp, DocumentReference, FieldValue } from '@google-cloud/firestore';
 import { Inject } from '@nestjs/common';
 // Removed CURRENT_USER_ID import
 import { KnowledgeUnit } from '@/types';
@@ -341,32 +341,29 @@ export class KnowledgeUnitsService {
         } as unknown as KnowledgeUnit;
     }
 
-    async ensureGrammarKU(note: GrammarNote): Promise<string> {
+    async ensureGrammarKU(note: GrammarNote): Promise<string | null> {
         const content = note.pattern ?? note.title;
-        const existing = await this.findByContent(content, 'Grammar');
 
-        if (existing) {
-            return existing.id;
+        // Exact match first
+        const existing = await this.findByContent(content, 'Grammar');
+        if (existing) return existing.id;
+
+        // Prefix search fallback — handles minor AI wording variations
+        const prefixSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
+            .where('type', '==', 'Grammar')
+            .where('content', '>=', content)
+            .where('content', '<=', content + '')
+            .limit(1)
+            .get();
+
+        if (!prefixSnap.empty) {
+            const matched = prefixSnap.docs[0];
+            this.logger.log(`Grammar KU fuzzy-matched "${content}" → "${matched.data().content}"`);
+            return matched.id;
         }
 
-        const newRef = this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc();
-        await newRef.set({
-            content,
-            type: 'Grammar',
-            data: {
-                title: note.title,
-                explanation: note.explanation,
-                exampleInContext: note.exampleInContext,
-            },
-            status: 'learning',
-            facet_count: 0,
-            createdAt: Timestamp.now(),
-            relatedUnits: [],
-            personalNotes: '',
-        });
-
-        this.logger.log(`Created Grammar KU for pattern "${content}"`);
-        return newRef.id;
+        this.logger.warn(`Grammar KU not found in pool for pattern "${content}" — skipping creation`);
+        return null;
     }
 
     async findOne(id: string): Promise<KnowledgeUnit> {
@@ -420,5 +417,41 @@ export class KnowledgeUnitsService {
 
         this.logger.log(`Cascade deleted KU ${kuId} for user ${uid}: ${JSON.stringify(deleted)}`);
         return { deleted };
+    }
+
+    async migrateGrammarJlptLevel(): Promise<{ migrated: number; skipped: number }> {
+        // Grammar KUs imported from corpus have jlptLevel at top level.
+        // This migrates them to data.jlptLevel to be consistent with Vocab/Kanji.
+        const snap = await this.db
+            .collection(KNOWLEDGE_UNITS_COLLECTION)
+            .where('type', '==', 'Grammar')
+            .get();
+
+        let migrated = 0;
+        let skipped = 0;
+        const BATCH_SIZE = 500;
+
+        const toMigrate = snap.docs.filter(doc => {
+            const d = doc.data();
+            return d.jlptLevel && !d.data?.jlptLevel;
+        });
+
+        for (let i = 0; i < toMigrate.length; i += BATCH_SIZE) {
+            const chunk = toMigrate.slice(i, i + BATCH_SIZE);
+            const batch = this.db.batch();
+            for (const doc of chunk) {
+                const jlptLevel = doc.data().jlptLevel;
+                batch.update(doc.ref, {
+                    'data.jlptLevel': jlptLevel,
+                    jlptLevel: FieldValue.delete(),
+                });
+            }
+            await batch.commit();
+            migrated += chunk.length;
+        }
+
+        skipped = snap.size - migrated;
+        this.logger.log(`migrateGrammarJlptLevel: migrated=${migrated}, skipped=${skipped}`);
+        return { migrated, skipped };
     }
 }

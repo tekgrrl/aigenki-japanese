@@ -29,7 +29,7 @@ function slideCount(loaded: LoadedItem): number {
   if (item.type === "Kanji") return 4;
   if (item.type === "Grammar" && lesson.type === "Grammar") {
     const gl = lesson as GrammarLesson;
-    return 3 + (gl.notes ? 1 : 0);
+    return 2 + (gl.notes ? 1 : 0) + (gl.examples?.length ?? 0);
   }
   return 1;
 }
@@ -126,14 +126,30 @@ function VocabKanjiSlide({ loaded }: { loaded: LoadedItem }) {
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Building Blocks</span>
-      <div className="text-4xl font-bold text-shodo-ink">{loaded.item.content}</div>
-      <div className="space-y-4">
+
+      {/* The word — framed and centred so it reads as the subject */}
+      <div className="flex justify-center">
+        <div className="px-10 py-4 rounded-xl bg-shodo-paper-dark border border-shodo-ink/10">
+          <span className="text-5xl font-bold text-shodo-ink">{loaded.item.content}</span>
+        </div>
+      </div>
+
+      {/* Visual connector */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-shodo-ink/10" />
+        <span className="text-xs text-shodo-ink-faint uppercase tracking-widest">made of</span>
+        <div className="flex-1 h-px bg-shodo-ink/10" />
+      </div>
+
+      {/* Component kanji — each in its own card */}
+      <div className="space-y-3">
         {kanji.map((k, i) => (
-          <div key={i} className="flex items-baseline gap-4 border-b border-shodo-ink/5 pb-4 last:border-0 last:pb-0">
-            <span className="text-4xl font-bold text-shodo-stamp-red w-12 shrink-0">{k.kanji}</span>
+          <div key={i} className="flex items-center gap-4 px-4 py-3 rounded-lg bg-shodo-paper-dark">
+            <span className="text-4xl font-bold text-shodo-stamp-red w-14 text-center shrink-0">{k.kanji}</span>
+            <div className="w-px self-stretch bg-shodo-ink/10" />
             <div className="flex flex-col gap-0.5">
-              <span className="text-lg text-shodo-ink">{k.meaning}</span>
-              <span className="text-sm text-shodo-ink-faint">In this word: {k.reading}</span>
+              <span className="text-lg text-shodo-ink font-medium">{k.meaning}</span>
+              <span className="text-sm text-shodo-ink-faint">{k.reading}</span>
             </div>
           </div>
         ))}
@@ -283,22 +299,22 @@ function GrammarMeaningSlide({ loaded }: { loaded: LoadedItem }) {
   );
 }
 
-function GrammarExampleSlide({ loaded }: { loaded: LoadedItem }) {
+function GrammarExampleSlide({ loaded, exampleIdx }: { loaded: LoadedItem; exampleIdx: number }) {
   const gl = loaded.lesson as GrammarLesson;
+  const ex = gl.examples[exampleIdx];
+  if (!ex) return null;
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
-      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">
-        {gl.examples.length > 1 ? `Examples (${gl.examples.length})` : "Example"}
-      </span>
-      <div className="text-4xl font-bold text-shodo-matcha">{gl.pattern}</div>
-      <div className="space-y-6">
-        {gl.examples.slice(0, 2).map((ex, i) => (
-          <div key={i}>
-            <p className="text-2xl text-shodo-ink">{ex.japanese}</p>
-            <p className="text-lg text-shodo-ink-light mt-1">{ex.english}</p>
-          </div>
-        ))}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">
+          Example {exampleIdx + 1} of {gl.examples.length}
+        </span>
+        {ex.context && (
+          <span className="text-xs text-shodo-ink-faint italic">{ex.context}</span>
+        )}
       </div>
+      <p className="text-3xl text-shodo-ink leading-relaxed">{ex.japanese}</p>
+      <p className="text-xl text-shodo-ink-light mt-2">{ex.english}</p>
     </div>
   );
 }
@@ -336,12 +352,14 @@ function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text: strin
     }
   }
   if (item.type === "Grammar" && lesson.type === "Grammar") {
-    switch (slideIdx) {
-      case 0: return <GrammarPatternSlide loaded={loaded} />;
-      case 1: return <GrammarMeaningSlide loaded={loaded} />;
-      case 2: return <GrammarExampleSlide loaded={loaded} />;
-      case 3: return <GrammarNotesSlide loaded={loaded} />;
-    }
+    const gl = lesson as GrammarLesson;
+    let s = slideIdx;
+    if (s === 0) return <GrammarPatternSlide loaded={loaded} />;
+    s--;
+    if (s === 0) return <GrammarMeaningSlide loaded={loaded} />;
+    s--;
+    if (gl.notes) { if (s === 0) return <GrammarNotesSlide loaded={loaded} />; s--; }
+    if (s < gl.examples.length) return <GrammarExampleSlide loaded={loaded} exampleIdx={s} />;
   }
   return null;
 }

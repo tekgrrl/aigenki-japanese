@@ -702,6 +702,34 @@ Library page (`/learn`): Kanji items now show `data.meaning` in the hint column 
 
 ---
 
+**Admin tooling, lesson session polish, cascade delete, manage improvements (2026-05-06)**
+
+- **Admin prompt tester** (`frontend/src/app/admin/prompt-tester/page.tsx`) — left panel: preset dropdown (6 presets covering vocab and concept question types), system prompt, user message, tool toggle + UID field, response schema, Run button. Right panel: latency badge, collapsible tool-call cards, result display.
+- **API log latency graphs** (`frontend/src/app/admin/logs/page.tsx`) — new Latency tab. Per-route bar chart: avg (solid) + p95 (faint overlay); green < 3 s, amber < 8 s, red ≥ 8 s. `ApilogService.getLatencyStats(sampleSize)` groups by route and computes avg/p95/min/max. `GET /apilogs/latency` endpoint added.
+- **"Start Learning" button** on `/learn` page — inline style `backgroundColor: "#2E4B75"` (Tailwind JIT doesn't emit custom colour classes for first-use values; inline style is guaranteed). `useRouter` for navigation.
+- **Lesson session label changes** — "Preparing your Lessons" (was "Preparing your Session"); "Lessons Complete" (was "Session Complete").
+- **Grammar lesson slides** — `slideCount` for Grammar: `2 + (gl.notes ? 1 : 0) + (gl.examples?.length ?? 0)`. `renderSlide` Grammar branch uses dynamic index arithmetic: Pattern → Meaning → Notes (if any) → one slide per example. `GrammarExampleSlide` accepts `exampleIdx`.
+- **Vocab word slide** — word in a centred pill, "made of" section divider, component cards; other slides remain left-aligned.
+- **Cascade delete** (`KnowledgeUnitsService.cascadeDelete(uid, kuId)`) — deletes in order: `review-facets`, `user-kus`, `feed`, `questions` + `question-states` (per-user), `lessons/{kuId}`, `knowledge-units/{kuId}`. Returns `{ deleted: Record<string, number> }`. `DELETE /api/knowledge-units/:id` endpoint added.
+- **Delete button on `/manage`** — two-click UI (Delete → Confirm + ✕). `confirmDeleteId` / `deletingId` state. Calls `DELETE /api/knowledge-units/:id`.
+- **JLPT + WaniKani fields in edit modal** for Kanji type (`EditKnowledgeUnitModal.tsx`). Previously Vocab-only. `useEffect`, `hasChanges`, and JSX condition updated to `type === 'Vocab' || type === 'Kanji'`. Kanji definition falls back to `data.meaning`.
+
+---
+
+**Grammar in learning queue + tool-based grammar matching (2026-05-06)**
+
+- **`LessonsService.getQueue`** — split corpus queries: `Vocab`/`Kanji` get up to 7 slots; `Grammar` gets a dedicated parallel query with up to 3 slots. Enrolled-but-not-started Grammar from `user-kus` (no facets yet) is prioritised first, then the corpus fills remaining Grammar slots. Final result: `[...grammarItems, ...vocabKanjiItems].slice(0, 10)`. Requires Firestore composite index on `(type, data.jlptLevel)`.
+- **`GET_GRAMMAR_PATTERNS_DECLARATION`** added to `backend/src/prompts/curriculum.ts` — tool that instructs Gemini to call `get_grammar_patterns(jlptLevel)` before finalising scenario grammar references.
+- **`generateWithTools` `responseSchema` made optional** — when absent, the final turn uses `responseMimeType: 'application/json'` without a strict schema. Allows scenario generation to benefit from the tool loop without requiring a fully-specified output schema.
+- **`GeminiService.generateScenario`** — signature extended with optional `toolDeclarations` + `toolHandlers`; when provided, delegates to `generateWithTools` (tool-call loop → JSON output). Also changed return type from `string` to `any` (parsed object). Falls back to the original direct `generateContent` path when no tools are passed.
+- **Scenario prompts** (`buildArchitectPrompt`, `buildImportPrompt`) — grammar requirement rewritten: AI must call `get_grammar_patterns(level)`, then select 1–2 patterns from the returned pool. Output schema replaces `grammarNotes` with `grammarMatches: [{ kuId, exampleFromConversation: { japanese, english, fragments, accepted_alternatives } }]`. `kuId` must be an exact ID returned by the tool — never invented.
+- **`GrammarMatch` interface** added to `backend/src/types/scenario.ts`. `Scenario.grammarNotes` made optional (backward compat). `Scenario.grammarMatches?: GrammarMatch[]` added.
+- **`ScenariosService.buildGrammarToolHandlers()`** — private method. `get_grammar_patterns` handler queries `knowledge-units` for `type === 'Grammar'` + `data.jlptLevel === level`, returns `{ patterns: [{ kuId, content, title, explanation }] }`.
+- **`ScenariosService.advanceState`** — `grammarMatches` path (new): iterates matches, calls `userKnowledgeUnitsService.create` + `lessonsService.createUserGrammarLesson` directly using the exact `kuId` — no fuzzy matching. Legacy `grammarNotes` path retained as fallback for scenarios created before this change.
+- **Grammar KU JLPT level migration** — imported Grammar KUs had `jlptLevel` at the document root instead of `data.jlptLevel` (inconsistent with Vocab/Kanji). `KnowledgeUnitsService.migrateGrammarJlptLevel()` batch-updates all affected Grammar KUs: copies `jlptLevel` → `data.jlptLevel`, deletes the root field. `POST /api/knowledge-units/migrate/grammar-jlpt-level` admin endpoint. 333 records migrated; 18 without any level skipped.
+
+---
+
 - **Firebase Console prerequisites** for project `gen-lang-client-0878434798`:
   1. Authentication → Sign-in method → **Email/Password** enabled.
   2. Authentication → Sign-in method → **Email link (passwordless sign-in)** enabled (sub-toggle under Email/Password).
