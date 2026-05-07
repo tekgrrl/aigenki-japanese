@@ -115,3 +115,21 @@ export const GET_USER_LEVEL_DECLARATION: FunctionDeclaration = {
     required: [],
   },
 };
+
+export const GET_GRAMMAR_PATTERNS_DECLARATION: FunctionDeclaration = {
+  name: 'get_grammar_patterns',
+  description:
+    'Returns the available Grammar KUs in the learner pool for a given JLPT level. ' +
+    'Call this to see which grammar patterns you can reference. ' +
+    'Your grammarMatches MUST only contain kuIds returned by this tool.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      jlptLevel: {
+        type: Type.STRING,
+        description: 'JLPT level to query (e.g. "N4"). Returns patterns at that level.',
+      },
+    },
+    required: ['jlptLevel'],
+  },
+};

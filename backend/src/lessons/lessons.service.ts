@@ -257,26 +257,67 @@ export class LessonsService {
       ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
       : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
 
-    // Exclude KUs the user has already started (has review facets) OR that are already
-    // in their library via a UKU record (scenario-extracted words land here before being taught).
     const [facetsSnap, ukuSnap] = await Promise.all([
       facetsCol.get(),
       this.db.collection('users').doc(uid).collection('user-kus').get(),
     ]);
-    const seenKuIds = new Set([
-      ...facetsSnap.docs.map(d => d.data().kuId as string).filter(Boolean),
-      ...ukuSnap.docs.map(d => d.data().kuId as string).filter(Boolean),
+
+    // Separate facet KU ids from UKU KU ids so we can compute enrolled-but-not-started
+    const facetKuIds = new Set(facetsSnap.docs.map(d => d.data().kuId as string).filter(Boolean));
+    const ukuKuIds = ukuSnap.docs.map(d => d.data().kuId as string).filter(Boolean);
+    const seenKuIds = new Set([...facetKuIds, ...ukuKuIds]);
+
+    // ── Path 1a: Vocab / Kanji corpus ─────────────────────────────────────
+    // ── Path 1b: Grammar corpus ────────────────────────────────────────────
+    // Run separately so Grammar always gets guaranteed slots regardless of
+    // how many Vocab/Kanji items exist at the same JLPT level.
+    const [vocabKanjiSnap, grammarCorpusSnap] = await Promise.all([
+      this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
+        .where('data.jlptLevel', '==', jlptLevel)
+        .where('type', 'in', ['Vocab', 'Kanji'])
+        .limit(200)
+        .get(),
+      this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
+        .where('data.jlptLevel', '==', jlptLevel)
+        .where('type', '==', 'Grammar')
+        .limit(50)
+        .get(),
     ]);
 
-    const kuSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
-      .where('data.jlptLevel', '==', jlptLevel)
-      .limit(200)
-      .get();
-
-    return kuSnap.docs
+    const vocabKanjiItems = vocabKanjiSnap.docs
       .filter(d => !seenKuIds.has(d.id))
-      .slice(0, 10)
+      .slice(0, 7)
       .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+
+    const grammarCorpusItems = grammarCorpusSnap.docs
+      .filter(d => !seenKuIds.has(d.id))
+      .slice(0, 3)
+      .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+
+    // ── Path 2: Enrolled Grammar queue ────────────────────────────────────
+    // Grammar KUs the user enrolled via a scenario (UKU exists) but hasn't
+    // started in review yet (no facets).
+    const enrolledNotStarted = ukuKuIds.filter(id => !facetKuIds.has(id));
+
+    let enrolledGrammarItems: { kuId: string; content: string; type: string }[] = [];
+    if (enrolledNotStarted.length > 0) {
+      const chunk = enrolledNotStarted.slice(0, 30);
+      const enrolledSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
+        .where('__name__', 'in', chunk)
+        .get();
+      enrolledGrammarItems = enrolledSnap.docs
+        .filter(d => d.data().type === 'Grammar')
+        .slice(0, 3)
+        .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+    }
+
+    // Enrolled grammar first, then corpus grammar, then vocab/kanji
+    const grammarItems = [
+      ...enrolledGrammarItems,
+      ...grammarCorpusItems.filter(g => !enrolledGrammarItems.some(e => e.kuId === g.kuId)),
+    ].slice(0, 3);
+
+    return [...grammarItems, ...vocabKanjiItems].slice(0, 10);
   }
 
   async processBatch(uid: string, vocabValues: { id: string; content: string }[]) {

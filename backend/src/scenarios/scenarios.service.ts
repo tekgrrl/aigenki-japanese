@@ -15,6 +15,8 @@ import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, REVIEW_FACETS_COLLECTION } 
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ALLOWED_USER_ROLES, ALLOWED_AI_ROLES, buildArchitectPrompt, buildImportPrompt, buildChatSystemPrompt } from '../prompts/scenario.prompts';
+import { GET_GRAMMAR_PATTERNS_DECLARATION } from '../prompts/curriculum';
+import { GrammarMatch } from '../types/scenario';
 
 import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
 
@@ -38,6 +40,33 @@ export class ScenariosService {
       return this.db.collection(SCENARIOS_COLLECTION);
     }
     return this.db.collection('users').doc(uid).collection(SCENARIOS_COLLECTION);
+  }
+
+  private buildGrammarToolHandlers() {
+    return {
+      get_grammar_patterns: async (args: Record<string, unknown>) => {
+        const jlptLevel = (args.jlptLevel as string) || 'N4';
+        const snap = await this.db
+          .collection('knowledge-units')
+          .where('type', '==', 'Grammar')
+          .where('data.jlptLevel', '==', jlptLevel)
+          .limit(60)
+          .get();
+
+        const patterns = snap.docs.map(doc => {
+          const d = doc.data();
+          return {
+            kuId: doc.id,
+            content: d.content as string,
+            title: (d.data as any)?.title ?? '',
+            explanation: (d.data as any)?.explanation ?? '',
+          };
+        });
+
+        this.logger.log(`get_grammar_patterns(${jlptLevel}) → ${patterns.length} patterns`);
+        return { patterns };
+      },
+    };
   }
 
   async getAllScenarios(userId: string, limitDays?: number, state?: string): Promise<Scenario[]> {
@@ -95,8 +124,11 @@ export class ScenariosService {
     const prompt = buildArchitectPrompt(resolvedDto);
 
     try {
-      const jsonString = await this.geminiService.generateScenario(prompt);
-      const data = JSON.parse(jsonString);
+      const data = await this.geminiService.generateScenario(
+        prompt,
+        [GET_GRAMMAR_PATTERNS_DECLARATION],
+        this.buildGrammarToolHandlers(),
+      );
 
       const docRef = this.scenariosColRef(userId).doc();
       const id = docRef.id;
@@ -128,7 +160,7 @@ export class ScenariosService {
           status: 'new',
           jlptLevel: ku.jlptLevel ?? null,
         })),
-        grammarNotes: data.grammarNotes,
+        grammarMatches: Array.isArray(data.grammarMatches) ? data.grammarMatches : [],
         state: 'encounter',
         createdAt: Timestamp.now(),
         chatHistory: [],
@@ -179,7 +211,8 @@ export class ScenariosService {
         status: 'new' as const,
         jlptLevel: ku.jlptLevel ?? null,
       })),
-      grammarNotes: data.grammarNotes ?? [],
+      grammarMatches: Array.isArray(data.grammarMatches) ? data.grammarMatches : [],
+      ...(data.grammarNotes ? { grammarNotes: data.grammarNotes } : {}),
       state: 'encounter' as const,
       createdAt: Timestamp.now(),
       chatHistory: [],
@@ -213,8 +246,11 @@ export class ScenariosService {
     });
 
     try {
-      const jsonString = await this.geminiService.generateScenario(prompt);
-      const data = JSON.parse(jsonString);
+      const data = await this.geminiService.generateScenario(
+        prompt,
+        [GET_GRAMMAR_PATTERNS_DECLARATION],
+        this.buildGrammarToolHandlers(),
+      );
 
       const docRef = this.scenariosColRef(uid).doc();
       const id = docRef.id;
@@ -245,7 +281,7 @@ export class ScenariosService {
           status: 'new',
           jlptLevel: ku.jlptLevel ?? null,
         })),
-        grammarNotes: data.grammarNotes,
+        grammarMatches: Array.isArray(data.grammarMatches) ? data.grammarMatches : [],
         state: 'encounter',
         createdAt: Timestamp.now(),
         chatHistory: [],
@@ -316,11 +352,31 @@ export class ScenariosService {
           updateData.extractedKUs = updatedKUs;
         }
 
-        // Emit Grammar KUs + UKUs + UserGrammarLessons for each grammar note
-        if (scenario.grammarNotes && scenario.grammarNotes.length > 0) {
+        // Link Grammar KUs — prefer grammarMatches (tool-based, exact kuIds) over legacy grammarNotes
+        if (scenario.grammarMatches && scenario.grammarMatches.length > 0) {
+          let linked = 0;
+          for (const match of scenario.grammarMatches) {
+            try {
+              await this.userKnowledgeUnitsService.create(uid, match.kuId, { type: 'scenario', id: scenario.id });
+              await this.lessonsService.createUserGrammarLesson(
+                uid,
+                match.kuId,
+                { sourceType: 'scenario', sourceId: scenario.id, sourceTitle: scenario.title },
+                match.exampleFromConversation,
+              );
+              linked++;
+            } catch (err) {
+              this.logger.error(`Failed to link grammar match kuId="${match.kuId}"`, err);
+            }
+          }
+          this.logger.log(`Grammar matches: linked ${linked}/${scenario.grammarMatches.length} for scenarioId=${scenario.id}`);
+        } else if (scenario.grammarNotes && scenario.grammarNotes.length > 0) {
+          // Legacy path: scenarios created before tool-based matching
+          let matched = 0;
           for (const note of scenario.grammarNotes) {
             try {
               const kuId = await this.knowledgeUnitsService.ensureGrammarKU(note);
+              if (!kuId) continue;
               await this.userKnowledgeUnitsService.create(uid, kuId, { type: 'scenario', id: scenario.id });
               await this.lessonsService.createUserGrammarLesson(
                 uid,
@@ -328,11 +384,12 @@ export class ScenariosService {
                 { sourceType: 'scenario', sourceId: scenario.id, sourceTitle: scenario.title },
                 note.exampleInContext,
               );
+              matched++;
             } catch (err) {
               this.logger.error(`Failed to process grammar note "${note.title}"`, err);
             }
           }
-          this.logger.log(`Processed ${scenario.grammarNotes.length} grammar notes for uid=${uid} scenarioId=${scenario.id}`);
+          this.logger.log(`Grammar notes (legacy): ${matched}/${scenario.grammarNotes.length} matched to pool for scenarioId=${scenario.id}`);
         }
 
         newState = 'drill';

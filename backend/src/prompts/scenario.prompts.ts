@@ -47,7 +47,7 @@ Create a "Genki-style" learning scenario for an ADULT traveler/expat (not a stud
 **Requirements:**
 1. **Dialogue:** Create a natural, realistic dialogue (6-12 lines). Use a mix of polite and casual forms appropriate for the setting.
 2. **Vocabulary:** STRICTLY LIMIT vocabulary to ${dto.difficulty} level. Introduce exactly 3-5 "Target Words" required for the specific goal.
-3. **Grammar Notes:** Identify 1-2 key grammar points used in the dialogue and explain them like a textbook (Genki style).
+3. **Grammar Matches:** Call \`get_grammar_patterns("${dto.difficulty}")\` to see the available grammar pool. Identify 1-2 patterns from those results that naturally appear in your dialogue. For each, provide a short example sentence taken directly from the conversation (with fragments for the typing exercise). If no patterns from the pool fit the dialogue, return an empty \`grammarMatches\` array.
 4. **Visual Context:** Provide a descriptive prompt that could be used to generate an image of the scene.
 5. **Role Constraints:**
 ${dto.userRole && dto.aiRole
@@ -64,8 +64,9 @@ ${dto.userRole && dto.aiRole
      - \`reading\`: Kana reading ONLY (e.g., "ほんや"). No Romaji.
      - \`meaning\`: English definition ONLY.
      - \`jlptLevel\`: JLPT level hint for this word (e.g., "N4"). MUST be one of: N5, N4, N3, N2, N1. Use your best judgement for the level of each individual word.
-   - For \`grammarNotes\`:
-     - \`pattern\`: The extractable grammar pattern in isolation (e.g., "～をお願いします", "～ている"). This should be concise and reusable across contexts.
+   - For \`grammarMatches\`:
+     - \`kuId\`: The exact kuId returned by \`get_grammar_patterns\`. Never invent an ID.
+     - \`exampleFromConversation\`: A sentence taken from your dialogue that demonstrates the pattern. Fragments must follow the fragment contract below.
 
 **Output Schema (Return ONLY raw JSON):**
 {
@@ -98,14 +99,12 @@ ${dto.userRole && dto.aiRole
       "jlptLevel": "N4"
     }
   ],
-  "grammarNotes": [
+  "grammarMatches": [
     {
-      "pattern": "The extractable grammar pattern, e.g. ～をお願いします",
-      "title": "Grammar Point Name",
-      "explanation": "Clear explanation",
-      "exampleInContext": {
-        "japanese": "The example sentence in Japanese only, no furigana or Romaji",
-        "english": "The English translation of the example",
+      "kuId": "exact-ku-id-from-tool",
+      "exampleFromConversation": {
+        "japanese": "Sentence from the dialogue in Japanese only, no furigana or Romaji",
+        "english": "English translation of the example",
         "fragments": ["minimal", "meaningful", "chunks", "of", "the", "sentence"],
         "accepted_alternatives": ["array of valid re-orderings or omittable-particle variants, or empty array"]
       }
@@ -113,7 +112,7 @@ ${dto.userRole && dto.aiRole
   ]
 }
 
-**Grammar Note Fragments Rules:**
+**Grammar Match Fragments Rules:**
 - ${FRAGMENT_CONTRACT}
 - ${ACCEPTED_ALTERNATIVES_DEF}
 `;
@@ -210,15 +209,16 @@ ${dto.conversationText}
    - Add an accurate English translation for each line.
 2. **Setting:** Infer location, participants, goal, timeOfDay, and visualPrompt from the conversation.${dto.sceneNotes ? ' Use the provided scene context as your primary guide.' : ''}
 3. **Vocabulary:** Extract 3-5 key vocabulary items the learner needs to participate in this conversation.
-4. **Grammar Notes:** Identify 1-3 grammar patterns used in the conversation and explain them Genki-style.
+4. **Grammar Matches:** Call \`get_grammar_patterns("${dto.difficulty ?? 'N4'}")\` to see the available grammar pool. Identify 1-3 patterns from those results that appear in the conversation. For each, provide a short example sentence from the conversation (with fragments for the typing exercise). If no patterns from the pool fit, return an empty \`grammarMatches\` array.
 5. **Title & Description:** Write a short English title and description for this scenario.
 
 **Data Formatting Rules:**
 - \`title\`, \`description\`, and all \`setting\` fields in English.
 - **NO ROMAJI**. Never include Romaji in any field — including grammar explanations. Write Japanese words in Japanese script (e.g. です, の) not romanised text (e.g. 'desu', 'no').
 - Extracted KUs: \`content\` = Japanese only, \`reading\` = kana only, \`meaning\` = English definition, \`jlptLevel\` = one of N5/N4/N3/N2/N1.
-- Grammar note fragments: ${FRAGMENT_CONTRACT}
+- Grammar match fragments: ${FRAGMENT_CONTRACT}
 - ${ACCEPTED_ALTERNATIVES_DEF}
+- \`grammarMatches[].kuId\`: Must be an exact kuId returned by \`get_grammar_patterns\`. Never invent IDs.
 
 **Output Schema (Return ONLY raw JSON):**
 {
@@ -241,12 +241,10 @@ ${dto.conversationText}
   "extractedKUs": [
     { "content": "本屋", "reading": "ほんや", "meaning": "Bookstore", "type": "vocab", "jlptLevel": "N4" }
   ],
-  "grammarNotes": [
+  "grammarMatches": [
     {
-      "pattern": "～をお願いします",
-      "title": "Grammar Point Name",
-      "explanation": "Clear explanation",
-      "exampleInContext": {
+      "kuId": "exact-ku-id-from-tool",
+      "exampleFromConversation": {
         "japanese": "Example sentence from the conversation",
         "english": "English translation",
         "fragments": ["minimal", "chunks"],

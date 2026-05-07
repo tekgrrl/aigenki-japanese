@@ -104,4 +104,9 @@ export class KnowledgeUnitsController {
         return { id: kuId, isNew: isNewKu };
     }
 
+    @Post('migrate/grammar-jlpt-level')
+    async migrateGrammarJlptLevel() {
+        return this.knowledgeUnitsService.migrateGrammarJlptLevel();
+    }
+
 }

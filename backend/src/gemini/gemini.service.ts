@@ -340,22 +340,32 @@ export class GeminiService implements OnModuleInit {
 
   }
 
-  // ... existing imports ...
-  // ... existing class definition ...
+  async generateScenario(
+    userMessage: string,
+    toolDeclarations?: FunctionDeclaration[],
+    toolHandlers?: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>>,
+  ): Promise<any> {
+    if (toolDeclarations?.length && toolHandlers) {
+      return this.generateWithTools<any>(
+        userMessage,
+        '',
+        toolDeclarations,
+        toolHandlers,
+        undefined,
+        { route: '/scenarios/generate', topic: userMessage.slice(0, 60) },
+      );
+    }
 
-  async generateScenario(userMessage: string) {
     const initialLogData: ApiLog = {
       timestamp: Timestamp.now(),
       route: "/scenarios/generate",
       status: "pending",
       modelUsed: this.modelName,
-      requestData: {
-        userMessage: userMessage,
-      },
+      requestData: { userMessage },
     };
 
     const logRef = await this.apilogService.startLog(initialLogData);
-    let startTime = performance.now();
+    const startTime = performance.now();
     let errorOccurred = false;
     let capturedError: any;
     let scenarioString: string | undefined;
@@ -372,7 +382,6 @@ export class GeminiService implements OnModuleInit {
 
       if (!apiResponse || !apiResponse?.text) throw new Error("AI response was empty.");
 
-      // Defensive Parsing
       scenarioString = apiResponse.text;
       const jsonStart = scenarioString.indexOf("{");
       const jsonEnd = scenarioString.lastIndexOf("}");
@@ -384,32 +393,25 @@ export class GeminiService implements OnModuleInit {
         throw new Error("AI response did not contain a valid JSON object.");
       }
 
-      return scenarioString;
+      return JSON.parse(scenarioString);
 
     } catch (error) {
       errorOccurred = true;
       capturedError = error;
       this.logger.error('Gemini Service Error (Scenario):', error);
-
-      // Re-throw appropriate exception (simplified from generateLesson for brevity, acts the same)
       throw new InternalServerErrorException("Failed to generate scenario");
     } finally {
       if (logRef) {
-        const endTime = performance.now();
-        const durationMs = (endTime - startTime) / 1000;
-
-        // FIX: Initialize with safe values only. Do not explicitly set keys to undefined.
+        const durationMs = (performance.now() - startTime) / 1000;
         const updateData: Partial<ApiLog> = {
           durationMs,
           status: errorOccurred ? "error" : "success",
         };
-
         if (errorOccurred) {
           updateData.errorData = { message: capturedError?.message };
         } else {
           updateData.responseData = { parsedJson: scenarioString || null };
         }
-
         try {
           await this.apilogService.completeLog(logRef, updateData);
         } catch (logError) {
@@ -787,7 +789,7 @@ export class GeminiService implements OnModuleInit {
     systemPrompt: string,
     toolDeclarations: FunctionDeclaration[],
     toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>>,
-    responseSchema: Record<string, unknown>,
+    responseSchema?: Record<string, unknown>,
     logContext?: Record<string, any>,
   ): Promise<T> {
     const startTime = performance.now();
@@ -859,9 +861,9 @@ export class GeminiService implements OnModuleInit {
         model: this.modelName,
         contents,
         config: {
-          systemInstruction: { parts: [{ text: systemPrompt }] },
+          systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
           responseMimeType: 'application/json',
-          responseSchema: responseSchema as any,
+          ...(responseSchema ? { responseSchema: responseSchema as any } : {}),
         },
       });
 
