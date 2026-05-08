@@ -229,6 +229,7 @@ export interface GrammarLesson {
   pattern: string;
   title: string;
   jlptLevel: string;
+  classification?: GrammarClassification;
   meaning: string;
   formation: string;
   notes: string;
@@ -320,11 +321,83 @@ export interface KanjiKnowledgeUnit extends KnowledgeUnitBase {
   };
 }
 
+// ─── Grammar Classification ───────────────────────────────────────────────────
+
+export type GrammarProductionType = 'compositional' | 'constructional';
+
+export type GrammarStructuralCategory =
+  | 'inflectional' | 'particle' | 'syntactic' | 'derivational' | 'numerical'
+  | 'modal' | 'aspectual' | 'discourse' | 'comparative' | 'speech-act'
+  | 'honorific' | 'pragmatic';
+
+export type ExpressiveDomain =
+  | 'describing-the-world' | 'expressing-the-mind' | 'acting-in-the-world'
+  | 'connecting-ideas' | 'managing-conversation';
+
+export type ExpressiveFunction =
+  | 'describing-things' | 'describing-events' | 'describing-states-changes'
+  | 'quantifying' | 'comparing'
+  | 'expressing-desires-intentions' | 'expressing-opinions' | 'expressing-certainty'
+  | 'expressing-feelings' | 'expressing-experience'
+  | 'making-requests' | 'permission' | 'obligation-necessity'
+  | 'offering-accepting' | 'social-rituals'
+  | 'reasoning-explanation' | 'conditioning-hypothesizing' | 'concession-contrast'
+  | 'sequencing-timing' | 'reporting-quoting'
+  | 'asking-questions' | 'topic-management' | 'softening-emphasizing'
+  | 'showing-politeness' | 'showing-closeness';
+
+export const EXPRESSIVE_FUNCTION_TO_DOMAIN: Record<ExpressiveFunction, ExpressiveDomain> = {
+  'describing-things': 'describing-the-world',
+  'describing-events': 'describing-the-world',
+  'describing-states-changes': 'describing-the-world',
+  'quantifying': 'describing-the-world',
+  'comparing': 'describing-the-world',
+  'expressing-desires-intentions': 'expressing-the-mind',
+  'expressing-opinions': 'expressing-the-mind',
+  'expressing-certainty': 'expressing-the-mind',
+  'expressing-feelings': 'expressing-the-mind',
+  'expressing-experience': 'expressing-the-mind',
+  'making-requests': 'acting-in-the-world',
+  'permission': 'acting-in-the-world',
+  'obligation-necessity': 'acting-in-the-world',
+  'offering-accepting': 'acting-in-the-world',
+  'social-rituals': 'acting-in-the-world',
+  'reasoning-explanation': 'connecting-ideas',
+  'conditioning-hypothesizing': 'connecting-ideas',
+  'concession-contrast': 'connecting-ideas',
+  'sequencing-timing': 'connecting-ideas',
+  'reporting-quoting': 'connecting-ideas',
+  'asking-questions': 'managing-conversation',
+  'topic-management': 'managing-conversation',
+  'softening-emphasizing': 'managing-conversation',
+  'showing-politeness': 'managing-conversation',
+  'showing-closeness': 'managing-conversation',
+};
+
+export const EXPRESSIVE_FUNCTIONS_BY_DOMAIN: Record<ExpressiveDomain, ExpressiveFunction[]> = {
+  'describing-the-world': ['describing-things', 'describing-events', 'describing-states-changes', 'quantifying', 'comparing'],
+  'expressing-the-mind': ['expressing-desires-intentions', 'expressing-opinions', 'expressing-certainty', 'expressing-feelings', 'expressing-experience'],
+  'acting-in-the-world': ['making-requests', 'permission', 'obligation-necessity', 'offering-accepting', 'social-rituals'],
+  'connecting-ideas': ['reasoning-explanation', 'conditioning-hypothesizing', 'concession-contrast', 'sequencing-timing', 'reporting-quoting'],
+  'managing-conversation': ['asking-questions', 'topic-management', 'softening-emphasizing', 'showing-politeness', 'showing-closeness'],
+};
+
+export interface GrammarClassification {
+  productionType: GrammarProductionType;
+  structuralCategory: GrammarStructuralCategory;
+  expressiveFunctions: ExpressiveFunction[];
+  confusableWith?: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface GrammarKnowledgeUnit extends KnowledgeUnitBase {
   type: "Grammar";
   data: {
     title: string;
     explanation: string;
+    jlptLevel?: string | null;
+    classification?: GrammarClassification;
     exampleInContext: {
       japanese: string;
       english: string;

@@ -213,6 +213,7 @@ export interface GrammarLesson {
   pattern: string;       // e.g. "～をお願いします"
   title: string;         // e.g. "Making Requests with ～をお願いします"
   jlptLevel: string;
+  classification?: GrammarClassification;
   meaning: string;       // one-line summary
   formation: string;     // "noun + をお願いします"
   notes: string;         // nuance, pitfalls
@@ -302,6 +303,7 @@ export interface GrammarKnowledgeUnit extends KnowledgeUnitBase {
   data: {
     title: string;
     explanation: string;
+    classification?: GrammarClassification;
     exampleInContext: {
       japanese: string;
       english: string;
@@ -532,6 +534,136 @@ export interface FeedQueueSummary {
   };
   totalPending: number;
   message: string;
+}
+
+// ─── Grammar Classification ─────────────────────────────────────────
+
+/**
+ * How a grammar item is produced by the learner.
+ * Determines pedagogical treatment and question generation strategy.
+ */
+export type GrammarProductionType =
+  | 'compositional'   // Constructed from rules and parts (e.g., te-form, particles)
+  | 'constructional'; // Retrieved as a unit with slots (e.g., 〜なければならない)
+
+/**
+ * Structural classification — what kind of grammar machinery this is.
+ * Used by the system to determine question types, conjugation behavior,
+ * and confusable-pairing logic.
+ */
+export type GrammarStructuralCategory =
+  // Compositional
+  | 'inflectional'       // Verb/adj/copula conjugations
+  | 'particle'           // Single-morpheme function words
+  | 'syntactic'          // Clause/phrase combination rules
+  | 'derivational'       // Word-formation patterns (お〜, 〜的, compound verbs)
+  | 'numerical'          // Counters and numerical expressions
+  // Constructional
+  | 'modal'              // Speaker stance/attitude (obligation, permission, desire)
+  | 'aspectual'          // Event phases beyond simple tense
+  | 'discourse'          // Inter-clause logical relations
+  | 'comparative'        // Comparison, degree, scope
+  | 'speech-act'         // Conventional communicative actions
+  | 'honorific'          // Keigo register marking
+  | 'pragmatic';         // Sentence-final particles, interactional glue
+
+/**
+ * Expressive classification — what the learner uses this grammar to do.
+ * Drives lesson grouping, confusable detection within communicative functions,
+ * and the "unlock by communicative achievement" mechanic.
+ */
+export type ExpressiveDomain =
+  | 'describing-the-world'
+  | 'expressing-the-mind'
+  | 'acting-in-the-world'
+  | 'connecting-ideas'
+  | 'managing-conversation';
+
+export type ExpressiveFunction =
+  // Describing the world
+  | 'describing-things'
+  | 'describing-events'
+  | 'describing-states-changes'
+  | 'quantifying'
+  | 'comparing'
+  // Expressing the mind
+  | 'expressing-desires-intentions'
+  | 'expressing-opinions'
+  | 'expressing-certainty'
+  | 'expressing-feelings'
+  | 'expressing-experience'
+  // Acting in the world
+  | 'making-requests'
+  | 'permission'
+  | 'obligation-necessity'
+  | 'offering-accepting'
+  | 'social-rituals'
+  // Connecting ideas
+  | 'reasoning-explanation'
+  | 'conditioning-hypothesizing'
+  | 'concession-contrast'
+  | 'sequencing-timing'
+  | 'reporting-quoting'
+  // Managing conversation
+  | 'asking-questions'
+  | 'topic-management'
+  | 'softening-emphasizing'
+  | 'showing-politeness'
+  | 'showing-closeness';
+
+/**
+ * Maps each ExpressiveFunction to its parent ExpressiveDomain.
+ * Centralizing this avoids drift between the two type unions.
+ */
+export const EXPRESSIVE_FUNCTION_TO_DOMAIN: Record<ExpressiveFunction, ExpressiveDomain> = {
+  'describing-things': 'describing-the-world',
+  'describing-events': 'describing-the-world',
+  'describing-states-changes': 'describing-the-world',
+  'quantifying': 'describing-the-world',
+  'comparing': 'describing-the-world',
+  'expressing-desires-intentions': 'expressing-the-mind',
+  'expressing-opinions': 'expressing-the-mind',
+  'expressing-certainty': 'expressing-the-mind',
+  'expressing-feelings': 'expressing-the-mind',
+  'expressing-experience': 'expressing-the-mind',
+  'making-requests': 'acting-in-the-world',
+  'permission': 'acting-in-the-world',
+  'obligation-necessity': 'acting-in-the-world',
+  'offering-accepting': 'acting-in-the-world',
+  'social-rituals': 'acting-in-the-world',
+  'reasoning-explanation': 'connecting-ideas',
+  'conditioning-hypothesizing': 'connecting-ideas',
+  'concession-contrast': 'connecting-ideas',
+  'sequencing-timing': 'connecting-ideas',
+  'reporting-quoting': 'connecting-ideas',
+  'asking-questions': 'managing-conversation',
+  'topic-management': 'managing-conversation',
+  'softening-emphasizing': 'managing-conversation',
+  'showing-politeness': 'managing-conversation',
+  'showing-closeness': 'managing-conversation',
+};
+
+/**
+ * The full classification block for a grammar item.
+ * Extends GrammarKnowledgeUnit.data and GrammarLesson.
+ */
+export interface GrammarClassification {
+  productionType: GrammarProductionType;
+  structuralCategory: GrammarStructuralCategory;
+
+  /**
+   * Expressive functions this grammar realizes. Most items have one primary
+   * function; some serve multiple (e.g., 〜のだ does explanation AND emphasis).
+   * The first entry is treated as the primary function for lesson grouping.
+   */
+  expressiveFunctions: ExpressiveFunction[];
+
+  /**
+   * Optional: specific patterns this is commonly confused with.
+   * Stored as kuIds. Used by question generation to produce discrimination
+   * questions and by SRS to schedule contrasting reviews.
+   */
+  confusableWith?: string[];
 }
 
 export * from './scenario';

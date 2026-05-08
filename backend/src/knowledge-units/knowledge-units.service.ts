@@ -26,7 +26,7 @@ export class KnowledgeUnitsService {
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     ) { }
 
-    async findAll({ status, type, content }: { status?: string, type?: string, content?: string[] }) {
+    async findAll({ status, type, content, jlptLevel }: { status?: string, type?: string, content?: string[], jlptLevel?: string }) {
         try {
             let query: Query = this.db.collection(KNOWLEDGE_UNITS_COLLECTION) as unknown as Query;
 
@@ -42,7 +42,11 @@ export class KnowledgeUnitsService {
                 query = query.where("content", "in", content);
             }
 
-            const snapshot = await query.orderBy("createdAt", "desc").get();
+            if (jlptLevel) {
+                query = query.where("data.jlptLevel", "==", jlptLevel);
+            }
+
+            const snapshot = await query.orderBy("createdAt", "desc").limit(300).get();
 
             if (snapshot.empty) {
                 return [];
@@ -51,11 +55,12 @@ export class KnowledgeUnitsService {
             const kus: KnowledgeUnit[] = [];
             snapshot.forEach((doc) => {
                 const data = doc.data();
-                const ts = data.createdAt as Timestamp;
                 kus.push({
                     id: doc.id,
                     ...data,
-                    createdAt: ts.toDate().toISOString(),
+                    createdAt: typeof data.createdAt?.toDate === 'function'
+                        ? data.createdAt.toDate().toISOString()
+                        : data.createdAt,
                 } as unknown as KnowledgeUnit);
             });
 
@@ -81,7 +86,9 @@ export class KnowledgeUnitsService {
         return {
             id: doc.id,
             ...data,
-            createdAt: (data.createdAt as Timestamp).toDate().toISOString(),
+            createdAt: typeof data.createdAt?.toDate === 'function'
+                ? data.createdAt.toDate().toISOString()
+                : data.createdAt,
         } as unknown as KnowledgeUnit;
     }
 
