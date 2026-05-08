@@ -19,6 +19,7 @@ export class KnowledgeUnitsController {
         @UserId() uid: string,
         @Query('status') status?: string,
         @Query('type') type?: string,
+        @Query('jlptLevel') jlptLevel?: string,
         @Query('content', new ParseArrayPipe({ items: String, separator: ',', optional: true })) content?: string[]
     ) {
         if (status === 'learning') {
@@ -27,7 +28,7 @@ export class KnowledgeUnitsController {
         if (status === 'user') {
             return this.userKnowledgeUnitsService.findAllAsKUs(uid);
         }
-        return this.knowledgeUnitsService.findAll({ status, type, content });
+        return this.knowledgeUnitsService.findAll({ status, type, content, jlptLevel });
     }
 
     @Put(':id')

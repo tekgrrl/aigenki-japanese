@@ -51,7 +51,9 @@ export class UserKnowledgeUnitsService {
         ...kuData,
         personalNotes: uku.personalNotes,
         userNotes: uku.userNotes,
-        createdAt: (kuData.createdAt as Timestamp).toDate().toISOString(),
+        createdAt: typeof kuData.createdAt?.toDate === 'function'
+                ? kuData.createdAt.toDate().toISOString()
+                : kuData.createdAt,
         // UKU state fields — projected onto the KU shape for the client
         ukuStatus: uku.status,
         ukuFacetCount: uku.facet_count,
