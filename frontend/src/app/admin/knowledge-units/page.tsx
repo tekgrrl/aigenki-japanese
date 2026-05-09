@@ -26,7 +26,7 @@ function KuRow({ ku, onEdit, onDelete }: { ku: KnowledgeUnit; onEdit: () => void
     const def = (ku.data?.definition || ku.data?.meaning) as string | undefined;
     preview = [reading, def].filter(Boolean).join(" · ");
   } else if (ku.type === "Grammar") {
-    preview = (ku.data?.title || ku.data?.explanation || "") as string;
+    preview = (ku.data?.title || ku.data?.corpusNotes || "") as string;
     if (preview.length > 80) preview = preview.slice(0, 80) + "…";
   }
 

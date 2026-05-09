@@ -67,7 +67,7 @@ export default function EditKnowledgeUnitModal({
   const [jlptLevel, setJlptLevel] = useState("");
   const [wanikaniLevel, setWanikaniLevel] = useState<number | "">("");
   const [grammarTitle, setGrammarTitle] = useState("");
-  const [grammarExplanation, setGrammarExplanation] = useState("");
+  const [grammarCorpusNotes, setGrammarCorpusNotes] = useState("");
   const [classification, setClassification] = useState<GrammarClassification>(emptyClassification());
   const [hasClassification, setHasClassification] = useState(false);
   const [userNotes, setUserNotes] = useState("");
@@ -83,12 +83,12 @@ export default function EditKnowledgeUnitModal({
         setJlptLevel(knowledgeUnit.data?.jlptLevel || "");
         setWanikaniLevel(knowledgeUnit.data?.wanikaniLevel || "");
         setGrammarTitle("");
-        setGrammarExplanation("");
+        setGrammarCorpusNotes("");
         setClassification(emptyClassification());
         setHasClassification(false);
       } else if (knowledgeUnit.type === "Grammar") {
         setGrammarTitle(knowledgeUnit.data?.title || "");
-        setGrammarExplanation(knowledgeUnit.data?.explanation || "");
+        setGrammarCorpusNotes(knowledgeUnit.data?.corpusNotes || "");
         setJlptLevel((knowledgeUnit.data as any)?.jlptLevel || "");
         const existing = knowledgeUnit.data?.classification;
         if (existing) {
@@ -107,7 +107,7 @@ export default function EditKnowledgeUnitModal({
         setJlptLevel("");
         setWanikaniLevel("");
         setGrammarTitle("");
-        setGrammarExplanation("");
+        setGrammarCorpusNotes("");
         setClassification(emptyClassification());
         setHasClassification(false);
       }
@@ -152,7 +152,7 @@ export default function EditKnowledgeUnitModal({
       return (
         content !== knowledgeUnit.content ||
         grammarTitle !== (knowledgeUnit.data?.title || "") ||
-        grammarExplanation !== (knowledgeUnit.data?.explanation || "") ||
+        grammarCorpusNotes !== (knowledgeUnit.data?.corpusNotes || "") ||
         jlptLevel !== ((knowledgeUnit.data as any)?.jlptLevel || "") ||
         userNotes !== (knowledgeUnit.userNotes || "") ||
         personalNotes !== (knowledgeUnit.personalNotes || "") ||
@@ -174,7 +174,7 @@ export default function EditKnowledgeUnitModal({
           data: {
             ...knowledgeUnit!.data,
             title: grammarTitle,
-            explanation: grammarExplanation,
+            corpusNotes: grammarCorpusNotes,
             jlptLevel: jlptLevel || null,
             classification: hasClassification ? classification : null,
           },
@@ -304,11 +304,11 @@ export default function EditKnowledgeUnitModal({
               </div>
 
               <div>
-                <label className={labelClass}>Explanation</label>
+                <label className={labelClass}>Corpus Notes</label>
                 <textarea
                   rows={4}
-                  value={grammarExplanation}
-                  onChange={(e) => setGrammarExplanation(e.target.value)}
+                  value={grammarCorpusNotes}
+                  onChange={(e) => setGrammarCorpusNotes(e.target.value)}
                   className={`${inputClass} resize-none`}
                 />
               </div>

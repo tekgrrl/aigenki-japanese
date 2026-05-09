@@ -54,6 +54,7 @@ export interface TutorVocabEntry {
 export interface UserRoot {
   id: string; // The Firestore document ID (which corresponds to the user's auth UID)
   email?: string;
+  isAdmin?: boolean;
 
   /**
    * Statistical data related to the user's reviews, engagement, and progression.
@@ -302,7 +303,7 @@ export interface GrammarKnowledgeUnit extends KnowledgeUnitBase {
   type: "Grammar";
   data: {
     title: string;
-    explanation: string;
+    corpusNotes?: string;
     classification?: GrammarClassification;
     exampleInContext: {
       japanese: string;
