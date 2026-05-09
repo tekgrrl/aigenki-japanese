@@ -57,7 +57,7 @@ export function buildGrammarLessonMessage(ku: GrammarKnowledgeUnit): string {
   return `You are an expert Japanese grammar tutor. Generate a lesson for the grammar pattern: ${ku.content}
 
 Pattern title: ${ku.data.title}
-Existing explanation: ${ku.data.explanation}
+Corpus context: ${ku.data.corpusNotes ?? ''}
 Example from context (USE AS examples[0] VERBATIM):
   japanese: ${ctxExample?.japanese ?? ''}
   english: ${ctxExample?.english ?? ''}

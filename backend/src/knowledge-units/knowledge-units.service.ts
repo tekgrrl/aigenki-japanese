@@ -461,4 +461,37 @@ export class KnowledgeUnitsService {
         this.logger.log(`migrateGrammarJlptLevel: migrated=${migrated}, skipped=${skipped}`);
         return { migrated, skipped };
     }
+
+    async migrateGrammarExplanationToCorpusNotes(): Promise<{ migrated: number; skipped: number }> {
+        const snap = await this.db
+            .collection(KNOWLEDGE_UNITS_COLLECTION)
+            .where('type', '==', 'Grammar')
+            .get();
+
+        const toMigrate = snap.docs.filter(doc => {
+            const d = doc.data();
+            return d.data?.explanation !== undefined;
+        });
+
+        const BATCH_SIZE = 500;
+        let migrated = 0;
+
+        for (let i = 0; i < toMigrate.length; i += BATCH_SIZE) {
+            const chunk = toMigrate.slice(i, i + BATCH_SIZE);
+            const batch = this.db.batch();
+            for (const doc of chunk) {
+                const explanation = doc.data().data?.explanation;
+                batch.update(doc.ref, {
+                    'data.corpusNotes': explanation,
+                    'data.explanation': FieldValue.delete(),
+                });
+            }
+            await batch.commit();
+            migrated += chunk.length;
+        }
+
+        const skipped = snap.size - migrated;
+        this.logger.log(`migrateGrammarExplanationToCorpusNotes: migrated=${migrated}, skipped=${skipped}`);
+        return { migrated, skipped };
+    }
 }

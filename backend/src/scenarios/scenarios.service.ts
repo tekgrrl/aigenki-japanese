@@ -59,7 +59,7 @@ export class ScenariosService {
             kuId: doc.id,
             content: d.content as string,
             title: (d.data as any)?.title ?? '',
-            explanation: (d.data as any)?.explanation ?? '',
+            corpusNotes: (d.data as any)?.corpusNotes ?? '',
           };
         });
 

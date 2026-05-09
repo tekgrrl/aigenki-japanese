@@ -16,6 +16,7 @@ export class UserService {
   private buildDefaultUserRoot(uid: string): UserRoot {
     return {
       id: uid,
+      isAdmin: true,
       stats: {
         reviewForecast: {},
         hourlyForecast: {},
@@ -63,7 +64,7 @@ export class UserService {
         void userRef.update({ email });
         data.email = email;
       }
-      return { id: uid, ...data } as UserRoot;
+      return { id: uid, ...data, isAdmin: data.isAdmin ?? true } as UserRoot;
     }
 
     this.logger.log(`UserRoot not found for uid: ${uid}. Creating default document.`);

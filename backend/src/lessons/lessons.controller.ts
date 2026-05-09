@@ -1,8 +1,10 @@
-import { Controller, Post, Body, BadRequestException, Param, Put, Get, Query, Logger, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, BadRequestException, NotFoundException, Param, Put, Get, Query, Logger, UseGuards } from '@nestjs/common';
 import { LessonsService } from './lessons.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
+import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
+import { GrammarKnowledgeUnit } from '../types';
 
 @Controller('lessons')
 @UseGuards(FirebaseAuthGuard)
@@ -102,5 +104,14 @@ export class LessonsController {
       throw new BadRequestException('kuId is required');
     }
     return this.lessonsService.getUserGrammarLessons(uid, kuId);
+  }
+
+  @Get('grammar-lesson-prompt')
+  async getGrammarLessonPrompt(@Query('kuId') kuId: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    const ku = await this.knowledgeUnitsService.findOneById(kuId);
+    if (!ku || ku.type !== 'Grammar') throw new NotFoundException(`Grammar KU ${kuId} not found`);
+    const userMessage = buildGrammarLessonMessage(ku as GrammarKnowledgeUnit);
+    return { kuId, content: ku.content, userMessage };
   }
 }

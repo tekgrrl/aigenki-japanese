@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Patch, Delete, Param, Body, Query, Post, BadRequestException, NotFoundException, UseGuards, HttpCode } from '@nestjs/common';
+import { Controller, Get, Put, Patch, Delete, Param, Body, Query, Post, BadRequestException, NotFoundException, UseGuards, HttpCode, Logger } from '@nestjs/common';
 import { KnowledgeUnitsService } from './knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -9,6 +9,8 @@ import { ParseArrayPipe } from '@nestjs/common/pipes';
 @Controller('knowledge-units')
 @UseGuards(FirebaseAuthGuard)
 export class KnowledgeUnitsController {
+    private readonly logger = new Logger(KnowledgeUnitsController.name);
+
     constructor(
         private readonly knowledgeUnitsService: KnowledgeUnitsService,
         private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
@@ -79,6 +81,18 @@ export class KnowledgeUnitsController {
         return this.knowledgeUnitsService.cascadeDelete(uid, id);
     }
 
+    @Post('migrate/grammar-jlpt-level')
+    async migrateGrammarJlptLevel() {
+        this.logger.log('migrateGrammarJlptLevel called');
+        return this.knowledgeUnitsService.migrateGrammarJlptLevel();
+    }
+
+    @Post('migrate/grammar-corpus-notes')
+    async migrateGrammarCorpusNotes() {
+        this.logger.log('migrateGrammarCorpusNotes called');
+        return this.knowledgeUnitsService.migrateGrammarExplanationToCorpusNotes();
+    }
+
     @Post()
     async create(@UserId() uid: string, @Body() body: any) {
         if (!body.content || !body.type) {
@@ -103,11 +117,6 @@ export class KnowledgeUnitsController {
         await this.userKnowledgeUnitsService.create(uid, kuId);
 
         return { id: kuId, isNew: isNewKu };
-    }
-
-    @Post('migrate/grammar-jlpt-level')
-    async migrateGrammarJlptLevel() {
-        return this.knowledgeUnitsService.migrateGrammarJlptLevel();
     }
 
 }

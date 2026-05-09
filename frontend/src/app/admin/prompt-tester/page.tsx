@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "@/lib/api-client";
 
 interface Preset {
@@ -24,6 +24,115 @@ interface TestResult {
   parsedJson: unknown;
   toolCalls: ToolCall[];
   durationMs: number;
+}
+
+interface KuSearchResult {
+  id: string;
+  content: string;
+  type: string;
+  data?: { title?: string };
+}
+
+function GrammarLessonLoader({ onLoad }: {
+  onLoad: (userMessage: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<KuSearchResult[]>([]);
+  const [selected, setSelected] = useState<KuSearchResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingPrompt, setLoadingPrompt] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!query.trim()) { setResults([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await apiFetch(`/api/knowledge-units/search?q=${encodeURIComponent(query.trim())}`);
+        if (res.ok) {
+          const all: KuSearchResult[] = await res.json();
+          setResults(all.filter(k => k.type === "Grammar"));
+        }
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+  }, [query]);
+
+  const handleSelect = (ku: KuSearchResult) => {
+    setSelected(ku);
+    setQuery(ku.content);
+    setResults([]);
+  };
+
+  const handleLoad = async () => {
+    if (!selected) return;
+    setLoadingPrompt(true);
+    try {
+      const res = await apiFetch(`/api/lessons/grammar-lesson-prompt?kuId=${selected.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        onLoad(data.userMessage);
+      }
+    } finally {
+      setLoadingPrompt(false);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-gray-700">Grammar Lesson</span>
+        <span className="text-xs text-gray-400">Search a pattern, load its built prompt</span>
+      </div>
+
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={e => { setQuery(e.target.value); setSelected(null); }}
+          placeholder="Search grammar pattern (e.g. ～てください)…"
+          className="w-full border border-gray-300 rounded-md p-2 text-sm font-mono pr-8"
+        />
+        {loading && (
+          <span className="absolute right-2 top-2.5 text-gray-400 text-xs animate-pulse">…</span>
+        )}
+      </div>
+
+      {results.length > 0 && (
+        <div className="border border-gray-200 rounded-md bg-white divide-y divide-gray-100 max-h-48 overflow-y-auto">
+          {results.map(ku => (
+            <button
+              key={ku.id}
+              onClick={() => handleSelect(ku)}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors"
+            >
+              <span className="font-mono text-sm text-gray-900">{ku.content}</span>
+              {ku.data?.title && (
+                <span className="ml-2 text-xs text-gray-400 truncate">{ku.data.title}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 font-mono truncate flex-1">
+            {selected.content}{selected.data?.title ? ` — ${selected.data.title}` : ""}
+          </span>
+          <button
+            onClick={handleLoad}
+            disabled={loadingPrompt}
+            className="shrink-0 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {loadingPrompt ? "Loading…" : "Load Prompt →"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function PromptTesterPage() {
@@ -56,6 +165,16 @@ export default function PromptTesterPage() {
     setSchemaText(
       preset.responseSchema ? JSON.stringify(preset.responseSchema, null, 2) : "",
     );
+  };
+
+  const handleGrammarLoad = (builtMessage: string) => {
+    setSelectedPresetId("");
+    setSystemPrompt("");
+    setSchemaText("");
+    setUseTools(false);
+    setUserMessage(builtMessage);
+    setResult(null);
+    setError(null);
   };
 
   const handleRun = async () => {
@@ -115,6 +234,10 @@ export default function PromptTesterPage() {
       <div className="flex gap-6">
         {/* Left panel — inputs */}
         <div className="flex-1 min-w-0 flex flex-col gap-4">
+
+          {/* Grammar lesson loader */}
+          <GrammarLessonLoader onLoad={handleGrammarLoad} />
+
           {/* Preset selector */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -149,7 +272,7 @@ export default function PromptTesterPage() {
               rows={14}
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="System prompt..."
+              placeholder="System prompt…"
             />
           </div>
 
@@ -160,10 +283,10 @@ export default function PromptTesterPage() {
             </label>
             <textarea
               className="w-full border border-gray-300 rounded-md p-2 text-sm font-mono"
-              rows={4}
+              rows={10}
               value={userMessage}
               onChange={(e) => setUserMessage(e.target.value)}
-              placeholder="User message (leave empty to use system prompt only)..."
+              placeholder="User message (leave empty to use system prompt only)…"
             />
           </div>
 
@@ -191,7 +314,7 @@ export default function PromptTesterPage() {
                   className="w-full border border-gray-300 rounded-md p-2 text-sm font-mono"
                   value={uid}
                   onChange={(e) => setUid(e.target.value)}
-                  placeholder="Firebase UID..."
+                  placeholder="Firebase UID…"
                 />
               </div>
             )}
@@ -214,7 +337,7 @@ export default function PromptTesterPage() {
 
           <button
             onClick={handleRun}
-            disabled={running || !systemPrompt.trim()}
+            disabled={running || (!systemPrompt.trim() && !userMessage.trim())}
             className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
           >
             {running ? "Running..." : "Run"}
@@ -223,7 +346,6 @@ export default function PromptTesterPage() {
 
         {/* Right panel — results */}
         <div className="w-[480px] shrink-0 flex flex-col gap-4">
-          {/* Status / latency */}
           {result && (
             <div className={`rounded-md px-3 py-2 text-sm font-mono font-semibold ${latencyColor(result.durationMs)}`}>
               {result.durationMs.toLocaleString()} ms
@@ -240,7 +362,6 @@ export default function PromptTesterPage() {
             <div className="text-sm text-gray-400 animate-pulse">Waiting for response...</div>
           )}
 
-          {/* Tool calls */}
           {result && result.toolCalls.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">
@@ -251,14 +372,10 @@ export default function PromptTesterPage() {
                   <div key={i} className="border border-gray-200 rounded-md overflow-hidden">
                     <button
                       className="w-full text-left px-3 py-2 bg-gray-50 hover:bg-gray-100 text-sm font-mono flex justify-between items-center"
-                      onClick={() =>
-                        setExpandedToolCall(expandedToolCall === i ? null : i)
-                      }
+                      onClick={() => setExpandedToolCall(expandedToolCall === i ? null : i)}
                     >
                       <span className="text-blue-700">{tc.fn}()</span>
-                      <span className="text-gray-400 text-xs">
-                        {expandedToolCall === i ? "▲" : "▼"}
-                      </span>
+                      <span className="text-gray-400 text-xs">{expandedToolCall === i ? "▲" : "▼"}</span>
                     </button>
                     {expandedToolCall === i && (
                       <div className="p-3 space-y-2 bg-white">
@@ -284,12 +401,11 @@ export default function PromptTesterPage() {
             </div>
           )}
 
-          {/* Result */}
           {result && (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Result</h3>
               <div className="border border-gray-200 rounded-md overflow-hidden">
-                <pre className="text-sm font-mono p-3 bg-white whitespace-pre-wrap overflow-auto max-h-[500px]">
+                <pre className="text-sm font-mono p-3 bg-white whitespace-pre-wrap overflow-auto max-h-[600px]">
                   {result.parsedJson !== null
                     ? JSON.stringify(result.parsedJson, null, 2)
                     : result.rawText}

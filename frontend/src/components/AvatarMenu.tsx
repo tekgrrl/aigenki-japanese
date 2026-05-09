@@ -8,7 +8,7 @@ import { applyFurigana, loadFurigana } from "@/lib/furigana";
 import { apiFetch } from "@/lib/api-client";
 
 export function AvatarMenu() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const [showFurigana, setShowFurigana] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -102,6 +102,27 @@ export function AvatarMenu() {
           >
             Manage
           </Link>
+
+          {isAdmin && (
+            <>
+              <div className="h-px bg-shodo-ink/10 my-1" />
+              <p className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-widest text-shodo-ink/30">
+                Admin
+              </p>
+              <Link href="/admin/knowledge-units" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Knowledge Units
+              </Link>
+              <Link href="/admin/concepts" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Concepts
+              </Link>
+              <Link href="/admin/prompt-tester" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Prompt Tester
+              </Link>
+              <Link href="/admin/logs" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                API Logs
+              </Link>
+            </>
+          )}
 
           <div className="h-px bg-shodo-ink/10 my-1" />
 
