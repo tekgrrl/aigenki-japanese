@@ -2,6 +2,7 @@ import { Controller, Get, Put, Patch, Delete, Param, Body, Query, Post, BadReque
 import { KnowledgeUnitsService } from './knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 import { UserId } from '../auth/user-id.decorator';
 import { ParseArrayPipe } from '@nestjs/common/pipes';
 
@@ -82,12 +83,14 @@ export class KnowledgeUnitsController {
     }
 
     @Post('migrate/grammar-jlpt-level')
+    @UseGuards(AdminGuard)
     async migrateGrammarJlptLevel() {
         this.logger.log('migrateGrammarJlptLevel called');
         return this.knowledgeUnitsService.migrateGrammarJlptLevel();
     }
 
     @Post('migrate/grammar-corpus-notes')
+    @UseGuards(AdminGuard)
     async migrateGrammarCorpusNotes() {
         this.logger.log('migrateGrammarCorpusNotes called');
         return this.knowledgeUnitsService.migrateGrammarExplanationToCorpusNotes();
