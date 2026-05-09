@@ -12,7 +12,7 @@ import { USER_TARGET_LEVEL } from './fragments';
 
 /** Static schema and rules appended to every grammar lesson user message. */
 export const GRAMMAR_INSTRUCTIONS = `
-The lesson should be in English. Japanese examples must not include Romaji.
+The lesson should be in English. The use of Romaji anywhere in the lesson is forbidden.
 
 Generate a complete grammar lesson matching this JSON schema exactly:
 {
@@ -36,7 +36,7 @@ Generate a complete grammar lesson matching this JSON schema exactly:
 
 Rules:
 - Provide exactly 3 examples
-- ALWAYS copy the provided 'Example from context' data VERBATIM into examples[0], including its exact fragments and accepted_alternatives
+- When provided ALWAYS copy 'Example from context' data VERBATIM into examples[0], including its exact fragments and accepted_alternatives
 - examples[1] and examples[2] MUST use completely different Japanese sentences with their own unique fragments
 - fragments must be the Japanese sentence split into meaningful chunks for sentence-assembly drills — each example must have different fragments matching its own sentence
 - NEVER copy fragments from one example to another

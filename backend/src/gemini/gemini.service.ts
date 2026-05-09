@@ -1152,8 +1152,9 @@ export class GeminiService implements OnModuleInit {
     toolDeclarations: FunctionDeclaration[];
     toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>>;
     responseSchema?: Record<string, unknown>;
+    model?: string;
   }): Promise<{ rawText: string; parsedJson: any; toolCalls: Array<{ fn: string; args: any; response: any }>; durationMs: number }> {
-    const { systemPrompt, userMessage, toolDeclarations, toolHandlers, responseSchema } = opts;
+    const { systemPrompt, userMessage, toolDeclarations, toolHandlers, responseSchema, model = this.modelName } = opts;
     const start = performance.now();
     const toolCallLog: Array<{ fn: string; args: any; response: any }> = [];
 
@@ -1165,7 +1166,7 @@ export class GeminiService implements OnModuleInit {
     if (toolDeclarations.length > 0) {
       for (let i = 0; i < 5; i++) {
         const response = await this.client.models.generateContent({
-          model: this.modelName,
+          model,
           contents,
           config: {
             systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -1205,7 +1206,7 @@ export class GeminiService implements OnModuleInit {
     }
 
     const finalResponse = await this.client.models.generateContent({
-      model: this.modelName,
+      model,
       contents,
       config: finalConfig,
     });
