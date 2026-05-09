@@ -71,8 +71,9 @@ export class ApilogController {
         useTools?: boolean;
         uid?: string;
         responseSchema?: Record<string, unknown>;
+        model?: string;
     }) {
-        const { systemPrompt, userMessage = '', useTools = false, uid, responseSchema } = body;
+        const { systemPrompt, userMessage = '', useTools = false, uid, responseSchema, model } = body;
 
         const toolDeclarations = useTools ? [GET_USER_LEVEL_DECLARATION] : [];
         const toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>> = {};
@@ -92,6 +93,7 @@ export class ApilogController {
             toolDeclarations,
             toolHandlers,
             responseSchema,
+            model,
         });
     }
 

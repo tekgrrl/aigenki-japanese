@@ -143,6 +143,7 @@ export default function PromptTesterPage() {
   const [useTools, setUseTools] = useState(false);
   const [uid, setUid] = useState("");
   const [schemaText, setSchemaText] = useState("");
+  const [model, setModel] = useState("gemini-3-flash-preview");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -204,6 +205,7 @@ export default function PromptTesterPage() {
           useTools,
           uid: uid || undefined,
           responseSchema: parsedSchema,
+          model,
         }),
       });
 
@@ -335,13 +337,23 @@ export default function PromptTesterPage() {
             />
           </div>
 
-          <button
-            onClick={handleRun}
-            disabled={running || (!systemPrompt.trim() && !userMessage.trim())}
-            className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-          >
-            {running ? "Running..." : "Run"}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRun}
+              disabled={running || (!systemPrompt.trim() && !userMessage.trim())}
+              className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            >
+              {running ? "Running..." : "Run"}
+            </button>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="border border-gray-300 rounded-md px-2 py-2 text-sm font-mono text-gray-700"
+            >
+              <option value="gemini-3-flash-preview">flash</option>
+              <option value="gemini-3.1-pro-preview">pro</option>
+            </select>
+          </div>
         </div>
 
         {/* Right panel — results */}
