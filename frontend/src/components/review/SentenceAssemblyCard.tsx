@@ -31,7 +31,7 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
     sourceTitle?: string;
   };
 
-  const normalize = (s: string) => s.replace(/[。、！？!?\.]+$/u, "").trim();
+  const normalize = (s: string) => s.replace(/[。、！？!?\.]+$/u, "").replace(/[\s　]+/g, "").trim();
   const missingData = !Array.isArray(fragments) || fragments.length === 0 || !answer;
   const [available, setAvailable] = useState<string[]>(() => shuffleArray(Array.isArray(fragments) ? fragments : []));
   const [assembled, setAssembled] = useState<string[]>([]);

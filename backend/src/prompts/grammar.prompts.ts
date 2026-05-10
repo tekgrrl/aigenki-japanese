@@ -4,7 +4,7 @@
  */
 
 import { GrammarKnowledgeUnit } from '../types';
-import { USER_TARGET_LEVEL } from './fragments';
+import { USER_TARGET_LEVEL, FRAGMENT_CONTRACT, ACCEPTED_ALTERNATIVES_DEF } from './fragments';
 
 // ---------------------------------------------------------------------------
 // Grammar lesson instructions (static)
@@ -40,7 +40,8 @@ Rules:
 - Provide exactly 3 examples
 - When provided, ALWAYS copy the 'Example from context' data VERBATIM into examples[0], including its exact fragments and accepted_alternatives
 - examples[1] and examples[2] MUST use completely different Japanese sentences with their own unique fragments
-- fragments must be the Japanese sentence split into meaningful chunks for sentence-assembly drills — each example must have different fragments matching its own sentence
+- ${FRAGMENT_CONTRACT} The final fragment MUST include the sentence-ending punctuation (。). Each example must have different fragments matching its own sentence.
+- ${ACCEPTED_ALTERNATIVES_DEF}
 - NEVER copy fragments from one example to another
 - Keep all example sentences at or below JLPT ${USER_TARGET_LEVEL}, even if the target grammar pattern is at a higher level
 `;
