@@ -27,7 +27,6 @@ export default function KnowledgeManagementPage() {
   const [newKuDefinition, setNewKuDefinition] = useState("");
   const [newKuJlptLevel, setNewKuJlptLevel] = useState("");
   const [newKuWanikaniLevel, setNewKuWanikaniLevel] = useState<number | "">("");
-  const [newKuNotes, setNewKuNotes] = useState(""); // Personal Notes
   const [newUserNotes, setNewUserNotes] = useState(""); // User Notes (Context)
   const [generatingFacetKuId, setGeneratingFacetKuId] = useState<string | null>(
     null,
@@ -112,6 +111,7 @@ export default function KnowledgeManagementPage() {
       if (newKuJlptLevel !== "") kuData.jlptLevel = newKuJlptLevel;
       if (newKuWanikaniLevel !== "") kuData.wanikaniLevel = Number(newKuWanikaniLevel);
     }
+    if (newUserNotes) kuData.corpusNotes = newUserNotes;
 
     try {
       // TODO needs nextjs rewrite
@@ -124,8 +124,6 @@ export default function KnowledgeManagementPage() {
           type: newKuType,
           content: newKuContent,
           data: kuData,
-          personalNotes: newKuNotes,
-          userNotes: newUserNotes,
         }),
       });
 
@@ -140,7 +138,6 @@ export default function KnowledgeManagementPage() {
       setNewKuDefinition("");
       setNewKuJlptLevel("");
       setNewKuWanikaniLevel("");
-      setNewKuNotes("");
       setNewUserNotes("");
 
       await fetchData(); // Refetch all data
@@ -313,11 +310,6 @@ export default function KnowledgeManagementPage() {
                 <p className="text-lg text-gray-300 break-all">
                   <span className="font-semibold">Definition:</span>{" "}
                   {ku.data.definition}
-                </p>
-              )}
-              {ku.personalNotes && (
-                <p className="mt-2 p-3 bg-gray-600 rounded text-gray-200 italic break-words">
-                  {ku.personalNotes}
                 </p>
               )}
 
@@ -516,7 +508,7 @@ export default function KnowledgeManagementPage() {
               htmlFor="kuUserNotes"
               className="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2"
             >
-              User Notes
+              Corpus Notes
               <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-normal normal-case">
                 AI Context
               </span>
@@ -527,23 +519,6 @@ export default function KnowledgeManagementPage() {
               onChange={(e) => setNewUserNotes(e.target.value)}
               rows={2}
               placeholder="Context instructions for Gemini (e.g., 'Focus on polite forms')..."
-              className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="kuNotes"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Personal Notes
-            </label>
-            <textarea
-              id="kuNotes"
-              value={newKuNotes}
-              onChange={(e) => setNewKuNotes(e.target.value)}
-              rows={3}
-              placeholder="e.g., Mnemonic, context where I found this, related to..."
               className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
             />
           </div>

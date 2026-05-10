@@ -321,11 +321,16 @@ function GrammarExampleSlide({ loaded, exampleIdx }: { loaded: LoadedItem; examp
 
 function GrammarNotesSlide({ loaded }: { loaded: LoadedItem }) {
   const gl = loaded.lesson as GrammarLesson;
+  const paragraphs = gl.notes.replace(/\\n/g, '\n').split(/\n\n+/);
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Notes</span>
       <div className="text-4xl font-bold text-shodo-matcha">{gl.pattern}</div>
-      <p className="text-lg text-shodo-ink-light leading-relaxed">{gl.notes}</p>
+      <div className="flex flex-col gap-3">
+        {paragraphs.map((para, i) => (
+          <p key={i} className="text-lg text-shodo-ink-light leading-relaxed">{para}</p>
+        ))}
+      </div>
     </div>
   );
 }

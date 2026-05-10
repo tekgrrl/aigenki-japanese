@@ -221,7 +221,6 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
                 description: 'The grammar pattern template (e.g. "～をお願いします").',
               },
               title: { type: 'string' },
-              explanation: { type: 'string' },
               exampleInContext: {
                 type: 'object',
                 properties: {
@@ -241,7 +240,7 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
                 required: ['japanese', 'english', 'fragments', 'accepted_alternatives'],
               },
             },
-            required: ['title', 'explanation', 'exampleInContext'],
+            required: ['title', 'exampleInContext'],
           },
         },
       },

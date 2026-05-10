@@ -33,7 +33,6 @@ export interface ExtractedKU {
 export interface GrammarNote {
     pattern?: string;  // the extractable pattern, e.g. "～をお願いします"
     title: string;
-    explanation: string;
     exampleInContext: {
         japanese: string;
         english: string;

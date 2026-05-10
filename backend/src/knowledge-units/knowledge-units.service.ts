@@ -171,10 +171,8 @@ export class KnowledgeUnitsService {
                 ...(hint?.jlptLevel ? { jlptLevel: hint.jlptLevel } : {}),
             },
             status: 'learning',
-            facet_count: 0,
             createdAt: Timestamp.now(),
             relatedUnits: [],
-            personalNotes: '',
         });
 
         return newRef.id;
@@ -204,7 +202,6 @@ export class KnowledgeUnitsService {
             data: body.data || {},
             createdAt: Timestamp.now(),
             status: "learning",
-            facet_count: 0,
         };
         delete newKuData.userId; // KUs are global; no user ownership
 
@@ -308,10 +305,7 @@ export class KnowledgeUnitsService {
                     type: item.type,
                     data: item.data || {},
                     relatedUnits: item.relatedUnits || [],
-                    personalNotes: item.personalNotes || '',
-                    userNotes: item.userNotes || '',
                     status: 'learning',
-                    facet_count: 0,
                     createdAt: Timestamp.now(),
                 },
             });

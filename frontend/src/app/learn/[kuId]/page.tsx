@@ -767,7 +767,7 @@ export default function LearnItemPage() {
       )}
       <main className="container mx-auto max-w-4xl p-8">
         <header className="mb-8">
-          <h1 className="text-6xl font-bold text-gray-900 dark:text-white mb-2 break-all">
+          <h1 className={`font-bold text-gray-900 dark:text-white mb-2 break-all ${lesson?.type === "Grammar" ? "text-4xl" : "text-6xl"}`}>
             {isLoading
               ? "..."
               : lesson?.type === "Vocab"
@@ -778,7 +778,7 @@ export default function LearnItemPage() {
                 : lesson?.type === "Kanji" && (lesson as KanjiLesson).kanji
                   ? (lesson as KanjiLesson).kanji
                   : lesson?.type === "Grammar"
-                    ? (lesson as GrammarLesson).pattern
+                    ? (lesson as GrammarLesson).title
                     : ku?.content || "..."}
           </h1>
           {lesson && lesson?.type === "Vocab" && (

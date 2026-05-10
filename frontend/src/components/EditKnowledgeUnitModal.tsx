@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "@/lib/api-client";
 import {
   KnowledgeUnit,
   GrammarClassification,
@@ -67,11 +68,12 @@ export default function EditKnowledgeUnitModal({
   const [jlptLevel, setJlptLevel] = useState("");
   const [wanikaniLevel, setWanikaniLevel] = useState<number | "">("");
   const [grammarTitle, setGrammarTitle] = useState("");
+  const [grammarNotes, setGrammarNotes] = useState("");
+  const [initialGrammarNotes, setInitialGrammarNotes] = useState("");
   const [grammarCorpusNotes, setGrammarCorpusNotes] = useState("");
   const [classification, setClassification] = useState<GrammarClassification>(emptyClassification());
   const [hasClassification, setHasClassification] = useState(false);
-  const [userNotes, setUserNotes] = useState("");
-  const [personalNotes, setPersonalNotes] = useState("");
+  const [corpusNotes, setCorpusNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -88,8 +90,10 @@ export default function EditKnowledgeUnitModal({
         setHasClassification(false);
       } else if (knowledgeUnit.type === "Grammar") {
         setGrammarTitle(knowledgeUnit.data?.title || "");
+        setGrammarNotes("");
+        setInitialGrammarNotes("");
         setGrammarCorpusNotes(knowledgeUnit.data?.corpusNotes || "");
-        setJlptLevel((knowledgeUnit.data as any)?.jlptLevel || "");
+        setJlptLevel(knowledgeUnit.data?.jlptLevel || "");
         const existing = knowledgeUnit.data?.classification;
         if (existing) {
           setClassification(existing);
@@ -101,18 +105,31 @@ export default function EditKnowledgeUnitModal({
         setReading("");
         setDefinition("");
         setWanikaniLevel("");
+
+        // Fetch the cached lesson to pre-populate notes (cache hit only — no AI generation triggered if already cached)
+        apiFetch("/api/lessons/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kuId: knowledgeUnit.id }),
+        }).then(res => res.ok ? res.json() : null).then(lesson => {
+          if (lesson?.notes) {
+            setGrammarNotes(lesson.notes);
+            setInitialGrammarNotes(lesson.notes);
+          }
+        }).catch(() => {});
       } else {
         setReading("");
         setDefinition("");
         setJlptLevel("");
         setWanikaniLevel("");
         setGrammarTitle("");
+        setGrammarNotes("");
+        setInitialGrammarNotes("");
         setGrammarCorpusNotes("");
         setClassification(emptyClassification());
         setHasClassification(false);
       }
-      setUserNotes(knowledgeUnit.userNotes || "");
-      setPersonalNotes(knowledgeUnit.personalNotes || "");
+      setCorpusNotes(knowledgeUnit.data?.corpusNotes || "");
     }
   }, [knowledgeUnit]);
 
@@ -137,8 +154,7 @@ export default function EditKnowledgeUnitModal({
         definition !== (knowledgeUnit.data?.definition || "") ||
         jlptLevel !== (knowledgeUnit.data?.jlptLevel || "") ||
         wanikaniLevel !== (knowledgeUnit.data?.wanikaniLevel || "") ||
-        userNotes !== (knowledgeUnit.userNotes || "") ||
-        personalNotes !== (knowledgeUnit.personalNotes || "")
+        corpusNotes !== (knowledgeUnit.data?.corpusNotes || "")
       );
     }
     if (knowledgeUnit.type === "Grammar") {
@@ -152,10 +168,9 @@ export default function EditKnowledgeUnitModal({
       return (
         content !== knowledgeUnit.content ||
         grammarTitle !== (knowledgeUnit.data?.title || "") ||
+        grammarNotes !== initialGrammarNotes ||
         grammarCorpusNotes !== (knowledgeUnit.data?.corpusNotes || "") ||
-        jlptLevel !== ((knowledgeUnit.data as any)?.jlptLevel || "") ||
-        userNotes !== (knowledgeUnit.userNotes || "") ||
-        personalNotes !== (knowledgeUnit.personalNotes || "") ||
+        jlptLevel !== (knowledgeUnit.data?.jlptLevel || "") ||
         classChanged
       );
     }
@@ -178,8 +193,6 @@ export default function EditKnowledgeUnitModal({
             jlptLevel: jlptLevel || null,
             classification: hasClassification ? classification : null,
           },
-          userNotes,
-          personalNotes,
         };
       } else {
         updates = {
@@ -190,12 +203,20 @@ export default function EditKnowledgeUnitModal({
             definition,
             jlptLevel: jlptLevel !== "" ? jlptLevel : null,
             wanikaniLevel: wanikaniLevel !== "" ? Number(wanikaniLevel) : null,
+            corpusNotes: corpusNotes || undefined,
           },
-          userNotes,
-          personalNotes,
         };
       }
       await onSave(knowledgeUnit!.id, updates);
+
+      if (knowledgeUnit!.type === "Grammar" && grammarNotes !== initialGrammarNotes) {
+        await apiFetch(`/api/lessons/${knowledgeUnit!.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ section: "notes", content: grammarNotes }),
+        });
+      }
+
       onClose();
     } catch (error) {
       console.error("Failed to save changes", error);
@@ -304,6 +325,17 @@ export default function EditKnowledgeUnitModal({
               </div>
 
               <div>
+                <label className={labelClass}>Notes</label>
+                <textarea
+                  rows={4}
+                  value={grammarNotes}
+                  onChange={(e) => setGrammarNotes(e.target.value)}
+                  className={`${inputClass} resize-none`}
+                  placeholder="Nuance, register, common mistakes, contrast with similar patterns…"
+                />
+              </div>
+
+              <div>
                 <label className={labelClass}>Corpus Notes</label>
                 <textarea
                   rows={4}
@@ -400,37 +432,28 @@ export default function EditKnowledgeUnitModal({
             </>
           )}
 
-          {/* User Notes (Context for AI) */}
-          <div>
-            <label className="block text-xs font-bold text-shodo-ink-light uppercase tracking-wide mb-1 flex items-center gap-2">
-              User Notes
-              <span className="text-[10px] bg-shodo-indigo text-white px-1.5 py-0.5 rounded-full font-normal normal-case">
-                AI Context
-              </span>
-            </label>
-            <p className="text-xs text-shodo-ink-light mb-2">
-              Provide context for the AI (e.g., "Focus on polite forms", "Medical terminology").
-            </p>
-            <textarea
-              rows={2}
-              value={userNotes}
-              onChange={(e) => setUserNotes(e.target.value)}
-              className={`${inputClass} resize-none`}
-              placeholder="Context instructions for Gemini..."
-            />
-          </div>
+          {/* Corpus Notes — Vocab/Kanji only (Grammar has its own field above) */}
+          {(knowledgeUnit.type === "Vocab" || knowledgeUnit.type === "Kanji") && (
+            <div>
+              <label className="block text-xs font-bold text-shodo-ink-light uppercase tracking-wide mb-1 flex items-center gap-2">
+                Corpus Notes
+                <span className="text-[10px] bg-shodo-indigo text-white px-1.5 py-0.5 rounded-full font-normal normal-case">
+                  AI Context
+                </span>
+              </label>
+              <p className="text-xs text-shodo-ink-light mb-2">
+                Context for the AI lesson generator (e.g., "Focus on polite forms", "Medical terminology").
+              </p>
+              <textarea
+                rows={2}
+                value={corpusNotes}
+                onChange={(e) => setCorpusNotes(e.target.value)}
+                className={`${inputClass} resize-none`}
+                placeholder="Context instructions for Gemini..."
+              />
+            </div>
+          )}
 
-          {/* Personal Notes (Private) */}
-          <div>
-            <label className={labelClass}>Personal Notes</label>
-            <textarea
-              rows={3}
-              value={personalNotes}
-              onChange={(e) => setPersonalNotes(e.target.value)}
-              className={inputClass}
-              placeholder="Your private study notes..."
-            />
-          </div>
         </div>
 
         {/* Footer */}
