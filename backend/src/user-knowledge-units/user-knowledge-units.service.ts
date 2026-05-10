@@ -49,8 +49,6 @@ export class UserKnowledgeUnitsService {
       result.push({
         id: kuDoc.id,
         ...kuData,
-        personalNotes: uku.personalNotes,
-        userNotes: uku.userNotes,
         createdAt: typeof kuData.createdAt?.toDate === 'function'
                 ? kuData.createdAt.toDate().toISOString()
                 : kuData.createdAt,
@@ -105,7 +103,6 @@ export class UserKnowledgeUnitsService {
     const payload: Omit<UserKnowledgeUnit, 'id'> = {
       userId: uid,
       kuId,
-      personalNotes: '',
       createdAt: now,
       status: 'learning',
       facet_count: 0,

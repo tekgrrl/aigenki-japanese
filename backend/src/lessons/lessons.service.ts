@@ -10,6 +10,13 @@ import { buildVocabLessonMessage, buildVocabCacheContext, buildKanjiLessonPrompt
 import { GRAMMAR_INSTRUCTIONS, buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { ADMIN_USER_ID } from '../lib/constants';
 
+function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
+  if (ku.type !== 'Grammar') return lesson;
+  const overrides: Partial<GrammarLesson> = { pattern: ku.content };
+  if (ku.data?.title) overrides.title = ku.data.title;
+  return { ...lesson, ...overrides } as Lesson;
+}
+
 @Injectable()
 export class LessonsService {
   private readonly logger = new Logger(LessonsService.name);
@@ -47,10 +54,8 @@ export class LessonsService {
         void lessonDbRef.update({ userId: FieldValue.delete() });
         delete data.userId;
       }
-      if (overlayDoc.exists) {
-        return { ...data, ...overlayDoc.data() } as Lesson;
-      }
-      return data as Lesson;
+      const merged = overlayDoc.exists ? { ...data, ...overlayDoc.data() } : data;
+      return applyKuOverrides(merged as Lesson, ku);
     }
 
     this.logger.log(`No existing lesson for KU ${kuId}. Generating new lesson`);
@@ -74,12 +79,14 @@ export class LessonsService {
       }
 
       await lessonDbRef.set(lessonJson);
-      return lessonJson;
+      return applyKuOverrides(lessonJson, ku);
     }
 
     if (ku.type === "Kanji") {
       userMessage = buildKanjiLessonPrompt(ku.content);
     } else {
+      // TODO: pass ku.data.corpusNotes into buildVocabLessonMessage so Vocab/Kanji corpus
+      // notes are injected into the prompt, mirroring how Grammar uses corpusNotes.
       userMessage = buildVocabLessonMessage(ku.content, !!cachedContentName);
     }
 
@@ -191,8 +198,13 @@ export class LessonsService {
       valueToSave = content;
     }
 
-    const overlayRef = this.db.collection('users').doc(uid).collection(USER_LESSONS_SUBCOLLECTION).doc(kuId);
-    await overlayRef.set({ [section]: valueToSave }, { merge: true });
+    const isAdmin = uid === ADMIN_USER_ID || process.env.ADMIN_ALL === 'true';
+    if (isAdmin) {
+      await this.db.collection(LESSONS_COLLECTION).doc(kuId).update({ [section]: valueToSave });
+    } else {
+      const overlayRef = this.db.collection('users').doc(uid).collection(USER_LESSONS_SUBCOLLECTION).doc(kuId);
+      await overlayRef.set({ [section]: valueToSave }, { merge: true });
+    }
 
     return { success: true };
   }
@@ -222,7 +234,6 @@ export class LessonsService {
     const ref = this.db.collection('users').doc(uid).collection(USER_GRAMMAR_LESSONS_SUBCOLLECTION).doc(docId);
 
     const data: Omit<UserGrammarLesson, 'id'> = {
-      userId: uid,
       kuId,
       lessonId: kuId,
       sourceType: source.sourceType,

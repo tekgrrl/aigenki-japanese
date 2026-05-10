@@ -214,9 +214,8 @@ export interface GrammarLesson {
   pattern: string;       // e.g. "～をお願いします"
   title: string;         // e.g. "Making Requests with ～をお願いします"
   jlptLevel: string;
-  classification?: GrammarClassification;
   meaning: string;       // one-line summary
-  formation: string;     // "noun + をお願いします"
+  formation: string | string[];
   notes: string;         // nuance, pitfalls
   examples: {
     japanese: string;
@@ -229,7 +228,6 @@ export interface GrammarLesson {
 
 export interface UserGrammarLesson {
   id: string;
-  userId: string;
   kuId: string;
   lessonId: string;      // = kuId (Grammar lessons stored at lessons/{kuId})
   sourceType: 'scenario' | 'concept';
@@ -255,26 +253,13 @@ export type KnowledgeUnitType =
 
 // ─── KnowledgeUnit discriminated union ───────────────────────────────────────
 
-/**
- * Fields shared by every KU sub-type.
- * Deprecated fields remain here until the User state migration is complete.
- */
+/** Fields shared by every KU sub-type. */
 export interface KnowledgeUnitBase {
   id: string;
   content: string; // The main "thing" (e.g., "食べる", "家族")
   relatedUnits: string[]; // Array of other KnowledgeUnit IDs
-  /** @deprecated migrating to User state models */
-  userId: string;
-  /** @deprecated migrating to User state models */
-  personalNotes: string;
-  /** @deprecated migrating to User state models */
-  userNotes?: string;
-  /** @deprecated migrating to User state models */
   createdAt: Timestamp;
-  /** @deprecated migrating to User state models */
-  facet_count: number;
-  /** @deprecated migrating to User state models */
-  history?: any[];
+  data: Record<string, any>;
 }
 
 export interface VocabKnowledgeUnit extends KnowledgeUnitBase {
@@ -285,6 +270,7 @@ export interface VocabKnowledgeUnit extends KnowledgeUnitBase {
     conjugationType?: 'godan' | 'ichidan' | 'irregular';
     jlptLevel?: string | null;
     wanikaniLevel?: number | null;
+    corpusNotes?: string;
     [key: string]: any;
   };
 }
@@ -295,6 +281,7 @@ export interface KanjiKnowledgeUnit extends KnowledgeUnitBase {
     meaning?: string;
     jlptLevel?: string | null;
     wanikaniLevel?: number | null;
+    corpusNotes?: string;
     [key: string]: any;
   };
 }
@@ -304,6 +291,7 @@ export interface GrammarKnowledgeUnit extends KnowledgeUnitBase {
   data: {
     title: string;
     corpusNotes?: string;
+    jlptLevel?: string | null;
     classification?: GrammarClassification;
     exampleInContext: {
       japanese: string;
@@ -380,8 +368,6 @@ export interface UserKnowledgeUnit {
   id: string;
   userId: string;
   kuId: string; // Bridges to KnowledgeUnit.id
-  personalNotes: string;
-  userNotes?: string;
   createdAt: Timestamp;
   status: "learning" | "reviewing" | "mastered";
   facet_count: number;
@@ -422,7 +408,8 @@ export type FacetType =
 export interface ReviewFacet {
   id: string;
   userId: string;
-  kuId: string; // ID of the parent KnowledgeUnit
+  kuId: string;
+  sourceCollection?: 'knowledge-units' | 'concepts' | 'scenarios';
   facetType: FacetType;
   srsStage: number; // 0 (new) to 8 (mastered)
   nextReviewAt: Timestamp; // ISO string
@@ -465,6 +452,7 @@ export type LessonDifficulty =
 export interface QuestionItem {
   id: string;
   kuId: string;
+  sourceCollection?: 'knowledge-units' | 'concepts' | 'scenarios';
   data: {
     context?: string;
     question: string;
@@ -475,23 +463,10 @@ export interface QuestionItem {
   rank: number;        // 0–100, starts at 50; suitable threshold is 30
   rejectionCount: number; // tracked for observability; not used for ranking
   createdAt: string | Timestamp;
-  /** @deprecated */
-  userId?: string;
-  /** @deprecated */
-  status?: "active" | "flagged" | "inactive";
-  /** @deprecated */
-  lastUsed?: string | Timestamp;
-  /** @deprecated */
-  previousAnswers?: {
-    answer: string;
-    result: "pass" | "fail";
-    timestamp: Timestamp;
-  }[];
 }
 
 export interface UserQuestionState {
   questionId: string;
-  kuId: string;
   rejected: boolean;       // user will never see this question again
   consecutiveFailures: number; // resets on correct answer; 3+ triggers rotation
 }

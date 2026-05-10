@@ -277,6 +277,7 @@ export class QuestionsService {
     const newQuestion: QuestionItem = {
       id: ref.id,
       kuId,
+      sourceCollection: 'knowledge-units',
       data: {
         question: parsed.question,
         context: parsed.context,
@@ -330,6 +331,7 @@ export class QuestionsService {
     const newQuestion: QuestionItem = {
       id: ref.id,
       kuId,
+      sourceCollection: 'concepts',
       data: {
         question: parsed.question,
         context: parsed.context,
@@ -360,9 +362,9 @@ export class QuestionsService {
 
     if (result === 'pass') {
       batch.update(questionRef, { rank: FieldValue.increment(RANK_CORRECT_DELTA) });
-      batch.set(stateRef, { questionId, kuId, consecutiveFailures: 0 }, { merge: true });
+      batch.set(stateRef, { questionId, consecutiveFailures: 0 }, { merge: true });
     } else {
-      batch.set(stateRef, { questionId, kuId, consecutiveFailures: FieldValue.increment(1) }, { merge: true });
+      batch.set(stateRef, { questionId, consecutiveFailures: FieldValue.increment(1) }, { merge: true });
     }
 
     try {

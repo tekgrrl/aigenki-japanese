@@ -231,9 +231,8 @@ export interface GrammarLesson {
   pattern: string;
   title: string;
   jlptLevel: string;
-  classification?: GrammarClassification;
   meaning: string;
-  formation: string;
+  formation: string | string[];
   notes: string;
   examples: {
     japanese: string;
@@ -246,7 +245,6 @@ export interface GrammarLesson {
 
 export interface UserGrammarLesson {
   id: string;
-  userId: string;
   kuId: string;
   lessonId: string;
   sourceType: "scenario" | "concept";
@@ -277,28 +275,13 @@ export type KnowledgeUnitType =
 
 // ─── KnowledgeUnit discriminated union ───────────────────────────────────────
 
-/**
- * Fields shared by every KU sub-type.
- * Deprecated fields remain here until the User state migration is complete.
- */
+/** Fields shared by every KU sub-type. */
 export interface KnowledgeUnitBase {
   id: string;
   content: string; // The main "thing" (e.g., "食べる", "家族")
   relatedUnits: string[]; // Array of other KnowledgeUnit IDs
-  /** @deprecated migrating to User state models */
-  userId: string;
-  /** @deprecated migrating to User state models */
-  personalNotes: string;
-  /** @deprecated migrating to User state models */
-  userNotes?: string;
-  /** @deprecated migrating to User state models */
   createdAt: Timestamp;
-  /** @deprecated migrating to User state models */
-  status: "learning" | "reviewing";
-  /** @deprecated migrating to User state models */
-  facet_count: number;
-  /** @deprecated migrating to User state models */
-  history?: any[];
+  data: Record<string, any>;
 }
 
 export interface VocabKnowledgeUnit extends KnowledgeUnitBase {
@@ -309,6 +292,7 @@ export interface VocabKnowledgeUnit extends KnowledgeUnitBase {
     conjugationType?: 'godan' | 'ichidan' | 'irregular';
     jlptLevel?: string | null;
     wanikaniLevel?: number | null;
+    corpusNotes?: string;
     [key: string]: any;
   };
 }
@@ -319,6 +303,7 @@ export interface KanjiKnowledgeUnit extends KnowledgeUnitBase {
     meaning?: string;
     jlptLevel?: string | null;
     wanikaniLevel?: number | null;
+    corpusNotes?: string;
     [key: string]: any;
   };
 }
@@ -492,8 +477,6 @@ export interface UserKnowledgeUnit {
   id: string;
   userId: string;
   kuId: string; // Bridges to GlobalKnowledgeUnit.id
-  personalNotes: string;
-  userNotes?: string;
   createdAt: Timestamp;
   status: "learning" | "reviewing";
   facet_count: number;
@@ -522,7 +505,8 @@ export type FacetType =
 export interface ReviewFacet {
   id: string;
   userId: string;
-  kuId: string; // ID of the parent KnowledgeUnit
+  kuId: string;
+  sourceCollection?: 'knowledge-units' | 'concepts' | 'scenarios';
   facetType: FacetType;
   srsStage: number; // 0 (new) to 8 (mastered)
   nextReviewAt: Timestamp; // ISO string
@@ -559,6 +543,7 @@ export type LessonDifficulty =
 export interface QuestionItem {
   id: string;
   kuId: string;
+  sourceCollection?: 'knowledge-units' | 'concepts' | 'scenarios';
   data: {
     context?: string;
     question: string;
@@ -569,23 +554,10 @@ export interface QuestionItem {
   rank: number;
   rejectionCount: number;
   createdAt: string | Timestamp;
-  /** @deprecated */
-  userId?: string;
-  /** @deprecated */
-  status?: "active" | "flagged" | "inactive";
-  /** @deprecated */
-  lastUsed?: string | Timestamp;
-  /** @deprecated */
-  previousAnswers?: {
-    answer: string;
-    result: "pass" | "fail";
-    timestamp: Timestamp;
-  }[];
 }
 
 export interface UserQuestionState {
   questionId: string;
-  kuId: string;
   rejected: boolean;
   consecutiveFailures: number;
 }

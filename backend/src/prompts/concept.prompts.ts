@@ -16,7 +16,7 @@ Write for an English-speaking learner at any level. Use Japanese text for all ex
 
 **Content Guidelines:**
 
-1. 'overview': Define the concept strictly in terms of how Japanese works — do not reference English grammar rules, relative pronouns, or words like "who", "which", or "that". Maximum two sentences.
+1. 'overview': Define the concept strictly in terms of how Japanese works — do not reference English grammar rules, relative pronouns, or words like "who", "which", or "that". Use your judegement on how much detail to provide to land the concept, but be thoughtful of the learner's experience. 
 
 2. 'mechanics': Break the grammar down by the learner's communicative intent, not just structural formulas. Each mechanic must contain:
    - 'goalTitle': An action-oriented title describing what the learner wants to express (e.g., "Describe a noun using a habitual or future action").

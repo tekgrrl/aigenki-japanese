@@ -32,7 +32,7 @@ function KuRow({ ku, onEdit, onDelete }: { ku: KnowledgeUnit; onEdit: () => void
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-shodo-mist hover:bg-shodo-paper-warm transition-colors">
-      <span className="text-base font-medium text-shodo-ink w-40 shrink-0 truncate">
+      <span title={ku.content} className="text-base font-medium text-shodo-ink w-40 shrink-0 truncate cursor-default">
         {ku.content}
       </span>
 

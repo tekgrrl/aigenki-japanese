@@ -22,6 +22,17 @@ import { ScenariosService } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
 
+/**
+ * Resolves which Firestore collection a ReviewFacet's kuId points to.
+ * New facets carry sourceCollection explicitly; old documents fall back to
+ * inferring from source.type, defaulting to 'knowledge-units'.
+ */
+export function resolveKuCollection(facet: Pick<ReviewFacet, 'sourceCollection' | 'source'>): 'knowledge-units' | 'concepts' | 'scenarios' {
+    if (facet.sourceCollection) return facet.sourceCollection;
+    if (facet.source?.type === 'concept') return 'concepts';
+    return 'knowledge-units';
+}
+
 @Injectable()
 export class ReviewsService {
     private readonly logger = new Logger(ReviewsService.name);
@@ -316,6 +327,7 @@ export class ReviewsService {
                     if (!existingKanjiTypes.has('Kanji-Component-Meaning')) {
                         batch.set(this.facetsColRef(uid).doc(), {
                             kuId: kanjiKuId,
+                            sourceCollection: 'knowledge-units',
                             facetType: 'Kanji-Component-Meaning',
                             srsStage: 0,
                             nextReviewAt: now,
@@ -331,6 +343,7 @@ export class ReviewsService {
                     if (!existingKanjiTypes.has('Kanji-Component-Reading')) {
                         batch.set(this.facetsColRef(uid).doc(), {
                             kuId: kanjiKuId,
+                            sourceCollection: 'knowledge-units',
                             facetType: 'Kanji-Component-Reading',
                             srsStage: 0,
                             nextReviewAt: now,
@@ -374,6 +387,7 @@ export class ReviewsService {
             const newFacetRef = this.facetsColRef(uid).doc();
             batch.set(newFacetRef, {
                 kuId: targetKuId,
+                sourceCollection: 'knowledge-units',
                 facetType: key,
                 srsStage: startStage,
                 nextReviewAt,
@@ -484,11 +498,13 @@ export class ReviewsService {
     ): Promise<number> {
         const batch = this.db.batch();
         const now = Timestamp.now();
+        const sourceCollection = resolveKuCollection({ source });
 
         for (const facet of facets) {
             const ref = this.facetsColRef(uid).doc();
             batch.set(ref, {
                 kuId: facet.kuId,
+                sourceCollection,
                 facetType: facet.facetType,
                 srsStage: 0,
                 nextReviewAt: now,

@@ -79,20 +79,22 @@ export default function LearnListPage() {
                 ${i < rows.length - 1 ? "border-b border-shodo-paper-dark" : ""}
                 dark:hover:bg-gray-700`}
             >
-              {/* Japanese content — coloured by type */}
+              {/* Primary label — coloured by type */}
               <span
                 style={{ color: TYPE_COLORS[ku.type] }}
-                className="text-xl font-bold min-w-[5rem] dark:text-white"
+                className={`font-bold min-w-[5rem] dark:text-white ${ku.type === "Grammar" ? "text-base" : "text-xl"}`}
               >
-                {ku.content}
+                {ku.type === "Grammar" && (ku as any).data?.title
+                  ? (ku as any).data.title
+                  : ku.content}
               </span>
 
               {/* Reading / definition hint — always flex-1 to anchor fixed columns */}
               <span className="flex-1 truncate text-sm text-shodo-ink-light dark:text-gray-400">
                 {ku.type === "Vocab" && (ku as any).data?.reading && (ku as any).data.reading !== ku.content
                   ? (ku as any).data.reading
-                  : ku.type === "Grammar" && (ku as any).data?.title
-                    ? (ku as any).data.title
+                  : ku.type === "Grammar"
+                    ? ku.content
                     : ku.type === "Kanji" && (ku as any).data?.meaning
                       ? (ku as any).data.meaning
                       : ""}

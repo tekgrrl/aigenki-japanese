@@ -50,9 +50,6 @@ export class KnowledgeUnitsController {
         const ku = await this.knowledgeUnitsService.findOneById(id);
         if (!ku) throw new NotFoundException(`Knowledge Unit ${id} not found`);
 
-        // Direct owner (user_default managing corpus) or user has a UKU for this KU
-        if (ku.userId === uid) return ku;
-
         const uku = await this.userKnowledgeUnitsService.findByKuId(uid, id);
         if (uku) return ku;
 
