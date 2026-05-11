@@ -251,53 +251,58 @@ export default function KnowledgeManagementPage() {
           const kuFacets = facets.filter((f) => f.kuId === ku.id);
           return (
             <li key={ku.id} className="p-4 bg-gray-700 rounded-lg shadow">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-2xl font-semibold text-white break-all">
-                  {ku.content}
-                </span>
-
-                <Link
-                  href={`/learn/${ku.id}?source=review`}
-                  className="text-sm inline-block px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700"
-                >
-                  Review lesson
-                </Link>
-
-                <span className="font-mono text-sm bg-gray-900 text-gray-100 px-2 py-1 rounded ml-2 flex-shrink-0">
-                  {ku.type}
-                </span>
-
-                <button
-                  onClick={() => handleEditClick(ku)}
-                  className="ml-2 text-sm px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
-                >
-                  Edit
-                </button>
-
-                {confirmDeleteId === ku.id ? (
-                  <div className="ml-2 flex items-center gap-1">
-                    <button
-                      onClick={() => handleDelete(ku.id)}
-                      disabled={deletingId === ku.id}
-                      className="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white rounded transition-colors"
-                    >
-                      {deletingId === ku.id ? "Deleting…" : "Confirm"}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteId(null)}
-                      className="text-sm px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
-                    >
-                      ✕
-                    </button>
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <span className="text-2xl font-semibold text-white break-words">
+                    {ku.content}
+                  </span>
+                  <div className="mt-1">
+                    <span className="font-mono text-xs bg-gray-900 text-gray-300 px-2 py-0.5 rounded">
+                      {ku.type}
+                    </span>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDeleteId(ku.id)}
-                    className="ml-2 text-sm px-3 py-1 bg-gray-700 hover:bg-red-700 text-gray-300 hover:text-white rounded transition-colors"
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link
+                    href={`/learn/${ku.id}?source=review`}
+                    className="text-sm whitespace-nowrap px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700"
                   >
-                    Delete
+                    Review lesson
+                  </Link>
+
+                  <button
+                    onClick={() => handleEditClick(ku)}
+                    className="text-sm px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                  >
+                    Edit
                   </button>
-                )}
+
+                  {confirmDeleteId === ku.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDelete(ku.id)}
+                        disabled={deletingId === ku.id}
+                        className="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white rounded transition-colors"
+                      >
+                        {deletingId === ku.id ? "Deleting…" : "Confirm"}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="text-sm px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(ku.id)}
+                      className="text-sm px-3 py-1 bg-gray-700 hover:bg-red-700 text-gray-300 hover:text-white rounded transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
 
               {ku.type === "Vocab" && ku.data.reading && (
@@ -536,7 +541,7 @@ export default function KnowledgeManagementPage() {
 
       {/* Search & Enroll */}
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
-        <h2 className="text-2xl font-semibold mb-4 text-white">Search Existing Vocab</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-white">Search Knowledge Units</h2>
         <input
           type="text"
           value={searchQuery}
@@ -562,10 +567,12 @@ export default function KnowledgeManagementPage() {
 
               return (
                 <li key={result.id} className="flex items-center justify-between gap-4 bg-gray-700 rounded-lg px-4 py-3">
-                  <div className="min-w-0">
-                    <span className="text-white font-semibold mr-2">{result.content}</span>
-                    <span className="text-xs font-mono bg-gray-600 text-gray-300 px-1.5 py-0.5 rounded mr-2">{result.type}</span>
-                    {hint && <span className="text-sm text-gray-400 truncate">{hint}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-white font-semibold break-words">{result.content}</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs font-mono bg-gray-600 text-gray-300 px-1.5 py-0.5 rounded">{result.type}</span>
+                      {hint && <span className="text-sm text-gray-400 truncate">{hint}</span>}
+                    </div>
                   </div>
                   {alreadyEnrolled ? (
                     <span className="text-xs text-green-400 shrink-0">In queue</span>

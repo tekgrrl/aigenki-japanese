@@ -8,6 +8,7 @@ interface GrammarLessonViewProps {
   userLesson?: UserGrammarLesson;
   selectedFacets: Record<string, boolean>;
   onToggleFacet: (key: string) => void;
+  existingFacetTypes?: Set<string>;
 }
 
 export default function GrammarLessonView({
@@ -15,6 +16,7 @@ export default function GrammarLessonView({
   userLesson,
   selectedFacets,
   onToggleFacet,
+  existingFacetTypes = new Set(),
 }: GrammarLessonViewProps) {
   const [revealedExamples, setRevealedExamples] = useState<Record<number, boolean>>({});
 
@@ -25,7 +27,6 @@ export default function GrammarLessonView({
   const facetOptions = [
     { key: "sentence-assembly", label: "Sentence Assembly", description: "Reassemble example sentences" },
     { key: "AI-Generated-Question", label: "General usage patterns", description: "Answer varied questions about how this pattern is used in context" },
-    { key: "Content-to-Definition", label: "Pattern → Meaning", description: "See the pattern, recall its meaning" },
   ];
 
   return (
@@ -118,23 +119,43 @@ export default function GrammarLessonView({
           Choose which review types to add to your queue.
         </p>
         <div className="space-y-3">
-          {facetOptions.map(({ key, label, description }) => (
-            <label
-              key={key}
-              className="flex items-start gap-3 p-4 bg-shodo-paper-warm border border-shodo-ink/10 rounded-lg cursor-pointer hover:border-indigo-300 transition-colors"
-            >
-              <input
-                type="checkbox"
-                checked={!!selectedFacets[key]}
-                onChange={() => onToggleFacet(key)}
-                className="mt-1 w-4 h-4 accent-indigo-600"
-              />
-              <div>
-                <div className="font-semibold text-shodo-ink">{label}</div>
-                <div className="text-sm text-shodo-ink-light">{description}</div>
-              </div>
-            </label>
-          ))}
+          {facetOptions.map(({ key, label, description }) => {
+            const enrolled = existingFacetTypes.has(key);
+            return enrolled ? (
+              <label
+                key={key}
+                className="flex items-start gap-3 p-4 bg-shodo-paper-warm border border-shodo-ink/10 rounded-lg opacity-60 cursor-not-allowed"
+              >
+                <input
+                  type="checkbox"
+                  checked
+                  disabled
+                  onChange={() => {}}
+                  className="mt-1 w-4 h-4 accent-indigo-600"
+                />
+                <div>
+                  <div className="font-semibold text-shodo-ink">{label}</div>
+                  <div className="text-sm text-shodo-ink-light">{description}</div>
+                </div>
+              </label>
+            ) : (
+              <label
+                key={key}
+                className="flex items-start gap-3 p-4 bg-shodo-paper-warm border border-shodo-ink/10 rounded-lg cursor-pointer hover:border-indigo-300 transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={!!selectedFacets[key]}
+                  onChange={() => onToggleFacet(key)}
+                  className="mt-1 w-4 h-4 accent-indigo-600"
+                />
+                <div>
+                  <div className="font-semibold text-shodo-ink">{label}</div>
+                  <div className="text-sm text-shodo-ink-light">{description}</div>
+                </div>
+              </label>
+            );
+          })}
         </div>
       </div>
     </div>
