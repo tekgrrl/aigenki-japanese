@@ -74,6 +74,20 @@ function KuRow({ ku, onEdit, onDelete }: { ku: KnowledgeUnit; onEdit: () => void
         {preview}
       </span>
 
+      <a
+        href={`https://console.cloud.google.com/firestore/databases/aisrs-japanese-dev/data/panel/lessons/${ku.id}?project=gen-lang-client-0878434798`}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open lesson in Firestore console"
+        className="shrink-0 flex items-center gap-1 text-xs px-3 py-1 rounded border border-shodo-mist text-shodo-ink-light hover:border-orange-400 hover:text-orange-600 transition-colors"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+        Lesson
+      </a>
       <button
         onClick={onEdit}
         className="shrink-0 text-xs px-3 py-1 rounded border border-shodo-mist text-shodo-ink-light hover:border-shodo-indigo hover:text-shodo-indigo transition-colors"

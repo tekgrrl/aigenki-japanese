@@ -226,7 +226,7 @@ export default function LearnItemPage() {
         .filter(k => !existingFacetTypes.has(k));
     }
     if (lesson.type === "Grammar") {
-      return ["sentence-assembly", "AI-Generated-Question", "Content-to-Definition"]
+      return ["sentence-assembly", "AI-Generated-Question"]
         .filter(k => !existingFacetTypes.has(k));
     }
     return [];
@@ -320,18 +320,6 @@ export default function LearnItemPage() {
           },
         });
       }
-      if (allStandardKeys.includes("Content-to-Definition")) {
-        grammarFacets.push({
-          key: "Content-to-Definition",
-          data: {
-            content: grammarLesson.pattern,
-            definitions: [grammarLesson.meaning].filter(Boolean),
-            topic: grammarLesson.title,
-            kuType: "Grammar",
-          },
-        });
-      }
-
       if (grammarFacets.length > 0) {
         promises.push(
           apiFetch("/api/reviews/generate", {
@@ -818,31 +806,37 @@ export default function LearnItemPage() {
           <KanjiLessonView lesson={lesson as KanjiLesson} />
         )}
 
-        {lesson && ku?.type === "Grammar" && (
-          <GrammarLessonView
-            lesson={lesson as GrammarLesson}
-            userLesson={userGrammarLessons[0]}
-            selectedFacets={selectedFacets}
-            onToggleFacet={handleCheckboxChange}
-          />
-        )}
-
         {!isLoading && !error && lesson && source !== "review" && (() => {
           const existingFacetTypes = new Set<string>((existingFacets ?? []).map((f: any) => f.facetType));
           if (ku?.type !== "Grammar") {
             return renderFacetChecklist(existingFacetTypes);
           }
+          const availableKeys = getAvailableStandardFacetKeys(existingFacetTypes);
+          const noneAvailable = availableKeys.length === 0;
           return (
-            <div>
-              {error && <div className="mb-4 text-red-600 text-sm">{error}</div>}
-              <button
-                onClick={handleSubmitFacets}
-                disabled={isSubmitting || !lesson}
-                className="w-full py-4 text-lg bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting ? "Saving..." : existingFacets && existingFacets.length > 0 ? "Add Selected Items" : "Enroll in Review Queue"}
-              </button>
-            </div>
+            <>
+              <GrammarLessonView
+                lesson={lesson as GrammarLesson}
+                userLesson={userGrammarLessons[0]}
+                selectedFacets={selectedFacets}
+                onToggleFacet={handleCheckboxChange}
+                existingFacetTypes={existingFacetTypes}
+              />
+              <div className="mt-6">
+                {error && <div className="mb-4 text-red-600 text-sm">{error}</div>}
+                {noneAvailable ? (
+                  <p className="text-sm text-center text-shodo-ink-faint">All review methods are already configured.</p>
+                ) : (
+                  <button
+                    onClick={handleSubmitFacets}
+                    disabled={isSubmitting}
+                    className="w-full py-4 text-lg bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? "Saving..." : existingFacets && existingFacets.length > 0 ? "Add Selected Items" : "Enroll in Review Queue"}
+                  </button>
+                )}
+              </div>
+            </>
           );
         })()}
       </main>

@@ -106,12 +106,8 @@ export default function EditKnowledgeUnitModal({
         setDefinition("");
         setWanikaniLevel("");
 
-        // Fetch the cached lesson to pre-populate notes (cache hit only — no AI generation triggered if already cached)
-        apiFetch("/api/lessons/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ kuId: knowledgeUnit.id }),
-        }).then(res => res.ok ? res.json() : null).then(lesson => {
+        apiFetch(`/api/lessons?kuId=${knowledgeUnit.id}`)
+        .then(res => res.ok ? res.json() : null).then(lesson => {
           if (lesson?.notes) {
             setGrammarNotes(lesson.notes);
             setInitialGrammarNotes(lesson.notes);
