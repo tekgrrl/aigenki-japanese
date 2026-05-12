@@ -293,7 +293,14 @@ function GrammarMeaningSlide({ loaded }: { loaded: LoadedItem }) {
       <p className="text-xl text-shodo-ink-light">{gl.meaning}</p>
       <div className="bg-shodo-paper-dark rounded-lg px-4 py-3 border border-shodo-ink/10">
         <div className="text-xs uppercase tracking-widest text-shodo-ink-faint mb-1">Formation</div>
-        <div className="text-lg text-shodo-ink font-mono">{gl.formation}</div>
+        <div className="flex flex-col gap-1">
+          {(Array.isArray(gl.formation) ? gl.formation : [gl.formation]).map((f, i) => (
+            <div key={i} className="flex gap-2 text-lg text-shodo-ink font-mono">
+              <span className="text-shodo-ink-faint select-none">›</span>
+              <span>{f}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
