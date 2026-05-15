@@ -34,10 +34,13 @@ function slideCount(loaded: LoadedItem): number {
   return 1;
 }
 
-async function fetchLesson(item: QueueItem): Promise<Lesson> {
+const LESSON_TIMEOUT_MS = 75_000;
+
+async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise<Lesson> {
   if (item.type === "Kanji") {
     const res = await apiFetch(
       `/api/kanji/details?char=${encodeURIComponent(item.content)}&kuId=${item.kuId}`,
+      { signal },
     );
     if (!res.ok) throw new Error("Failed to fetch kanji lesson");
     return res.json();
@@ -46,9 +49,19 @@ async function fetchLesson(item: QueueItem): Promise<Lesson> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kuId: item.kuId }),
+    signal,
   });
   if (!res.ok) throw new Error("Failed to generate lesson");
   return res.json();
+}
+
+async function fetchLessonWithRetry(item: QueueItem): Promise<Lesson> {
+  try {
+    return await fetchLesson(item, AbortSignal.timeout(LESSON_TIMEOUT_MS));
+  } catch (e) {
+    console.warn(`[session] lesson fetch failed for ${item.content}, retrying…`, e);
+    return await fetchLesson(item, AbortSignal.timeout(LESSON_TIMEOUT_MS));
+  }
 }
 
 async function enrollItem(item: QueueItem, lesson: Lesson): Promise<void> {
@@ -391,6 +404,7 @@ export default function LessonSessionPage() {
   const [loadedCount, setLoadedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [queueEmpty, setQueueEmpty] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [currentItemIdx, setCurrentItemIdx] = useState(0);
   const [currentSlideIdx, setCurrentSlideIdx] = useState(0);
   const [enrolling, setEnrolling] = useState(false);
@@ -432,19 +446,21 @@ export default function LessonSessionPage() {
         setTotalCount(queue.length);
 
         const results: LoadedItem[] = [];
-        await Promise.all(
-          queue.map(async (item) => {
-            const lesson = await fetchLesson(item);
+        for (const item of queue) {
+          try {
+            const lesson = await fetchLessonWithRetry(item);
             results.push({ item, lesson });
-            setLoadedCount(c => c + 1);
-          }),
-        );
-        // preserve queue order
-        results.sort((a, b) => queue.findIndex(q => q.kuId === a.item.kuId) - queue.findIndex(q => q.kuId === b.item.kuId));
+          } catch (e) {
+            console.error(`[session] skipping ${item.content} after retry:`, e);
+          }
+          setLoadedCount(c => c + 1);
+        }
+        if (results.length === 0) { setLoadError(true); return; }
         setLoadedItems(results);
         setPhase("slideshow");
       } catch (e) {
         console.error(e);
+        setLoadError(true);
       }
     })();
   }, []);
@@ -499,6 +515,20 @@ export default function LessonSessionPage() {
   }, [phase, advance, retreat]);
 
   // ─── Loading phase ────────────────────────────────────────────────────────
+  if (loadError) {
+    return (
+      <main className="container mx-auto max-w-2xl p-8">
+        <div>
+          <h1 className="text-2xl font-bold text-shodo-ink mb-3">Could not load lessons</h1>
+          <p className="text-shodo-ink-light mb-8">All lesson generations failed or timed out. Check the backend logs, then try again.</p>
+          <button onClick={() => router.push("/learn")} className="px-6 py-3 bg-shodo-ink text-shodo-paper rounded-lg font-semibold hover:bg-shodo-ink-light transition-colors">
+            Back
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   if (queueEmpty) {
     return (
       <main className="container mx-auto max-w-2xl p-8">
