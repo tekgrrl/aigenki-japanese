@@ -376,6 +376,28 @@ export interface UserKnowledgeUnit {
     type: 'scenario' | 'lesson';
     id: string;
   };
+  /** Current position in the facet unlock sequence. 0 = not yet initialized. */
+  currentStage?: number;
+}
+
+// ─── Facet sequence types ────────────────────────────────────────────────────
+
+export interface FacetStageEntry {
+  type: FacetType;
+  /** Where the facet data comes from. 'kanji-components' produces one facet per component. */
+  source: 'primary' | 'kanji-components' | 'examples';
+}
+
+export interface FacetStageDefinition {
+  stage: number;
+  facets: FacetStageEntry[];
+  /** All facets in this stage must reach this SRS stage before the next stage unlocks. null = terminal. */
+  unlockAtSrsStage: number | null;
+}
+
+export interface KuFacetSequence {
+  kuType: string;
+  stages: FacetStageDefinition[];
 }
 
 export interface UserConcept {
@@ -424,6 +446,8 @@ export interface ReviewFacet {
   consecutiveFailures?: number;
   /** @deprecated - failure tracking moved to UserQuestionState.consecutiveFailures */
   questionAttempts?: number;
+  /** Which stage in the KU's facet unlock sequence this facet belongs to. */
+  sequenceStage?: number;
   data?: any;
   source?: {
     type: 'lesson' | 'concept';

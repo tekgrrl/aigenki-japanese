@@ -20,6 +20,7 @@ import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledg
 import { StatsService } from '../stats/stats.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
+import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
 
 /**
@@ -37,18 +38,31 @@ export function resolveKuCollection(facet: Pick<ReviewFacet, 'sourceCollection' 
 export class ReviewsService {
     private readonly logger = new Logger(ReviewsService.name);
 
-    // SRS intervals in hours (maps to srsStage)
-    private readonly INTERVALS = {
-        0: 10 / 60, // 10 minutes
-        1: 8, // 8 hours
-        2: 24, // 1 day
-        3: 72, // 3 days
-        4: 168, // 1 week
-        5: 336, // 2 weeks
-        6: 730, // 1 month (approx)
-        7: 2920, // 4 months
-        8: 8760, // 1 year
-    };
+    // SRS intervals in hours (maps to srsStage).
+    // Set SRS_TEST_MODE=true in backend/.env to use the compressed testing schedule.
+    private readonly INTERVALS = process.env.SRS_TEST_MODE === 'true'
+        ? {
+            0: 10 / 60,   // 10 min
+            1: 10 / 60,   // 10 min
+            2: 10 / 60,   // 10 min
+            3: 10 / 60,   // 10 min
+            4: 10 / 60,   // 10 min
+            5: 10 / 60,   // 10 min
+            6: 730,
+            7: 2920,
+            8: 8760,
+        }
+        : {
+            0: 10 / 60,   // 10 min
+            1: 8,         // 8 h
+            2: 24,        // 1 day
+            3: 72,        // 3 days
+            4: 168,       // 1 week
+            5: 336,       // 2 weeks
+            6: 730,       // ~1 month
+            7: 2920,      // 4 months
+            8: 8760,      // 1 year
+        };
 
     constructor(
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
@@ -60,6 +74,7 @@ export class ReviewsService {
         private readonly statsService: StatsService,
         private readonly scenariosService: ScenariosService,
         private readonly learningProgressService: LearningProgressService,
+        private readonly reviewProgressService: ReviewProgressService,
     ) { }
 
     private facetsColRef(uid: string): CollectionReference {
@@ -160,6 +175,17 @@ export class ReviewsService {
         // Post-transaction: recompute and cache UKU status from facet SRS data
         if (txResult.kuId) {
             await this.learningProgressService.recomputeAndCache(uid, txResult.kuId);
+        }
+
+        // Post-transaction: check if this SRS update unlocks the next facet stage
+        if (txResult.kuId && txResult.newStage > txResult.prevStage) {
+            void (async () => {
+                try {
+                    await this.reviewProgressService.checkAndAdvanceStage(uid, txResult.kuId);
+                } catch (e) {
+                    this.logger.error(`checkAndAdvanceStage failed uid=${uid} kuId=${txResult.kuId}`, e);
+                }
+            })();
         }
 
         // Post-transaction: check if a linked scenario's vocab is now all drill-ready

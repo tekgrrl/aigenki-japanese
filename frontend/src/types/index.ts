@@ -481,6 +481,23 @@ export interface UserKnowledgeUnit {
   status: "learning" | "reviewing";
   facet_count: number;
   history?: any[];
+  currentStage?: number;
+}
+
+export interface FacetStageEntry {
+  type: FacetType;
+  source: 'primary' | 'kanji-components' | 'examples';
+}
+
+export interface FacetStageDefinition {
+  stage: number;
+  facets: FacetStageEntry[];
+  unlockAtSrsStage: number | null;
+}
+
+export interface KuFacetSequence {
+  kuType: string;
+  stages: FacetStageDefinition[];
 }
 
 /** Distributes Omit across union members, preserving the discriminated union. */
@@ -519,6 +536,7 @@ export interface ReviewFacet {
   currentQuestionId?: string;
   /** @deprecated - failure tracking moved to UserQuestionState.consecutiveFailures */
   questionAttempts?: number;
+  sequenceStage?: number;
   data?: any;
 }
 
