@@ -64,46 +64,11 @@ async function fetchLessonWithRetry(item: QueueItem): Promise<Lesson> {
   }
 }
 
-async function enrollItem(item: QueueItem, lesson: Lesson): Promise<void> {
-  const facetsToCreate: { key: string; data: Record<string, unknown> }[] = [];
-
-  if (lesson.type === "Vocab") {
-    const vl = lesson as VocabLesson;
-    const base = { content: item.content, reading: vl.reading, definitions: vl.definitions ?? [], topic: item.content };
-    const hasReading = vl.reading && vl.reading !== item.content;
-    const examples = vl.context_examples ?? [];
-    facetsToCreate.push({ key: "Definition-to-Content", data: base });
-    facetsToCreate.push({ key: "Content-to-Definition", data: base });
-    if (hasReading) facetsToCreate.push({ key: "Content-to-Reading", data: base });
-    if (examples.length > 0) {
-      facetsToCreate.push({ key: "audio", data: { ...base, contextExample: examples[Math.floor(Math.random() * examples.length)] } });
-    }
-    facetsToCreate.push({ key: "AI-Generated-Question", data: base });
-    for (const k of vl.component_kanji ?? []) {
-      facetsToCreate.push({ key: `Kanji-Component-${k.kanji}`, data: { meaning: k.meaning, onyomi: k.onyomi ?? [], kunyomi: k.kunyomi ?? [] } });
-    }
-  } else if (lesson.type === "Kanji") {
-    const kl = lesson as KanjiLesson;
-    const base = { content: item.content, meaning: kl.meaning, onyomi: kl.onyomi, kunyomi: kl.kunyomi };
-    facetsToCreate.push({ key: "Kanji-Component-Meaning", data: base });
-    facetsToCreate.push({ key: "Kanji-Component-Reading", data: base });
-  } else if (lesson.type === "Grammar") {
-    const gl = lesson as GrammarLesson;
-    for (const ex of gl.examples) {
-      facetsToCreate.push({
-        key: "sentence-assembly",
-        data: { goalTitle: gl.pattern, fragments: ex.fragments, answer: ex.japanese, english: ex.english, accepted_alternatives: ex.accepted_alternatives ?? [], sourceId: item.kuId, sourceTitle: gl.title },
-      });
-    }
-    facetsToCreate.push({ key: "AI-Generated-Question", data: { content: gl.pattern, topic: gl.title, sourceId: item.kuId, sourceTitle: gl.title } });
-    facetsToCreate.push({ key: "Content-to-Definition", data: { content: gl.pattern, definitions: [gl.meaning], topic: gl.title, kuType: "Grammar" } });
-  }
-
-  if (facetsToCreate.length === 0) return;
-  await apiFetch("/api/reviews/generate", {
+async function enrollItem(item: QueueItem): Promise<void> {
+  await apiFetch("/api/reviews/initialize-sequence", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kuId: item.kuId, facetsToCreate, selfCertifiedFacets: [] }),
+    body: JSON.stringify({ kuId: item.kuId }),
   });
 }
 
@@ -465,8 +430,8 @@ export default function LessonSessionPage() {
     })();
   }, []);
 
-  const triggerEnrollment = useCallback((loaded: LoadedItem) => {
-    enrollmentPromises.current.push(enrollItem(loaded.item, loaded.lesson));
+  const triggerEnrollment = useCallback((item: QueueItem) => {
+    enrollmentPromises.current.push(enrollItem(item));
   }, []);
 
   const advance = useCallback(async () => {
@@ -480,7 +445,7 @@ export default function LessonSessionPage() {
       return;
     }
     // Finished this item — enroll it
-    triggerEnrollment(loaded);
+    triggerEnrollment(loaded.item);
 
     if (!isLastItem) {
       setCurrentItemIdx(i => i + 1);

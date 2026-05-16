@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, FormEvent } from "react";
+import React, { useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import Link from "next/link";
 import { ReviewItem, ReviewFacet, KnowledgeUnit, Lesson, VocabLesson, KanjiLesson, GrammarLesson } from "@/types";
 import * as wanakana from "wanakana";
@@ -99,6 +99,17 @@ export default function ReviewPage() {
   const currentItem = reviewQueue[currentIndex];
 
   const reviewCount = reviewQueue.length;
+  const isSessionComplete = reviewQueue.length > 0 && currentIndex >= reviewQueue.length;
+
+  // Refresh header stats when session ends, with a delay to let fire-and-forget
+  // stage advancement (checkAndAdvanceStage) finish updating UKU status.
+  useEffect(() => {
+    if (!isSessionComplete) return;
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("refreshStats"));
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [isSessionComplete]);
 
   const lastFetchedIndex = useRef<number | null>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
@@ -175,27 +186,42 @@ export default function ReviewPage() {
   };
 
   // --- Data Fetching ---
-  useEffect(() => {
-    const fetchDueItems = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        // TODO usenestjs backend service instead
-        const response = await apiFetch("/api/reviews/facets?due=true");
-        if (!response.ok) {
-          throw new Error("Failed to fetch due review items");
-        }
-        const data: ReviewItem[] = await response.json();
-        setReviewQueue(shuffleArray(data));
-      } catch (err) {
-        if (err instanceof Error) setError(err.message);
-        else setError("An unknown error occurred");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchDueItems();
+  const fetchDueItems = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await apiFetch("/api/reviews/facets?due=true");
+      if (!response.ok) throw new Error("Failed to fetch due review items");
+      const data: ReviewItem[] = await response.json();
+      setReviewQueue(shuffleArray(data));
+    } catch (err) {
+      if (err instanceof Error) setError(err.message);
+      else setError("An unknown error occurred");
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => { fetchDueItems(); }, [fetchDueItems]);
+
+  // Reload queue when the header Review tab is clicked while already on this page
+  useEffect(() => {
+    const handleReload = () => {
+      setCurrentIndex(0);
+      setUserAnswer("");
+      setAnswerState("unanswered");
+      setAiExplanation("");
+      setSessionFailureCounts({});
+      setPendingSrsResult(null);
+      setLevelStatus(null);
+      setShowLesson(false);
+      setLessonForReview(null);
+      setShowFeedbackModal(false);
+      fetchDueItems();
+    };
+    window.addEventListener("reloadReviews", handleReload);
+    return () => window.removeEventListener("reloadReviews", handleReload);
+  }, [fetchDueItems]);
 
   // --- Effect to handle current item changes ---
   useEffect(() => {
@@ -696,7 +722,7 @@ export default function ReviewPage() {
           href="/"
           className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700"
         >
-          Back to Manage
+          Finish
         </Link>
       </main>
     );

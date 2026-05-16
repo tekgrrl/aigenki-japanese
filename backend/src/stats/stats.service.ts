@@ -44,6 +44,20 @@ export class StatsService {
             .count()
             .get();
 
+        const next24HoursQuery = facetsCol
+            .where("nextReviewAt", ">", Timestamp.now())
+            .where("nextReviewAt", "<=", Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)))
+            .count()
+            .get();
+
+        const endOfToday = new Date();
+        endOfToday.setHours(23, 59, 59, 999);
+        const restOfTodayQuery = facetsCol
+            .where("nextReviewAt", ">", Timestamp.now())
+            .where("nextReviewAt", "<=", Timestamp.fromMillis(endOfToday.getTime()))
+            .count()
+            .get();
+
         const userStatsQuery = this.db.collection('users').doc(uid).get();
 
         const scenariosCol = uid === ADMIN_USER_ID
@@ -54,11 +68,13 @@ export class StatsService {
             .count()
             .get();
 
-        const [ukuLearnSnapshot, reviewingSnapshot, masteredSnapshot, reviewsSnapshot, userStatsDoc, simulateScenariosSnapshot] = await Promise.all([
+        const [ukuLearnSnapshot, reviewingSnapshot, masteredSnapshot, reviewsSnapshot, next24HoursSnapshot, restOfTodaySnapshot, userStatsDoc, simulateScenariosSnapshot] = await Promise.all([
             ukuLearnQuery,
             reviewQuery,
             masteredQuery,
             reviewsDueQuery,
+            next24HoursQuery,
+            restOfTodayQuery,
             userStatsQuery,
             simulateScenariosQuery,
         ]);
@@ -77,14 +93,9 @@ export class StatsService {
 
         // --- CALCULATION LOGIC ---
 
-        // 1. Next 24 Hours
-        // Sum hourly buckets from (now + 1h) to (now + 24h)
-        let next24HoursCount = 0;
-        for (let i = 1; i <= 24; i++) {
-            const futureHour = new Date(now.getTime() + i * 60 * 60 * 1000);
-            const key = this.getDateBuckets(futureHour).hourKey;
-            next24HoursCount += (rawHourlyForecast[key] || 0);
-        }
+        // 1. Next 24 Hours — direct range query so past-due items (nextReviewAt <= now) are
+        // never double-counted with reviewsDue, regardless of SRS interval length.
+        const next24HoursCount = next24HoursSnapshot.data().count;
 
         // 2. 5-Day Schedule
         // Day 0: Rest of Today (remaining hours)
@@ -93,20 +104,8 @@ export class StatsService {
         const schedule: { date: string; isToday: boolean; count: number; runningTotal: number; label: string; }[] = [];
         let runningTotal = reviewsDueCount;
 
-        // Day 0 (Today)
-        let todayRemainingCount = 0;
-        const startHour = now.getHours() + 1; // start from next hour
-        if (startHour < 24) {
-            const todayBuckets = this.getDateBuckets(now);
-            // Reconstruct the hour keys for the rest of today
-            // Note: simple string manipulation is safe here as yyyy-mm-dd is stable for the loop
-            const prefix = todayBuckets.dayKey;
-            for (let h = startHour; h < 24; h++) {
-                const hh = String(h).padStart(2, '0');
-                const key = `${prefix}-${hh}`;
-                todayRemainingCount += (rawHourlyForecast[key] || 0);
-            }
-        }
+        // Day 0 (Today) — direct range query avoids hourly-bucket blind spots (e.g. same-hour reschedules)
+        const todayRemainingCount = restOfTodaySnapshot.data().count;
 
         runningTotal += todayRemainingCount;
         schedule.push({

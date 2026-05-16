@@ -1,5 +1,6 @@
 import { Controller, Post, Body, BadRequestException, Put, Param, Get, Query, Logger, UseGuards } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
+import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
 
@@ -8,7 +9,10 @@ import { UserId } from '../auth/user-id.decorator';
 export class ReviewsController {
   private readonly logger = new Logger(ReviewsController.name);
 
-  constructor(private readonly reviewsService: ReviewsService) { }
+  constructor(
+    private readonly reviewsService: ReviewsService,
+    private readonly reviewProgressService: ReviewProgressService,
+  ) { }
 
   @Post('evaluate')
   async evaluate(@UserId() uid: string, @Body() body: { userAnswer: string; expectedAnswers: string[]; question: string; topic: string; questionId: string; kuId: string; facetType?: string }) {
@@ -55,6 +59,15 @@ export class ReviewsController {
     }
 
     return this.reviewsService.generateReviewFacets(uid, body.kuId, body.facetsToCreate, body.selfCertifiedFacets ?? []);
+  }
+
+  @Post('initialize-sequence')
+  async initializeSequence(
+    @UserId() uid: string,
+    @Body() body: { kuId: string },
+  ) {
+    if (!body.kuId) throw new BadRequestException('Missing kuId');
+    return this.reviewProgressService.initializeSequence(uid, body.kuId);
   }
 
   @Get('facets')

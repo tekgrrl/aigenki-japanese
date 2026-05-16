@@ -19,11 +19,12 @@ import { UserModule } from './users/user.module';
 import { UserKnowledgeUnitsModule } from './user-knowledge-units/user-knowledge-units.module';
 import { ConceptsModule } from './concepts/concepts.module';
 import { LearningProgressModule } from './learning-progress/learning-progress.module';
+import { ReviewProgressModule } from './review-progress/review-progress.module';
 import { TutorModule } from './tutor/tutor.module';
 import { DailyPlanModule } from './daily-plan/daily-plan.module';
 
 @Module({
-  imports: [ReviewsModule, FirebaseModule, GeminiModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, TutorModule, DailyPlanModule],
+  imports: [ReviewsModule, FirebaseModule, GeminiModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, DailyPlanModule],
   controllers: [AppController],
   providers: [AppService, QuestionsService],
 })

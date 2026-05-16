@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/providers/AuthProvider";
@@ -13,6 +14,7 @@ import { applyFurigana, loadFurigana } from "@/lib/furigana";
  */
 export default function Header() {
   const { user } = useAuth();
+  const pathname = usePathname();
   const [stats, setStats] = useState({ learnCount: 0, reviewingCount: 0, reviewsDue: 0, simulateCount: 0 });
   const [showDailyNudge, setShowDailyNudge] = useState(false);
 
@@ -120,12 +122,21 @@ export default function Header() {
           >
             Learn ({stats.learnCount}/{stats.reviewingCount})
           </Link>
-          <Link
-            href="/review"
-            className="whitespace-nowrap px-4 py-2 rounded-md text-shodo-ink font-medium hover:bg-shodo-ink/5 transition-colors duration-200"
-          >
-            Review ({stats.reviewsDue})
-          </Link>
+          {pathname === "/review" ? (
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent("reloadReviews"))}
+              className="whitespace-nowrap px-4 py-2 rounded-md text-shodo-ink font-medium hover:bg-shodo-ink/5 transition-colors duration-200"
+            >
+              Review ({stats.reviewsDue})
+            </button>
+          ) : (
+            <Link
+              href="/review"
+              className="whitespace-nowrap px-4 py-2 rounded-md text-shodo-ink font-medium hover:bg-shodo-ink/5 transition-colors duration-200"
+            >
+              Review ({stats.reviewsDue})
+            </Link>
+          )}
           <Link
             href="/scenarios"
             className="whitespace-nowrap px-4 py-2 rounded-md text-shodo-ink font-medium hover:bg-shodo-ink/5 transition-colors duration-200"
