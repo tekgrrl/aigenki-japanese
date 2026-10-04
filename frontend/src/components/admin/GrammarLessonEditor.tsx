@@ -61,7 +61,7 @@ export default function GrammarLessonEditor({ lesson, onChange }: Props) {
         <label className={labelClass}>Meaning</label>
         <textarea
           rows={3}
-          className={`${inputClass} resize-none`}
+          className={`${inputClass} resize-y`}
           value={lesson.meaning || ""}
           onChange={(e) => set("meaning", e.target.value)}
         />
