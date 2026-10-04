@@ -31,7 +31,7 @@ export default function VocabLessonEditor({ lesson, onChange }: Props) {
         <label className={labelClass}>Meaning Explanation</label>
         <textarea
           rows={4}
-          className={`${inputClass} resize-none`}
+          className={`${inputClass} resize-y`}
           value={lesson.meaning_explanation || ""}
           onChange={(e) => set("meaning_explanation", e.target.value)}
         />
@@ -41,7 +41,7 @@ export default function VocabLessonEditor({ lesson, onChange }: Props) {
         <label className={labelClass}>Reading Explanation</label>
         <textarea
           rows={4}
-          className={`${inputClass} resize-none`}
+          className={`${inputClass} resize-y`}
           value={lesson.reading_explanation || ""}
           onChange={(e) => set("reading_explanation", e.target.value)}
         />
