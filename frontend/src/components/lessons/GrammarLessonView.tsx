@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import { GrammarLesson, UserGrammarLesson } from "@/types";
 import { normalizeFormation } from "@/lib/grammar-lesson";
 import GrammarPatternDisplay from "./GrammarPatternDisplay";
@@ -56,10 +58,8 @@ export default function GrammarLessonView({
           <p className="text-shodo-ink text-lg">{lesson.meaning}</p>
         </div>
         {lesson.notes && (
-          <div className="border-t border-shodo-ink/10 pt-4 space-y-3">
-            {lesson.notes.replace(/\\n/g, '\n').split(/\n\n+/).map((para, i) => (
-              <p key={i} className="text-shodo-ink-light text-base leading-relaxed">{para}</p>
-            ))}
+          <div className="border-t border-shodo-ink/10 pt-4 space-y-3 text-shodo-ink-light text-base leading-relaxed [&_p]:mb-3 [&_br]:block [&_br]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_strong]:font-semibold [&_strong]:text-shodo-ink [&_a]:underline [&_code]:bg-shodo-ink/5 [&_code]:px-1 [&_code]:rounded [&_h1]:text-xl [&_h1]:font-bold [&_h1]:text-shodo-ink [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:text-shodo-ink [&_h2]:mt-4 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-shodo-ink [&_h3]:mt-3 [&_h3]:mb-1.5">
+            <ReactMarkdown remarkPlugins={[remarkBreaks]}>{lesson.notes.replace(/\\n/g, '\n')}</ReactMarkdown>
           </div>
         )}
       </div>

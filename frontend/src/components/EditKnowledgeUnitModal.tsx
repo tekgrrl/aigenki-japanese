@@ -274,7 +274,7 @@ export default function EditKnowledgeUnitModal({
                   rows={4}
                   value={grammarNotes}
                   onChange={(e) => setGrammarNotes(e.target.value)}
-                  className={`${inputClass} resize-none`}
+                  className={`${inputClass} resize-y`}
                   placeholder="Nuance, register, common mistakes, contrast with similar patterns…"
                 />
               </div>
@@ -285,7 +285,7 @@ export default function EditKnowledgeUnitModal({
                   rows={4}
                   value={grammarCorpusNotes}
                   onChange={(e) => setGrammarCorpusNotes(e.target.value)}
-                  className={`${inputClass} resize-none`}
+                  className={`${inputClass} resize-y`}
                 />
               </div>
             </>
@@ -307,7 +307,7 @@ export default function EditKnowledgeUnitModal({
                 rows={2}
                 value={corpusNotes}
                 onChange={(e) => setCorpusNotes(e.target.value)}
-                className={`${inputClass} resize-none`}
+                className={`${inputClass} resize-y`}
                 placeholder="Context instructions for Gemini..."
               />
             </div>

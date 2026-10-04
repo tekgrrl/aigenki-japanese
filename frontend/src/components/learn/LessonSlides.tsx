@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import { VocabLesson, KanjiLesson, GrammarLesson, Lesson } from "@/types";
 import { apiFetch } from "@/lib/api-client";
 import { normalizeFormation } from "@/lib/grammar-lesson";
@@ -350,15 +352,12 @@ function GrammarExampleSlide({ loaded, exampleIdx }: { loaded: LoadedItem; examp
 
 function GrammarNotesSlide({ loaded }: { loaded: LoadedItem }) {
   const gl = loaded.lesson as GrammarLesson;
-  const paragraphs = gl.notes.replace(/\\n/g, '\n').split(/\n\n+/);
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Notes</span>
       <GrammarPatternDisplay pattern={gl.pattern} className="text-4xl font-bold text-shodo-matcha text-center" />
-      <div className="flex flex-col gap-3">
-        {paragraphs.map((para, i) => (
-          <p key={i} className="text-lg text-shodo-ink-light leading-relaxed">{para}</p>
-        ))}
+      <div className="flex flex-col gap-3 text-lg text-shodo-ink-light leading-relaxed [&_p]:mb-3 [&_br]:block [&_br]:mb-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_strong]:font-semibold [&_strong]:text-shodo-ink [&_a]:underline [&_code]:bg-shodo-ink/5 [&_code]:px-1 [&_code]:rounded [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:text-shodo-ink [&_h1]:mt-2 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-shodo-ink [&_h2]:mt-2 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-shodo-ink [&_h3]:mt-2">
+        <ReactMarkdown remarkPlugins={[remarkBreaks]}>{gl.notes.replace(/\\n/g, '\n')}</ReactMarkdown>
       </div>
     </div>
   );

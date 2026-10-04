@@ -1,4 +1,4 @@
-import { Controller, Get, Logger, NotFoundException, Param, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Logger, NotFoundException, Param, Patch, UseGuards } from '@nestjs/common';
 import { GrammarSectionsService } from './grammar-sections.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 
@@ -23,5 +23,14 @@ export class GrammarSectionsController {
             throw new NotFoundException(`Grammar section ${id} not found`);
         }
         return section;
+    }
+
+    @Patch(':id')
+    async updateNotes(@Param('id') id: string, @Body() body: { notes: string }) {
+        if (typeof body.notes !== 'string') {
+            throw new BadRequestException('notes must be a string');
+        }
+        await this.grammarSectionsService.updateNotes(id, body.notes);
+        return { success: true };
     }
 }
