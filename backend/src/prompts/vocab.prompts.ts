@@ -25,6 +25,7 @@ The lesson should be in English. Where you want to use Japanese text for example
 * Generate context examples appropriate for the user's current JLPT level even if the vocabulary itself is more advanced. (Level constraint is injected at call time.)
 * Every context example MUST use the target word as a genuinely independent occurrence. Never pick or write a sentence where the word only appears as a bound fragment fused inside a larger, unrelated compound (jukugo) that has its own distinct meaning — e.g. do not use 三月 (March) to exemplify the number 三, or 学校 (school) to exemplify 学. If the target word forms a real compound with a related, compositional meaning, that compound may appear, but the target word's own reading and meaning must still be recoverable as a distinct unit within it — when in doubt, prefer a sentence where the word stands entirely alone.
 * ${PREFER_SPOKEN_REGISTER}
+* Give each context example a short \`usage\` label (a few English words) naming the usage or sense of the target word it shows, e.g. "asking why" vs "how come (surprise)". Examples showing the same usage MUST share the identical label. If the word has more than one distinct usage, the examples should cover them.
 * Analyze component Kanji. If the word is normally or almost always written in kana alone in modern Japanese (e.g. もらう, くれる, いる, ある, すごい, かわいい), set \`kanaOnly\` to true and \`component_kanji\` to an empty array — do not include the kanji breakdown even if kanji exist for it. Otherwise set \`kanaOnly\` to false.
 * Do not explain what "rendaku" means.
 
@@ -52,7 +53,7 @@ You MUST return a valid JSON object matching this schema:
   "reading_explanation": "An explanation of the reading (e.g., nuance, rendaku).",
 
   "context_examples": [
-    { "sentence": "Japanese sentence with Furigana in brackets e.g. 明日[あした]", "translation": "English translation." }
+    { "sentence": "Japanese sentence with Furigana in brackets e.g. 明日[あした]", "translation": "English translation.", "usage": "Short label for the usage/sense shown" }
   ],
   "kanaOnly": "true | false — true if this word is normally written in kana alone (see Task 2); when true, component_kanji MUST be an empty array",
   "component_kanji": [
@@ -293,4 +294,27 @@ export function buildKanjiDetailsSystemPrompt(kanji: string): string {
 /** User message for Kanji Alive-style metadata lookup. Source: gemini.service.ts:generateKanjiDetails */
 export function buildKanjiDetailsUserMessage(kanji: string): string {
   return `Generate a valid JSON object matching the Kanji Alive API structure for the character ${kanji}.`;
+}
+
+/**
+ * Labels the existing context examples of an already-generated Vocab lesson by usage,
+ * without rewriting them (lazy backfill for lessons created before `usage` existed).
+ * Source: lessons.service.ts:labelVocabUsages
+ */
+export function buildUsageLabelMessage(
+  vocab: string,
+  definitions: string[],
+  examples: { sentence: string; translation: string }[],
+): string {
+  const list = examples
+    .map((e, i) => `${i + 1}. ${e.sentence.replace(/\[[^\]]*\]/g, '')} — ${e.translation}`)
+    .join('\n');
+  return `You are labelling example sentences for the Japanese word 「${vocab}」 (definitions: ${definitions.join('; ')}).
+
+For each example below, give a short label (a few English words) naming the usage or sense of 「${vocab}」 that the example shows, e.g. "asking why" vs "how come (surprise)". Examples that show the same usage MUST get the identical label; only use different labels for genuinely different usages, not for synonyms or different contexts.
+
+Examples:
+${list}
+
+Return JSON: {"usages": ["label for example 1", "label for example 2", ...]} with exactly ${examples.length} labels, in order.`;
 }

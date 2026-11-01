@@ -177,7 +177,8 @@ export interface VocabLesson {
   conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
-  context_examples?: { sentence: string; translation: string }[];
+  /** `usage`: short label for the usage/sense the example shows (same label = same usage). Absent on older lessons until labelled. */
+  context_examples?: { sentence: string; translation: string; usage?: string }[];
   validation?: LessonValidation;
   /** When true, component_kanji must be empty — this word is never taught/queued with its kanji breakdown, regardless of how it's stored. Set by the AI at generation time or curated manually via the admin editor; enforced app-side, not just prompted for. */
   kanaOnly?: boolean;

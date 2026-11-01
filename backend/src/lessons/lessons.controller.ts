@@ -120,6 +120,13 @@ export class LessonsController {
     return this.lessonsService.getUserGrammarLessons(uid, kuId);
   }
 
+  /** Lazy usage labelling for a Vocab lesson's examples (used by the Start Learning slideshow). */
+  @Post(':kuId/label-usages')
+  async labelUsages(@Param('kuId') kuId: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    return this.lessonsService.labelVocabUsages(kuId);
+  }
+
   @Post('regenerate/:kuId')
   @UseGuards(AdminGuard)
   async regenerate(@UserId() uid: string, @Param('kuId') kuId: string) {
