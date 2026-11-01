@@ -1146,6 +1146,7 @@ export default function ReviewPage() {
               lesson={lessonForReview as GrammarLesson}
               selectedFacets={{}}
               onToggleFacet={() => {}}
+              readOnly
             />
           )}
         </div>

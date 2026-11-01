@@ -11,6 +11,8 @@ interface GrammarLessonViewProps {
   selectedFacets: Record<string, boolean>;
   onToggleFacet: (key: string) => void;
   existingFacetTypes?: Set<string>;
+  /** Hides the "Review Methods" facet picker (e.g. when viewing the lesson from a review). */
+  readOnly?: boolean;
 }
 
 export default function GrammarLessonView({
@@ -19,6 +21,7 @@ export default function GrammarLessonView({
   selectedFacets,
   onToggleFacet,
   existingFacetTypes = new Set(),
+  readOnly = false,
 }: GrammarLessonViewProps) {
   const [revealedExamples, setRevealedExamples] = useState<Record<number, boolean>>({});
 
@@ -115,6 +118,7 @@ export default function GrammarLessonView({
       </div>
 
       {/* Facet Selection */}
+      {!readOnly && (
       <div className="bg-shodo-paper-dark border border-shodo-ink/5 rounded-lg p-6 shadow-lg">
         <h2 className="text-2xl font-semibold mb-2 text-shodo-ink">Review Methods</h2>
         <p className="text-sm text-shodo-ink-faint mb-4">
@@ -160,6 +164,7 @@ export default function GrammarLessonView({
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }
