@@ -6,6 +6,7 @@ import { KnowledgeUnit, Lesson, VocabLesson, VocabKnowledgeUnit, KanjiLesson, Gr
 import VocabLessonView from "@/components/lessons/VocabLessonView";
 import KanjiLessonView from "@/components/lessons/KanjiLessonView";
 import GrammarLessonView from "@/components/lessons/GrammarLessonView";
+import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import KuMetaTags from "@/components/lessons/KuMetaTags";
 import { FuriganaText } from "@/components/FuriganaText";
 import { buildFuriganaMarkup } from "@/lib/furigana";
@@ -782,6 +783,11 @@ export default function LearnItemPage() {
             <p className="text-2xl text-gray-500 dark:text-gray-400">
               Grammar Pattern
             </p>
+          )}
+          {lesson && ku && (
+            <div className="mt-3 flex flex-col items-start">
+              <ReportContentIssue kuId={ku.id} kuContent={lessonLabel(lesson) ?? ku.content} lesson={lesson} />
+            </div>
           )}
         </header>
 

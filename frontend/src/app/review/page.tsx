@@ -13,6 +13,7 @@ import SentenceAssemblyCard from "@/components/review/SentenceAssemblyCard";
 import SentenceClozeCard from "@/components/review/SentenceClozeCard";
 import InputModeBadge from "@/components/review/InputModeBadge";
 import FacetDebugPanel from "@/components/review/FacetDebugPanel";
+import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import ReviewActionButtons from "@/components/review/ReviewActionButtons";
 import VocabLessonView from "@/components/lessons/VocabLessonView";
 import KanjiLessonView from "@/components/lessons/KanjiLessonView";
@@ -1143,6 +1144,13 @@ export default function ReviewPage() {
             >
               Close
             </button>
+          </div>
+          <div className="-mt-2 mb-4 flex flex-col items-end">
+            <ReportContentIssue
+              kuId={currentItem.facet.kuId}
+              kuContent={lessonLabel(lessonForReview) ?? currentItem.facet.data?.content ?? currentItem.facet.kuId}
+              lesson={lessonForReview}
+            />
           </div>
           {lessonForReview.type === "Vocab" && (
             <VocabLessonView lesson={lessonForReview as VocabLesson} readOnly />

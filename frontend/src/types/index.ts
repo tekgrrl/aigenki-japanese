@@ -631,6 +631,10 @@ export interface ContentFlag {
   violations: Array<{ segment: string; detectedLevel: string; type: 'vocab' | 'grammar' }>;
   status: 'open' | 'resolved' | 'dismissed';
   manualNote?: string;
+  /** Manual flags: the exact sentence/part of the content being reported. */
+  quotedSegment?: string;
+  /** Manual flags: quick category (e.g. "Above level"). */
+  category?: string;
   dismissNote?: string;
   resolvedAt?: Timestamp;
   createdAt: Timestamp;

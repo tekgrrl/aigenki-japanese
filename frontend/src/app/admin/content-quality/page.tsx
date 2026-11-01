@@ -284,7 +284,8 @@ function FlagRow({
   onResolve,
 }: FlagRowProps) {
   const [showDismissInput, setShowDismissInput] = useState(false);
-  const isManual = !flag.violations.length && !!flag.manualNote;
+  // Category-only in-lesson reports have an empty note but are still manual flags.
+  const isManual = !flag.violations.length && (!!flag.manualNote || !!flag.category || !!flag.quotedSegment);
   const canRegenerate = (flag.sourceType === "lesson" && !!flag.kuId) || (flag.sourceType === "scenario" && !!flag.userId);
 
   return (
@@ -303,7 +304,17 @@ function FlagRow({
           </div>
 
           {isManual ? (
-            <p className="mt-1 text-sm text-shodo-ink/70 italic">{flag.manualNote}</p>
+            <div className="mt-1 space-y-1">
+              {flag.category && (
+                <span className="inline-block text-xs px-1.5 py-0.5 rounded border border-shodo-ink/20 text-shodo-ink/70">
+                  {flag.category}
+                </span>
+              )}
+              {flag.quotedSegment && (
+                <p className="font-mono text-sm text-shodo-ink">「{flag.quotedSegment}」</p>
+              )}
+              {flag.manualNote && <p className="text-sm text-shodo-ink/70 italic">{flag.manualNote}</p>}
+            </div>
           ) : (
             <div className="space-y-1 mt-2">
               {flag.violations.map((v, i) => (

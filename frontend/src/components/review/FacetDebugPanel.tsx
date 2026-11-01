@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAuth } from "@/providers/AuthProvider";
 import { apiFetch } from "@/lib/api-client";
 import { JsonDisplay } from "@/components/JSONDisplay";
+import ReportContentIssue from "@/components/lessons/ReportContentIssue";
 import { ReviewFacet, KnowledgeUnit } from "@/types";
 
 interface Props {
@@ -16,10 +17,6 @@ export default function FacetDebugPanel({ facet }: Props) {
   const [loading, setLoading] = useState(false);
   const [targetKu, setTargetKu] = useState<KnowledgeUnit | null>(null);
   const [originKu, setOriginKu] = useState<KnowledgeUnit | null>(null);
-  const [userLevel, setUserLevel] = useState<string>("N5");
-  const [note, setNote] = useState("");
-  const [flagStatus, setFlagStatus] = useState<"idle" | "sending">("idle");
-  const [flagMessage, setFlagMessage] = useState<string | null>(null);
 
   if (!isAdmin) return null;
 
@@ -34,18 +31,11 @@ export default function FacetDebugPanel({ facet }: Props) {
     if (next && !targetKu && !loading) {
       setLoading(true);
       try {
-        const fetches: Promise<Response>[] = [
-          apiFetch(`/api/knowledge-units/${facet.kuId}`),
-          apiFetch(`/api/users/me`),
-        ];
+        const fetches: Promise<Response>[] = [apiFetch(`/api/knowledge-units/${facet.kuId}`)];
         if (originId) fetches.push(apiFetch(`/api/knowledge-units/${originId}`));
 
-        const [kuRes, meRes, originRes] = await Promise.all(fetches);
+        const [kuRes, originRes] = await Promise.all(fetches);
         if (kuRes.ok) setTargetKu(await kuRes.json());
-        if (meRes.ok) {
-          const me = await meRes.json();
-          setUserLevel(me?.preferences?.jlptLevel ?? "N5");
-        }
         if (originRes?.ok) setOriginKu(await originRes.json());
       } finally {
         setLoading(false);
@@ -53,32 +43,9 @@ export default function FacetDebugPanel({ facet }: Props) {
     }
   };
 
-  const handleFlag = async () => {
-    if (!note.trim() || !targetKu) return;
-    setFlagStatus("sending");
-    try {
-      const res = await apiFetch("/api/content-flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceType: "lesson",
-          sourceId: originId ?? facet.kuId,
-          kuId: facet.kuId,
-          kuContent: targetKu.content,
-          userLevel,
-          manualNote: note,
-        }),
-      });
-      if (!res.ok) throw new Error("Flag request failed");
-      setFlagMessage("Flagged for content review.");
-      setNote("");
-    } catch {
-      setFlagMessage("Something went wrong — try again.");
-    } finally {
-      setFlagStatus("idle");
-      setTimeout(() => setFlagMessage(null), 2500);
-    }
-  };
+  // Reports target the lesson the facet's sequence came from (the parent word for kanji-component facets).
+  const reportKuId = originId ?? facet.kuId;
+  const reportLabel = (originId ? originKu?.content : targetKu?.content) ?? reportKuId;
 
   return (
     <div className="mt-4">
@@ -123,28 +90,8 @@ export default function FacetDebugPanel({ facet }: Props) {
 
               {facet.data && <JsonDisplay data={facet.data} />}
 
-              <div className="pt-2 border-t border-gray-700 space-y-2">
-                {flagMessage ? (
-                  <p className="text-sm text-green-300">{flagMessage}</p>
-                ) : (
-                  <>
-                    <textarea
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="What's wrong with this content?"
-                      rows={2}
-                      className="w-full rounded-md bg-gray-800 border border-gray-600 p-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleFlag}
-                      disabled={flagStatus === "sending" || !note.trim()}
-                      className="px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-medium rounded-md transition-colors"
-                    >
-                      Flag content quality
-                    </button>
-                  </>
-                )}
+              <div className="pt-2 border-t border-gray-700">
+                <ReportContentIssue kuId={reportKuId} kuContent={reportLabel} tone="dark" />
               </div>
             </>
           )}
