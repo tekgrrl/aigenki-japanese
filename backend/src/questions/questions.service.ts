@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
+import { StatsService } from '../stats/stats.service';
 import { Firestore } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
@@ -54,6 +55,7 @@ export class QuestionsService {
     @Inject(forwardRef(() => ReviewsService))
     private readonly reviewsService: ReviewsService,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
+    private readonly statsService: StatsService,
   ) {}
 
   private questionStatesRef(uid: string) {
@@ -206,7 +208,8 @@ export class QuestionsService {
         const userDoc = await this.db.collection('users').doc(uid).get();
         const userData = userDoc.data() as any;
         const level = (userData?.preferences?.jlptLevel ?? 'N5') as JlptLevel;
-        const allowedGrammar: string[] = userData?.tutorContext?.allowedGrammar ?? [];
+        // Resolved from enrolled KU ids at call time — always current content + title.
+        const allowedGrammar = await this.statsService.getAllowedGrammar(uid, userData);
         const excludedVocab: string[] = userData?.tutorContext?.excludedVocab ?? [];
         const excludedGrammar: string[] = userData?.tutorContext?.excludedGrammar ?? [];
         return { jlptLevel: level, allowedGrammar, excludedVocab, excludedGrammar };

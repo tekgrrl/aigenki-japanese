@@ -141,7 +141,7 @@ export class UserKnowledgeUnitsService {
           await this.statsService.updateCurriculumNode(uid, jlptLevel);
         }
         if (kuData?.type === 'Grammar' && kuData?.content && !aboveLevel) {
-          await this.statsService.addToAllowedGrammar(uid, kuData.content);
+          await this.statsService.addToAllowedGrammar(uid, kuData.content, kuId);
         }
       } catch (e) {
         this.logger.error(`Failed to record KU enrolled stats uid=${uid} kuId=${kuId}`, e);

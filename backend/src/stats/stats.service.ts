@@ -8,12 +8,16 @@ import {
     SCENARIOS_COLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
+import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 
 @Injectable()
 export class StatsService {
     private readonly logger = new Logger(StatsService.name);
 
-    constructor(@Inject(FIRESTORE_CONNECTION) private readonly db: Firestore) { }
+    constructor(
+        @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly knowledgeUnitsService: KnowledgeUnitsService,
+    ) { }
 
     async getDashboardStats(uid: string) {
         // ... existing queries ...
@@ -402,10 +406,61 @@ export class StatsService {
         await this.removeTutorVocabFacetType(uid, 'leechVocab', content, facetType);
     }
 
-    async addToAllowedGrammar(uid: string, pattern: string): Promise<void> {
+    /**
+     * Records an enrolled (at-or-below-level) Grammar KU as allowed for AI generation.
+     * The KU id is the source of truth (`allowedGrammarKuIds`); text is resolved from the
+     * current KU at read time by getAllowedGrammar(), so renames never go stale. The legacy
+     * text snapshot (`allowedGrammar`) is still appended for now but no longer read.
+     */
+    async addToAllowedGrammar(uid: string, pattern: string, kuId: string): Promise<void> {
+        // Make sure the id list exists (backfilled from user-kus) before appending to it,
+        // otherwise the first arrayUnion would create a one-item list and skip the backfill.
+        await this.getAllowedGrammarKuIds(uid);
         await this.db.collection('users').doc(uid).update({
+            'tutorContext.allowedGrammarKuIds': FieldValue.arrayUnion(kuId),
             'tutorContext.allowedGrammar': FieldValue.arrayUnion(pattern),
         });
+    }
+
+    /**
+     * The user's allowed grammar for AI generation, as current "content — title" strings
+     * resolved from the in-memory KU cache. Deleted KUs simply drop out.
+     */
+    async getAllowedGrammar(uid: string, userData?: Record<string, any>): Promise<string[]> {
+        const ids = await this.getAllowedGrammarKuIds(uid, userData);
+        const kus = await this.knowledgeUnitsService.getManyCached(ids);
+        return kus
+            .filter(k => k.type === 'Grammar')
+            .map(k => {
+                const content = String(k.content ?? '').trim();
+                const title = String((k.data as Record<string, any>)?.title ?? '').trim();
+                return title && title !== content ? `${content} — ${title}` : content;
+            });
+    }
+
+    private async getAllowedGrammarKuIds(uid: string, userData?: Record<string, any>): Promise<string[]> {
+        const data = userData ?? (await this.db.collection('users').doc(uid).get()).data();
+        const ids = data?.tutorContext?.allowedGrammarKuIds;
+        if (Array.isArray(ids)) return ids as string[];
+        return this.backfillAllowedGrammarKuIds(uid);
+    }
+
+    /**
+     * One-off per user: rebuild the id list from the Grammar KUs they've actually enrolled
+     * (not above level) — the legacy text list can't be mapped back reliably after renames.
+     */
+    private async backfillAllowedGrammarKuIds(uid: string): Promise<string[]> {
+        const userRef = this.db.collection('users').doc(uid);
+        const ukus = await userRef.collection(USER_KUS_SUBCOLLECTION).get();
+        const candidateIds = ukus.docs
+            .filter(d => d.data().aboveLevel !== true)
+            .map(d => (d.data().kuId as string | undefined) ?? d.id);
+        const grammarIds = (await this.knowledgeUnitsService.getManyCached(candidateIds))
+            .filter(k => k.type === 'Grammar')
+            .map(k => k.id);
+        await userRef.update({ 'tutorContext.allowedGrammarKuIds': grammarIds });
+        this.logger.log(`Backfilled allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
+        return grammarIds;
     }
 
     async addToExcludedVocab(uid: string, content: string): Promise<void> {

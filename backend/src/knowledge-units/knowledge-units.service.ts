@@ -65,6 +65,13 @@ export class KnowledgeUnitsService {
         }
     }
 
+    /** Current KUs for the given ids from the in-memory cache (no Firestore reads). Unknown ids are skipped. */
+    async getManyCached(ids: string[]): Promise<KnowledgeUnit[]> {
+        if (ids.length === 0) return [];
+        const want = new Set(ids);
+        return (await this.ensureSearchCache()).filter(k => want.has(k.id));
+    }
+
     private invalidateSearchCache(): void {
         this.searchCache = null;
     }

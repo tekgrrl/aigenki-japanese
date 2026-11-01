@@ -113,8 +113,14 @@ export interface UserRoot {
     /** The current topic or structural node the user is tackling in their overall curriculum. */
     currentCurriculumNode: string;
 
-    /** The set of grammar constructs the AI is permitted to use when generating content for this user. */
+    /**
+     * @deprecated Text snapshot taken at enrollment; goes stale when KUs are renamed. Still
+     * appended but no longer read — use allowedGrammarKuIds via StatsService.getAllowedGrammar().
+     */
     allowedGrammar: string[];
+
+    /** Enrolled (at-or-below-level) Grammar KU ids the AI may use; text is resolved from the current KUs at read time. */
+    allowedGrammarKuIds?: string[];
 
     /**
      * Vocab the user explicitly said they don't want to learn right now ("Not now" on a

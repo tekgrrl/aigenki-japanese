@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { StatsService } from '../stats/stats.service';
 import { Firestore } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
@@ -19,6 +20,7 @@ export class TutorToolExecutor {
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly scenariosService: ScenariosService,
+    private readonly statsService: StatsService,
   ) {}
 
   async execute(
@@ -135,8 +137,8 @@ export class TutorToolExecutor {
     cache: Map<string, unknown>,
   ): Promise<string[]> {
     const doc = await this.getUserDoc(uid, cache);
-    const ctx = (doc.tutorContext ?? {}) as Record<string, unknown>;
-    return (ctx.allowedGrammar ?? []) as string[];
+    // Resolved from enrolled KU ids at call time — always current content + title.
+    return this.statsService.getAllowedGrammar(uid, doc as Record<string, any>);
   }
 
   private async getWeakGrammar(
