@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { Volume2 } from "lucide-react";
 import { ReviewFacet } from "@/types";
 import { apiFetch } from "@/lib/api-client";
 import ReviewActionButtons from "./ReviewActionButtons";
@@ -321,22 +322,21 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
             </div>
           ) : (
             <>
-              <p className="text-gray-200">
-                <span className="font-semibold">Correct answer: </span>
+              <p className="text-gray-200 flex items-center flex-wrap gap-x-2">
+                <span className="font-semibold">Correct answer:</span>
                 <span className="text-white font-medium">{answer}</span>
+                {onSpeak && (
+                  <button
+                    type="button"
+                    onClick={() => onSpeak(answer)}
+                    title="Replay audio"
+                    aria-label="Replay audio"
+                    className="p-1.5 rounded-full text-gray-200 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <Volume2 className="w-5 h-5" />
+                  </button>
+                )}
               </p>
-              {onSpeak && (
-                <button
-                  type="button"
-                  onClick={() => onSpeak(answer)}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-md transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M4.018 14L14.41 9 4.018 4v10z"></path>
-                  </svg>
-                  Replay Audio
-                </button>
-              )}
               {sourceId && (
                 <Link
                   href={`/concepts/${sourceId}`}
