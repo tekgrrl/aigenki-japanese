@@ -132,6 +132,15 @@ export default function ReviewPage() {
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
 
+  // --- Level change toast: auto-dismiss (matches the 2.5s animate-toast-in-out) ---
+  const LEVEL_TOAST_MS = 2500;
+
+  useEffect(() => {
+    if (!levelStatus) return;
+    const timer = setTimeout(() => setLevelStatus(null), LEVEL_TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [levelStatus]);
+
   // --- Focus Next Button Effect ---
   const FOCUS_TIMEOUT_MS = 50;
 
@@ -1016,9 +1025,9 @@ export default function ReviewPage() {
 
             {/* Level Change Notification Overlay */}
             {levelStatus && (
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 w-full">
+              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 w-full pointer-events-none">
                 <div
-                  className={`flex flex-col items-center justify-center p-6 rounded-lg shadow-xl border-2 animate-fade-slide-up mx-auto w-3/4 ${
+                  className={`flex flex-col items-center justify-center p-6 rounded-lg shadow-xl border-2 animate-toast-in-out mx-auto w-3/4 ${
                     levelStatus.direction === "up"
                       ? "bg-[#0A5C36] border-green-400 text-white"
                       : "bg-red-800 border-red-400 text-white"
