@@ -36,21 +36,48 @@ interface LearnableTerm {
   meaning: string;
 }
 
+interface AssemblyExample {
+  fragments: string[];
+  answer: string;
+  english: string;
+  accepted_alternatives: string[];
+  learnableTerms?: LearnableTerm[];
+}
+
+/**
+ * Removes sentence-final punctuation from the last fragment (in canonical order) so it
+ * doesn't give away which piece goes last. Answer checking ignores trailing punctuation
+ * via normalize(), and feedback still shows the full answer. Drops a lone "。" fragment.
+ */
+function stripFinalPunctuation(fragments: string[]): string[] {
+  if (fragments.length === 0) return fragments;
+  const out = [...fragments];
+  out[out.length - 1] = out[out.length - 1].replace(/[。！？!?.]+$/u, "");
+  return out.filter((f) => f.trim() !== "");
+}
+
 export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSkip, onSpeak, onShowLesson, showLesson, isFetchingLesson }: Props) {
-  const { goalTitle, fragments, answer, english, accepted_alternatives, sourceId, sourceTitle, learnableTerms } = facet.data as {
+  const data = facet.data as Partial<AssemblyExample> & {
     goalTitle: string;
-    fragments: string[];
-    answer: string;
-    english: string;
-    accepted_alternatives: string[];
     sourceId?: string;
     sourceTitle?: string;
-    learnableTerms?: LearnableTerm[];
+    /** Rotating facets (one per grammar point) hold several examples; legacy facets hold one, flat. */
+    examples?: AssemblyExample[];
   };
+  const { goalTitle, sourceId, sourceTitle } = data;
+  // Pick once per mount so the example doesn't change mid-answer.
+  const [example] = useState<Partial<AssemblyExample>>(() =>
+    Array.isArray(data.examples) && data.examples.length > 0
+      ? data.examples[Math.floor(Math.random() * data.examples.length)]
+      : data,
+  );
+  const { fragments, answer = "", english, accepted_alternatives, learnableTerms } = example;
 
   const normalize = (s: string) => s.replace(/[。、！？!?\.]+$/u, "").replace(/[\s　]+/g, "").trim();
   const missingData = !Array.isArray(fragments) || fragments.length === 0 || !answer;
-  const [available, setAvailable] = useState<string[]>(() => shuffleArray(Array.isArray(fragments) ? fragments : []));
+  const [available, setAvailable] = useState<string[]>(() =>
+    shuffleArray(Array.isArray(fragments) ? stripFinalPunctuation(fragments) : []),
+  );
   const [assembled, setAssembled] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);

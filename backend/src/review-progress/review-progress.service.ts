@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common';
 import { CollectionReference, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
@@ -6,6 +6,7 @@ import {
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
+import { isUsefulAssembly } from '../lib/assembly-quality';
 import {
   FacetStageDefinition,
   FacetStageEntry,
@@ -118,6 +119,66 @@ export class ReviewProgressService {
     }
 
     return { stage: result.stage.stage, facetsCreated: result.facetsCreated };
+  }
+
+  /**
+   * Admin tool: regenerates the KU's global lesson, then rebuilds this user's facet
+   * sequence from the new lesson. SRS progress for the KU is deliberately lost.
+   */
+  async regenerateAndReset(
+    uid: string,
+    kuId: string,
+  ): Promise<{ facetsDeleted: number; stage: number; facetsCreated: number }> {
+    const ku = await this.knowledgeUnitsService.findOne(kuId);
+    if (ku.type !== 'Vocab' && ku.type !== 'Grammar') {
+      throw new BadRequestException(`Regeneration supports Vocab and Grammar only (kuId=${kuId} is ${ku.type})`);
+    }
+    await this.lessonsService.regenerateLesson(uid, kuId);
+    return this.resetSequence(uid, kuId);
+  }
+
+  /**
+   * Deletes all of this user's facets for a KU's sequence and re-initializes it from
+   * the current lesson. Matches source.id (stage facets, incl. kanji-component facets
+   * attributed to this KU) OR kuId (legacy facets without a source).
+   */
+  async resetSequence(
+    uid: string,
+    kuId: string,
+  ): Promise<{ facetsDeleted: number; stage: number; facetsCreated: number }> {
+    const [bySource, byKu] = await Promise.all([
+      this.facetsColRef(uid).where('source.id', '==', kuId).get(),
+      this.facetsColRef(uid).where('kuId', '==', kuId).get(),
+    ]);
+    const docs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    [...bySource.docs, ...byKu.docs].forEach(d => docs.set(d.id, d));
+
+    const countByKuId = new Map<string, number>();
+    const batch = this.db.batch();
+    docs.forEach(d => {
+      const target = (d.data().kuId as string) ?? kuId;
+      countByKuId.set(target, (countByKuId.get(target) ?? 0) + 1);
+      batch.delete(d.ref);
+    });
+    if (docs.size > 0) await batch.commit();
+
+    await Promise.all(
+      Array.from(countByKuId.entries())
+        .filter(([target]) => target !== kuId)
+        .map(async ([target, n]) => {
+          await this.userKnowledgeUnitsService.update(uid, target, { facet_count: FieldValue.increment(-n) });
+          await this.learningProgressService.recomputeAndCache(uid, target);
+        }),
+    );
+    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
+
+    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId);
+    if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
+
+    this.logger.log(
+      `resetSequence uid=${uid} kuId=${kuId}: deleted ${docs.size} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
+    );
+    return { facetsDeleted: docs.size, stage, facetsCreated };
   }
 
   /**
@@ -435,14 +496,19 @@ export class ReviewProgressService {
     if (entry.source === 'examples') {
       if (lesson.type === 'Grammar') {
         const gl = lesson as GrammarLesson;
-        return (gl.examples ?? []).map(ex => ({
-          goalTitle: gl.pattern,
-          fragments: ex.fragments,
-          answer: ex.japanese,
-          english: ex.english,
-          accepted_alternatives: ex.accepted_alternatives ?? [],
-          learnableTerms: ex.learnableTerms ?? [],
-        }));
+        // One rotating facet per grammar point (the card picks an example each review),
+        // not one facet per example — and only examples long enough to be a real
+        // exercise. No useful example → [] → the stage is skipped (stageIsApplicable).
+        const examples = (gl.examples ?? [])
+          .filter(ex => ex.japanese && isUsefulAssembly(ex.fragments))
+          .map(ex => ({
+            fragments: ex.fragments,
+            answer: ex.japanese,
+            english: ex.english,
+            accepted_alternatives: ex.accepted_alternatives ?? [],
+            learnableTerms: ex.learnableTerms ?? [],
+          }));
+        return examples.length > 0 ? [{ goalTitle: gl.pattern, examples }] : [];
       }
       return [];
     }

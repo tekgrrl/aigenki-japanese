@@ -134,7 +134,7 @@ export const NOUN_PARTICLE_FEW_SHOT_TURNS: Array<{ user: string; model: string }
 
 export const GRAMMAR_QUESTION_OPTIONS: Record<string, string> = {
   'novel-translation': 'Create a completely new English sentence that naturally forces the use of the target grammar pattern. Ask the user to translate it into Japanese.',
-  'error-correction': 'Present a complete Japanese sentence that attempts to use the target grammar pattern but contains a specific error in its construction. Ask the user to correct the error and provide the fully corrected Japanese sentence. Provide the intended English meaning as context.',
+  'error-correction': 'Present a complete Japanese sentence that attempts to use the target grammar pattern but contains a specific error in its construction. Ask the user to correct the error and provide the fully corrected Japanese sentence. The context is the intended English meaning only — do not point out, quote or describe the error, or name the correct form; finding it is the test. Keep the question to one short instruction followed by the incorrect sentence.',
 };
 
 export type GrammarQuestionType = keyof typeof GRAMMAR_QUESTION_OPTIONS;
@@ -175,7 +175,7 @@ Rules:
 // ---------------------------------------------------------------------------
 
 export const CONCEPT_QUESTION_OPTIONS: Record<string, string> = {
-  'error-correction': 'Present a complete Japanese sentence that attempts to use the grammatical rule but contains a specific syntax, particle, or conjugation error related to that rule. Ask the user to correct the error and provide the fully corrected Japanese sentence. Provide the intended English meaning as context.',
+  'error-correction': 'Present a complete Japanese sentence that attempts to use the grammatical rule but contains a specific syntax, particle, or conjugation error related to that rule. Ask the user to correct the error and provide the fully corrected Japanese sentence. The context is the intended English meaning only — do not point out, quote or describe the error, or name the correct form; finding it is the test. Keep the question to one short instruction followed by the incorrect sentence.',
   'novel-translation': 'Create a completely new English sentence that naturally forces the use of the grammatical rule. Ask the user to translate it into Japanese. Ensure the vocabulary used is very simple (JLPT N5 level) so the user is only challenged by the grammar structure, not the vocabulary.',
 };
 

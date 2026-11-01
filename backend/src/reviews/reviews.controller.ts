@@ -3,6 +3,7 @@ import { ReviewsService } from './reviews.service';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
+import { AdminGuard } from '../auth/admin.guard';
 import { ALREADY_KNOWN_STAGE } from '../lib/constants';
 
 @Controller('reviews')
@@ -35,6 +36,14 @@ export class ReviewsController {
     }
 
     return this.reviewsService.evaluateAnswer(uid, userAnswer, expectedAnswers, question, topic, questionId, kuId, facetType as any, facetId);
+  }
+
+  /** Admin tool (review Debug panel): regenerate the KU's lesson and rebuild this user's facets. SRS progress is reset. */
+  @Post('regenerate-and-reset/:kuId')
+  @UseGuards(AdminGuard)
+  async regenerateAndReset(@UserId() uid: string, @Param('kuId') kuId: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    return this.reviewProgressService.regenerateAndReset(uid, kuId);
   }
 
   @Put('facets/:id')

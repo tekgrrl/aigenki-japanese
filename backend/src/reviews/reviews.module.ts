@@ -10,6 +10,7 @@ import { UserKnowledgeUnitsModule } from '../user-knowledge-units/user-knowledge
 import { ScenariosModule } from '../scenarios/scenarios.module';
 import { LearningProgressModule } from '../learning-progress/learning-progress.module';
 import { ReviewProgressModule } from '../review-progress/review-progress.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ReviewProgressModule } from '../review-progress/review-progress.module'
     ScenariosModule,
     LearningProgressModule,
     ReviewProgressModule,
+    AuthModule,
   ],
   controllers: [ReviewsController],
   providers: [ReviewsService],

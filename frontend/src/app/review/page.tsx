@@ -523,6 +523,14 @@ export default function ReviewPage() {
     advanceToNext();
   };
 
+  /** After an admin regenerate-and-reset, drop later queue items whose facets were just deleted, then move on. */
+  const handleRegenerated = (kuId: string) => {
+    setReviewQueue((prev) =>
+      prev.filter((item, i) => i <= currentIndex || (item.facet.kuId !== kuId && item.facet.source?.id !== kuId)),
+    );
+    advanceToNext();
+  };
+
   const handleShowLesson = async () => {
     if (showLesson) {
       setShowLesson(false);
@@ -1130,7 +1138,7 @@ export default function ReviewPage() {
       )}
 
       {/* --- Facet Debug Panel (admin-only, all facet types) --- */}
-      <FacetDebugPanel facet={currentItem.facet} />
+      <FacetDebugPanel key={`debug-${currentItem.facet.id}`} facet={currentItem.facet} onRegenerated={handleRegenerated} />
 
       {/* --- Inline Lesson Panel --- */}
       {showLesson && lessonForReview && (
