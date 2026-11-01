@@ -11,7 +11,7 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
 import { performance } from "perf_hooks"; // For timing
 import { CLOZE_SYSTEM_PROMPT, buildClozeUserMessage } from '../prompts/cloze.prompts';
-import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage } from '../prompts/vocab.prompts';
+import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageLabelMessage } from '../prompts/vocab.prompts';
 import { buildScenarioEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
 
@@ -794,6 +794,70 @@ export class GeminiService implements OnModuleInit {
         }
         this.apilogService.completeLog(logRef, updateData).catch(err =>
           console.error('Failed to update cloze log', err)
+        );
+      }
+    }
+  }
+
+  /**
+   * Labels a Vocab lesson's existing context examples by usage/sense (lazy backfill for
+   * lessons generated before examples carried a `usage`). Returns one label per example,
+   * or null if the call fails or returns the wrong number of labels.
+   */
+  async labelExampleUsages(
+    vocab: string,
+    definitions: string[],
+    examples: { sentence: string; translation: string }[],
+    kuId: string,
+  ): Promise<string[] | null> {
+    const userMessage = buildUsageLabelMessage(vocab, definitions, examples);
+    const schema = {
+      type: 'OBJECT',
+      properties: { usages: { type: 'ARRAY', items: { type: 'STRING' } } },
+      required: ['usages'],
+    };
+
+    const logRef = await this.apilogService.startLog({
+      timestamp: Timestamp.now(),
+      route: '/lessons/label-usages',
+      status: 'pending',
+      modelUsed: this.modelName,
+      requestData: { userMessage, content: vocab, kuId },
+    });
+    const startTime = performance.now();
+    let capturedError: any;
+    let aiJsonText: string | undefined;
+    let parsedJson: any;
+
+    try {
+      const response = await this.client.models.generateContent({
+        model: this.modelName,
+        contents: [{ parts: [{ text: userMessage }] }],
+        config: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.2 },
+      });
+      aiJsonText = response.text;
+      parsedJson = aiJsonText ? JSON.parse(aiJsonText) : null;
+      const usages: unknown = parsedJson?.usages;
+      if (!Array.isArray(usages) || usages.length !== examples.length || !usages.every(u => typeof u === 'string' && u.trim())) {
+        throw new Error(`Expected ${examples.length} usage labels, got ${JSON.stringify(usages)}`);
+      }
+      return usages.map((u: string) => u.trim());
+    } catch (error: any) {
+      capturedError = error;
+      this.logger.error(`Failed to label example usages for ${vocab}`, error);
+      return null;
+    } finally {
+      if (logRef) {
+        const updateData: any = { durationMs: performance.now() - startTime };
+        if (capturedError) {
+          updateData.status = 'error';
+          updateData.errorData = { message: capturedError?.message || 'Unknown error' };
+        } else {
+          updateData.status = 'success';
+          updateData.responseData = { rawText: aiJsonText, parsedJson };
+        }
+        this.apilogService.completeLog(logRef, updateData).catch(err =>
+          console.error('Failed to update label-usages log', err)
         );
       }
     }

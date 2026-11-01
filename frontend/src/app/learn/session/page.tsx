@@ -187,7 +187,7 @@ export default function LessonSessionPage() {
     const slides = slideCount(loaded);
     const isLastSlide = currentSlideIdx >= slides - 1;
     const isLastItem = currentItemIdx >= loadedItems.length - 1;
-    const typeColor = TYPE_COLORS[loaded.item.type] ?? "#595048";
+    const typeColor = TYPE_COLORS[loaded.item.type] ?? "var(--shodo-ink-light)";
 
     return (
       <main className="container mx-auto max-w-2xl p-8">
@@ -202,7 +202,7 @@ export default function LessonSessionPage() {
                 className="h-2 rounded-full transition-all duration-300"
                 style={{
                   width: i === currentItemIdx ? "2rem" : "0.5rem",
-                  backgroundColor: i <= currentItemIdx ? typeColor : "#D1CBC3",
+                  backgroundColor: i <= currentItemIdx ? typeColor : "color-mix(in srgb, var(--shodo-ink) 20%, transparent)",
                 }}
               />
             ))}
@@ -211,7 +211,7 @@ export default function LessonSessionPage() {
             Item {currentItemIdx + 1} of {loadedItems.length}
           </span>
           <span
-            className="text-xs font-semibold px-2 py-1 rounded-full text-white"
+            className="text-xs font-semibold px-2 py-1 rounded-full text-shodo-paper"
             style={{ backgroundColor: typeColor }}
           >
             {loaded.item.type}
@@ -232,8 +232,8 @@ export default function LessonSessionPage() {
           key={`${currentItemIdx}-${currentSlideIdx}`}
           className="min-h-[400px] rounded-xl border p-8 animate-in fade-in duration-300"
           style={{
-            backgroundColor: `${typeColor}0d`,
-            borderColor: `${typeColor}33`,
+            backgroundColor: `color-mix(in srgb, ${typeColor} 5%, transparent)`,
+            borderColor: `color-mix(in srgb, ${typeColor} 20%, transparent)`,
           }}
         >
           {renderSlide(loaded, currentSlideIdx, playAudio)}
@@ -254,14 +254,14 @@ export default function LessonSessionPage() {
               <div
                 key={i}
                 className="h-1.5 w-1.5 rounded-full transition-colors"
-                style={{ backgroundColor: i === currentSlideIdx ? typeColor : "#D1CBC3" }}
+                style={{ backgroundColor: i === currentSlideIdx ? typeColor : "color-mix(in srgb, var(--shodo-ink) 20%, transparent)" }}
               />
             ))}
           </div>
 
           <button
             onClick={advance}
-            className="px-6 py-2.5 rounded-lg text-white font-semibold transition-colors"
+            className="px-6 py-2.5 rounded-lg text-shodo-paper font-semibold transition-colors"
             style={{ backgroundColor: typeColor }}
           >
             {isLastSlide && isLastItem ? "Finish" : isLastSlide ? "Next Item →" : "Next →"}
@@ -289,8 +289,8 @@ export default function LessonSessionPage() {
             {loadedItems.map(({ item }) => (
               <span
                 key={item.kuId}
-                className="text-xl px-3 py-1.5 rounded-lg text-white font-medium"
-                style={{ backgroundColor: TYPE_COLORS[item.type] ?? "#595048" }}
+                className="text-xl px-3 py-1.5 rounded-lg text-shodo-paper font-medium"
+                style={{ backgroundColor: TYPE_COLORS[item.type] ?? "var(--shodo-ink-light)" }}
               >
                 {item.content}
               </span>

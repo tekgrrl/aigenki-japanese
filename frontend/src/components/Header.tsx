@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/providers/AuthProvider";
 import { AvatarMenu } from "./AvatarMenu";
 import { applyFurigana, loadFurigana } from "@/lib/furigana";
+import { watchSystemTheme } from "@/lib/theme";
 import DailyCheckInDialog from "./DailyCheckInDialog";
 
 /**
@@ -95,6 +96,10 @@ export default function Header() {
   useEffect(() => {
     applyFurigana(loadFurigana());
   }, []);
+
+  // Theme is applied before paint by layout.tsx; here we only follow live OS
+  // light/dark changes while the user's choice is "System".
+  useEffect(() => watchSystemTheme(), []);
 
   // Alt+F global keyboard shortcut — toggles furigana and persists to backend
   useEffect(() => {

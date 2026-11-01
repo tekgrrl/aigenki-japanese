@@ -15,7 +15,7 @@ const PART_OF_SPEECH_OPTIONS = [
   "auxiliary-verb", "prefix", "suffix", "conjunction", "grammar", "expression",
 ];
 
-const inputClass = "w-full px-3 py-2 bg-white border border-shodo-mist rounded text-gray-900 text-sm focus:outline-none focus:border-shodo-indigo";
+const inputClass = "w-full px-3 py-2 bg-white dark:bg-shodo-paper-warm border border-shodo-mist rounded text-gray-900 dark:text-shodo-ink text-sm focus:outline-none focus:border-shodo-indigo";
 const labelClass = "block text-xs font-bold text-shodo-ink-light uppercase tracking-wide mb-1";
 const microLabelClass = "block text-[10px] text-shodo-ink-light mb-0.5";
 const sectionClass = "bg-shodo-paper-dark p-4 rounded-lg border border-shodo-ink/5 space-y-3";

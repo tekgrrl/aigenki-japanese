@@ -5,12 +5,19 @@ import { useAuth } from "@/providers/AuthProvider";
 import { UserAvatar } from "@/components/UserAvatar";
 import { apiFetch } from "@/lib/api-client";
 import { applyFurigana, loadFurigana } from "@/lib/furigana";
+import { loadTheme, saveTheme, type ThemeChoice } from "@/lib/theme";
 
 const JLPT_LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
+const THEME_OPTIONS: { value: ThemeChoice; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
 
 export default function ProfilePage() {
   const { user } = useAuth();
   const [showFurigana, setShowFurigana] = useState(false);
+  const [theme, setTheme] = useState<ThemeChoice>("system");
   const [jlptLevel, setJlptLevel] = useState<string>("");
   const [preferredUserRole, setPreferredUserRole] = useState<string>("");
   const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -19,6 +26,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     setShowFurigana(loadFurigana());
+    setTheme(loadTheme());
 
     Promise.all([
       apiFetch("/api/users/me").then((r) => r.json()),
@@ -123,6 +131,37 @@ export default function ProfilePage() {
                 />
               </button>
             </div>
+          </div>
+
+          {/* Appearance (per device — stored in this browser, not on the account) */}
+          <div className="flex items-center justify-between px-5 py-4">
+            <div>
+              <p className="text-sm font-medium text-shodo-ink">Appearance</p>
+              <p className="text-xs text-shodo-ink/50 mt-0.5">
+                Light or dark theme for this device. System follows your OS setting.
+              </p>
+            </div>
+            <fieldset className="ml-4 shrink-0 flex rounded-md border border-shodo-ink/20 overflow-hidden">
+              <legend className="sr-only">Appearance</legend>
+              {THEME_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={theme === opt.value}
+                  onClick={() => {
+                    setTheme(opt.value);
+                    saveTheme(opt.value);
+                  }}
+                  className={`px-3 py-1.5 text-sm transition-colors ${
+                    theme === opt.value
+                      ? "bg-shodo-ink text-shodo-paper"
+                      : "text-shodo-ink-light hover:bg-shodo-ink/5"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </fieldset>
           </div>
 
           {/* JLPT Level */}

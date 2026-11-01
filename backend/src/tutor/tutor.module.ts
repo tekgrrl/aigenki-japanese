@@ -7,9 +7,10 @@ import { GeminiProvider } from './providers/gemini.provider';
 import { ClaudeProvider } from './providers/claude.provider';
 import { AiProvider } from './providers/ai-provider.interface';
 import { ScenariosModule } from '../scenarios/scenarios.module';
+import { StatsModule } from '../stats/stats.module';
 
 @Module({
-  imports: [ConfigModule.forRoot(), ScenariosModule],
+  imports: [ConfigModule.forRoot(), ScenariosModule, StatsModule],
   controllers: [TutorController],
   providers: [
     GeminiProvider,

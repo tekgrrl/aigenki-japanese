@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow the app's theme choice (html[data-theme="dark"], set by
+   lib/theme.ts) rather than Tailwind v4's default prefers-color-scheme media query. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -80,16 +84,30 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Shodo Dark Mode ("sumi night": ink-stone charcoal, warm off-white ink).
+   Set by lib/theme.ts (System / Light / Dark, per device) via html[data-theme="dark"];
+   an inline script in layout.tsx applies it before first paint. Accents are brightened
+   so they still read as text on charcoal (WCAG AA ≥ 4.5:1 on --shodo-paper). */
+html[data-theme="dark"] {
+  color-scheme: dark;
 
-    /* Shodo Dark Mode (Inverted) */
-    --shodo-paper: #1a1a1a;
-    --shodo-ink: #f9f7f2;
-    --shodo-accent: #ff4d4d;
-  }
+  --background: #1c1a18;
+  --foreground: #ece6da;
+
+  --shodo-paper: #1c1a18;
+  --shodo-ink: #ece6da;
+  --shodo-accent: #ff5c4d;
+
+  --shodo-paper-dark: #262320;
+  --shodo-paper-warm: #2a2622;
+  --shodo-mist: #23272b;
+  --shodo-ink-light: #c2b8ab;
+  --shodo-ink-faint: #8f867c;
+  --shodo-stamp-red: #e0604c;
+  --shodo-indigo: #6b8cc4;
+  --shodo-matcha: #9aae5c;
+  --shodo-persimmon: #e99a5e;
+  --shodo-gold: #d4b062;
 }
 
 body {

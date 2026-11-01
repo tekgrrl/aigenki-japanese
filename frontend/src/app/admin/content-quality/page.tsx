@@ -174,7 +174,7 @@ function CreateFlagForm({ onCreated }: { onCreated: () => void }) {
   };
 
   const inputClass =
-    "w-full text-sm border border-shodo-ink/20 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-shodo-ink/30";
+    "w-full text-sm border border-shodo-ink/20 rounded px-2 py-1.5 bg-white dark:bg-shodo-paper-warm focus:outline-none focus:ring-1 focus:ring-shodo-ink/30";
   const labelClass = "block text-xs font-medium text-shodo-ink/60 mb-1";
 
   return (
@@ -289,7 +289,7 @@ function FlagRow({
   const canRegenerate = (flag.sourceType === "lesson" && !!flag.kuId) || (flag.sourceType === "scenario" && !!flag.userId);
 
   return (
-    <div className="border border-shodo-ink/10 rounded-lg p-4 bg-white">
+    <div className="border border-shodo-ink/10 rounded-lg p-4 bg-white dark:bg-shodo-paper-warm">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -370,7 +370,7 @@ function FlagRow({
             placeholder="Reason for dismissal (optional)"
             value={dismissNote}
             onChange={(e) => onDismissNoteChange(e.target.value)}
-            className="flex-1 text-xs border border-shodo-ink/20 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-shodo-ink/30"
+            className="flex-1 text-xs border border-shodo-ink/20 rounded px-2 py-1.5 bg-white dark:bg-shodo-paper-warm focus:outline-none focus:ring-1 focus:ring-shodo-ink/30"
           />
           <button
             onClick={onDismiss}

@@ -1,5 +1,6 @@
 "use client";
 
+import LessonNotes from "@/components/lessons/LessonNotes";
 import { useEffect, useRef, useCallback } from "react";
 import { VocabLesson, KanjiLesson, GrammarLesson, Lesson } from "@/types";
 import { apiFetch } from "@/lib/api-client";
@@ -23,7 +24,7 @@ export function slideCount(loaded: LoadedItem): number {
   if (item.type === "Vocab" && lesson.type === "Vocab") {
     const vl = lesson as VocabLesson;
     const hasKanji = !vl.kanaOnly && (vl.component_kanji?.length ?? 0) > 0;
-    return 3 + (hasKanji ? 1 : 0) + ((vl.context_examples?.length ?? 0) > 0 ? 1 : 0);
+    return 3 + (hasKanji ? 1 : 0) + vocabExampleSlides(vl).length;
   }
   if (item.type === "Kanji") return 4;
   if (item.type === "Grammar" && lesson.type === "Grammar") {
@@ -31,6 +32,24 @@ export function slideCount(loaded: LoadedItem): number {
     return 2 + (gl.notes ? 1 : 0) + (gl.examples?.length ?? 0);
   }
   return 1;
+}
+
+/**
+ * Examples to show in the slideshow: the first example of each distinct usage, so a word
+ * with two usages isn't later tested on one the learner never saw. Unlabelled (older)
+ * lessons show just the first example.
+ */
+export function vocabExampleSlides(vl: VocabLesson): NonNullable<VocabLesson["context_examples"]> {
+  const examples = vl.context_examples ?? [];
+  if (examples.length === 0) return [];
+  if (!examples.every((e) => e.usage)) return [examples[0]];
+  const seen = new Set<string>();
+  return examples.filter((e) => {
+    const key = (e.usage ?? "").trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 const LESSON_TIMEOUT_MS = 75_000;
@@ -51,7 +70,30 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
     signal,
   });
   if (!res.ok) throw new Error("Failed to generate lesson");
-  return res.json();
+  const lesson: Lesson = await res.json();
+  if (lesson.type === "Vocab") await ensureUsageLabels(lesson as VocabLesson, item.kuId, signal);
+  return lesson;
+}
+
+/**
+ * Older Vocab lessons have unlabelled examples. Ask the backend to label them once (it
+ * saves the labels on the lesson) so the slideshow can show one example per usage.
+ * Best-effort: on any failure the slideshow just shows the first example.
+ */
+async function ensureUsageLabels(vl: VocabLesson, kuId: string, signal: AbortSignal) {
+  const examples = vl.context_examples ?? [];
+  if (examples.length < 2 || examples.every((e) => e.usage)) return;
+  try {
+    const res = await apiFetch(`/api/lessons/${kuId}/label-usages`, { method: "POST", signal });
+    if (!res.ok) return;
+    const { usages } = (await res.json()) as { usages: (string | null)[] };
+    if (Array.isArray(usages) && usages.length === examples.length) {
+      vl.context_examples = examples.map((e, i) => ({ ...e, usage: usages[i] ?? undefined }));
+    }
+  } catch (e) {
+    if (signal.aborted) throw e;
+    console.warn(`[lesson-slides] usage labelling failed for ${vl.vocab}`, e);
+  }
 }
 
 export async function fetchLessonWithRetry(item: QueueItem): Promise<Lesson> {
@@ -182,14 +224,13 @@ function VocabDefinitionsSlide({ loaded }: { loaded: LoadedItem }) {
   );
 }
 
-function VocabExampleSlide({ loaded }: { loaded: LoadedItem }) {
-  const vl = loaded.lesson as VocabLesson;
-  const ex = vl.context_examples?.[0];
-  if (!ex) return null;
+function VocabExampleSlide({ ex, showUsage }: { ex: NonNullable<VocabLesson["context_examples"]>[number]; showUsage: boolean }) {
   const stripped = (s: string) => s.replace(/\[[^\]]*\]/g, "").trim();
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
-      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Example</span>
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">
+        Example{showUsage && ex.usage ? <span className="normal-case tracking-normal font-medium"> · {ex.usage}</span> : null}
+      </span>
       {/* content is server-generated lesson data, not user input */}
       <p className="text-3xl text-shodo-ink leading-relaxed"><FuriganaText text={ex.sentence} /></p>
       <p className="text-xl text-shodo-ink-light">{stripped(ex.translation)}</p>
@@ -350,15 +391,16 @@ function GrammarExampleSlide({ loaded, exampleIdx }: { loaded: LoadedItem; examp
 
 function GrammarNotesSlide({ loaded }: { loaded: LoadedItem }) {
   const gl = loaded.lesson as GrammarLesson;
-  const paragraphs = gl.notes.replace(/\\n/g, '\n').split(/\n\n+/);
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Notes</span>
       <GrammarPatternDisplay pattern={gl.pattern} className="text-4xl font-bold text-shodo-matcha text-center" />
       <div className="flex flex-col gap-3">
-        {paragraphs.map((para, i) => (
-          <p key={i} className="text-lg text-shodo-ink-light leading-relaxed">{para}</p>
-        ))}
+        <LessonNotes
+          notes={gl.notes}
+          className="text-lg text-shodo-ink-light leading-relaxed"
+          headingClassName="text-xl font-semibold text-shodo-ink mt-2"
+        />
       </div>
     </div>
   );
@@ -375,7 +417,9 @@ export function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text
     if (hasKanji) { if (s === 0) return <VocabKanjiSlide loaded={loaded} />; s--; }
     if (s === 0) return <VocabMeaningSlide loaded={loaded} />;
     if (s === 1) return <VocabDefinitionsSlide loaded={loaded} />;
-    if (s === 2) return <VocabExampleSlide loaded={loaded} />;
+    const exampleSlides = vocabExampleSlides(vl);
+    const ex = exampleSlides[s - 2];
+    if (ex) return <VocabExampleSlide ex={ex} showUsage={exampleSlides.length > 1} />;
   }
   if (item.type === "Kanji") {
     switch (slideIdx) {
@@ -398,8 +442,10 @@ export function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text
   return null;
 }
 
+// Shodo theme variables (follow light/dark mode). Used as inline style colours, so
+// derive tints with color-mix() rather than appending hex alpha.
 export const TYPE_COLORS: Record<string, string> = {
-  Vocab: "#2E4B75",
-  Kanji: "#C0392B",
-  Grammar: "#7B8D42",
+  Vocab: "var(--shodo-indigo)",
+  Kanji: "var(--shodo-stamp-red)",
+  Grammar: "var(--shodo-matcha)",
 };

@@ -169,7 +169,7 @@ export default function EditKnowledgeUnitModal({
     }
   };
 
-  const inputClass = "w-full px-3 py-2 bg-white border border-shodo-mist rounded text-gray-900 focus:outline-none focus:border-shodo-indigo";
+  const inputClass = "w-full px-3 py-2 bg-white dark:bg-shodo-paper-warm border border-shodo-mist rounded text-gray-900 dark:text-shodo-ink focus:outline-none focus:border-shodo-indigo";
   const labelClass = "block text-xs font-bold text-shodo-ink-light uppercase tracking-wide mb-1";
 
   return (
@@ -296,7 +296,7 @@ export default function EditKnowledgeUnitModal({
             <div>
               <label className="block text-xs font-bold text-shodo-ink-light uppercase tracking-wide mb-1 flex items-center gap-2">
                 Corpus Notes
-                <span className="text-[10px] bg-shodo-indigo text-white px-1.5 py-0.5 rounded-full font-normal normal-case">
+                <span className="text-[10px] bg-shodo-indigo text-shodo-paper px-1.5 py-0.5 rounded-full font-normal normal-case">
                   AI Context
                 </span>
               </label>

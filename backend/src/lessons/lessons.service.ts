@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
@@ -239,6 +239,38 @@ export class LessonsService {
       // not valid JSON — fall through and save as the raw string
     }
     return content;
+  }
+
+  /**
+   * Lazy backfill: label a Vocab lesson's existing context examples by usage so the
+   * Start Learning slideshow can show one example per distinct usage. Examples are not
+   * rewritten — only a `usage` field is added. Runs at most once per lesson (labels are
+   * saved on the global lesson); a no-op if already labelled or fewer than 2 examples.
+   */
+  async labelVocabUsages(kuId: string): Promise<{ usages: (string | null)[] }> {
+    const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
+    const doc = await lessonRef.get();
+    if (!doc.exists) throw new NotFoundException('Lesson not found');
+    const lesson = doc.data() as VocabLesson;
+    const examples = lesson.context_examples ?? [];
+    if (lesson.type !== 'Vocab') throw new BadRequestException('Only Vocab lessons have usage labels');
+
+    const current = examples.map(e => e.usage ?? null);
+    if (examples.length < 2 || current.every(u => u)) return { usages: current };
+
+    const usages = await this.geminiService.labelExampleUsages(
+      lesson.vocab,
+      lesson.definitions ?? [],
+      examples.map(e => ({ sentence: e.sentence, translation: e.translation })),
+      kuId,
+    );
+    if (!usages) return { usages: current };
+
+    await lessonRef.update({
+      context_examples: examples.map((e, i) => ({ ...e, usage: usages[i] })),
+    });
+    this.logger.log(`Labelled ${usages.length} example usages for ${lesson.vocab} (${kuId}): ${[...new Set(usages)].join(' | ')}`);
+    return { usages };
   }
 
   private async writeGlobalLesson(kuId: string, updates: Record<string, any>): Promise<void> {

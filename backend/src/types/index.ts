@@ -113,8 +113,14 @@ export interface UserRoot {
     /** The current topic or structural node the user is tackling in their overall curriculum. */
     currentCurriculumNode: string;
 
-    /** The set of grammar constructs the AI is permitted to use when generating content for this user. */
+    /**
+     * @deprecated Text snapshot taken at enrollment; goes stale when KUs are renamed. Still
+     * appended but no longer read — use allowedGrammarKuIds via StatsService.getAllowedGrammar().
+     */
     allowedGrammar: string[];
+
+    /** Enrolled (at-or-below-level) Grammar KU ids the AI may use; text is resolved from the current KUs at read time. */
+    allowedGrammarKuIds?: string[];
 
     /**
      * Vocab the user explicitly said they don't want to learn right now ("Not now" on a
@@ -177,7 +183,8 @@ export interface VocabLesson {
   conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
-  context_examples?: { sentence: string; translation: string }[];
+  /** `usage`: short label for the usage/sense the example shows (same label = same usage). Absent on older lessons until labelled. */
+  context_examples?: { sentence: string; translation: string; usage?: string }[];
   validation?: LessonValidation;
   /** When true, component_kanji must be empty — this word is never taught/queued with its kanji breakdown, regardless of how it's stored. Set by the AI at generation time or curated manually via the admin editor; enforced app-side, not just prompted for. */
   kanaOnly?: boolean;

@@ -179,7 +179,7 @@ export default function PreviewLessonPage() {
   const slides = slideCount(loaded);
   const isFirstSlide = slideIdx === 0;
   const isLastSlide = slideIdx >= slides - 1;
-  const typeColor = TYPE_COLORS[loaded.item.type] ?? "#595048";
+  const typeColor = TYPE_COLORS[loaded.item.type] ?? "var(--shodo-ink-light)";
 
   return (
     <main className="container mx-auto max-w-2xl p-8">
@@ -196,8 +196,8 @@ export default function PreviewLessonPage() {
         key={slideIdx}
         className="min-h-[400px] rounded-xl border p-8 animate-in fade-in duration-300"
         style={{
-          backgroundColor: `${typeColor}0d`,
-          borderColor: `${typeColor}33`,
+          backgroundColor: `color-mix(in srgb, ${typeColor} 5%, transparent)`,
+          borderColor: `color-mix(in srgb, ${typeColor} 20%, transparent)`,
         }}
       >
         {renderSlide(loaded, slideIdx, playAudio)}
@@ -217,7 +217,7 @@ export default function PreviewLessonPage() {
             <div
               key={i}
               className="h-1.5 w-1.5 rounded-full transition-colors"
-              style={{ backgroundColor: i === slideIdx ? typeColor : "#D1CBC3" }}
+              style={{ backgroundColor: i === slideIdx ? typeColor : "color-mix(in srgb, var(--shodo-ink) 20%, transparent)" }}
             />
           ))}
         </div>
@@ -225,7 +225,7 @@ export default function PreviewLessonPage() {
         <button
           onClick={() => setSlideIdx(s => Math.min(slides - 1, s + 1))}
           disabled={isLastSlide}
-          className="px-6 py-2.5 rounded-lg text-white font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="px-6 py-2.5 rounded-lg text-shodo-paper font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           style={{ backgroundColor: typeColor }}
         >
           Next →
