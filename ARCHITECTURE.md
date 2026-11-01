@@ -53,7 +53,7 @@ Basic Vocab data was extracted from Wanikani and then boiled down to non-proprie
   - **`concepts`**: Generates and stores `ConceptKnowledgeUnit` documents (grammar concept pages) via `GeminiService.generateConcept`. Uses a dedicated `GEMINI_MODEL` env var so a higher-capability model can be used independently of the flash model used elsewhere.
   - **`stats`**: Central endpoint for aggregating dashboard/queue numbers.
 - **Database Access**: Uses `firebase-admin` natively (not via Web SDK). Note: Next.js API Routes must not use `firebase-admin`; thus, all such operations are fully isolated in this NestJS layer.
-- **Gemini**: Relies heavily on high-context, single prompt instructions using the current model (`gemini-3-flash-preview`) rather than generic `systemInstruction` prompts.
+- **Gemini**: Relies heavily on high-context, single prompt instructions using the current model (`gemini-3.8-flash`) rather than generic `systemInstruction` prompts.
 
 ## Development Setup
 - **Node/Package**: Uses `yarn` workspaces or separated `yarn` installs in each folder depending on CI config. DO NOT USE `npm`.
@@ -223,7 +223,7 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 GOOGLE_CLOUD_PROJECT=gen-lang-client-0878434798   # Firebase project
 FIRESTORE_DB=aisrs-japanese-dev                    # Named Firestore database
 NODE_ENV                                           # 'production' enables strict auth
-MODEL_GEMINI_FLASH=gemini-3-flash-preview          # Default model used by all Gemini methods
+MODEL_GEMINI_FLASH=gemini-3.8-flash          # Default model used by all Gemini methods
 GEMINI_MODEL=gemini-3.1-pro-preview                # Higher-capability model used only by generateConcept
 ```
 

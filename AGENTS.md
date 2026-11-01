@@ -68,7 +68,7 @@ Backend: Runs on `http://localhost:3500` (`yarn start:dev` inside `/backend`)
 
 - **Dates & Firestore**: A historically painful bug in this project involves date parsing. **All dates (`nextReviewAt`, `createdAt`, etc.) MUST be saved as Firebase `Timestamp` objects or native `Date` (which NestJS/Firebase admin serialize) on the backend**. Never save date fields as ISO Strings, as this breaks `where('nextReviewAt', '<=')` range queries.
 - **Firebase Admin SDK Rules**: Do not use `firebase-admin` on Next.js server/API routes. While these routes are mostly deprecated, note that `FieldValue` and `FieldPath` imports cause immediate serverless edge crashes in Next.js. The current architecture strictly relegates these to the NestJS `/backend`.
-- **Gemini API Prompting**: The current version used by the app is `gemini-3-flash-preview` (update the docs if this changes). In this project, comprehensive single `userMessage` instructions (with temperature ~0.4) combined with explicit schema instructions typically yield more reliable JSON returns than splitting instructions between `systemInstruction` and the `responseSchema` param.
+- **Gemini API Prompting**: The current version used by the app is `gemini-3.8-flash` (update the docs if this changes). In this project, comprehensive single `userMessage` instructions (with temperature ~0.4) combined with explicit schema instructions typically yield more reliable JSON returns than splitting instructions between `systemInstruction` and the `responseSchema` param.
 
 ## Dependencies
 

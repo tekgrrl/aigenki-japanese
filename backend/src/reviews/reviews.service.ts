@@ -292,9 +292,11 @@ export class ReviewsService {
         questionId: string,
         kuId: string,
         facetType?: FacetType,
+        facetId?: string,
     ) {
         // 1. Local Check — strip trailing Japanese/ASCII punctuation before comparing
-        const normalize = (s: string) => s.toLowerCase().replace(/[。、！？,.!?\s]+$/u, '').trim();
+        const stripTrailing = (s: string) => s.replace(/[。、！？,.!?\s]+$/u, '').trim();
+        const normalize = (s: string) => stripTrailing(s.toLowerCase());
         const isLocalMatch = expectedAnswers.some(
             (ans) => normalize(ans) === normalize(userAnswer),
         );
@@ -323,8 +325,47 @@ export class ReviewsService {
             await this.questionsService.recordAnswer(uid, questionId, kuId, evalResult.result, facetType);
         }
 
-        return evalResult;
+        // 3. Remember AI-accepted answers so the next attempt matches locally (no AI call).
+        let addedAlternative: string | undefined;
+        const accepted = stripTrailing(userAnswer.trim());
+        if (evalResult.result === 'pass' && accepted) {
+            addedAlternative = await this.addAcceptedAlternative(uid, accepted, facetType, questionId, facetId);
+        }
+
+        return { ...evalResult, ...(addedAlternative ? { addedAlternative } : {}) };
     } // END evaluateAnswer
+
+    /**
+     * AI-Generated-Question answers live on the global Question doc (already app-mutated
+     * via rank), so the alternative goes there. Every other facet type takes its expected
+     * answers from the user's own facet data, so the alternative goes on the facet.
+     * Never fails the review — returns the stored value, or undefined if nothing was written.
+     */
+    private async addAcceptedAlternative(
+        uid: string,
+        answer: string,
+        facetType: FacetType | undefined,
+        questionId: string | undefined,
+        facetId: string | undefined,
+    ): Promise<string | undefined> {
+        try {
+            if (facetType === 'AI-Generated-Question') {
+                if (!questionId) return undefined;
+                await this.questionsService.addAcceptedAlternative(questionId, answer);
+                this.logger.log(`Added accepted alternative "${answer}" to question ${questionId}`);
+                return answer;
+            }
+            if (!facetId) return undefined;
+            await this.facetsColRef(uid).doc(facetId).update({
+                'data.acceptedAlternatives': FieldValue.arrayUnion(answer),
+            });
+            this.logger.log(`Added accepted alternative "${answer}" to facet ${facetId} (${facetType})`);
+            return answer;
+        } catch (err) {
+            this.logger.error(`Failed to store accepted alternative "${answer}" (facet=${facetId}, question=${questionId})`, err);
+            return undefined;
+        }
+    }
 
     async generateReviewFacets(
         uid: string,

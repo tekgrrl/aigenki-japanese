@@ -436,6 +436,13 @@ export class QuestionsService {
     }
   }
 
+  /** Adds an AI-accepted answer to the question's alternatives so future attempts match locally. */
+  async addAcceptedAlternative(questionId: string, answer: string): Promise<void> {
+    await this.db.collection(QUESTIONS_COLLECTION).doc(questionId).update({
+      'data.acceptedAlternatives': FieldValue.arrayUnion(answer),
+    });
+  }
+
   async recordFeedback(uid: string, questionId: string, feedback: 'keep' | 'request-new' | 'report') {
     const questionRef = this.db.collection(QUESTIONS_COLLECTION).doc(questionId);
     const doc = await questionRef.get();

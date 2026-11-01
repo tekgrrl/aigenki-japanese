@@ -46,6 +46,27 @@
   --color-shodo-gold: var(--shodo-gold);
 
   --animate-fade-slide-up: fade-slide-up 0.5s ease-out forwards;
+  /* Floats in, holds, fades out — pair with an unmount timer of the same length. */
+  --animate-toast-in-out: toast-in-out 2.5s ease-out forwards;
+
+  @keyframes toast-in-out {
+    0% {
+      opacity: 0;
+      transform: translateY(10%);
+    }
+    15% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    75% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-10%);
+    }
+  }
 
   @keyframes fade-slide-up {
     0% {

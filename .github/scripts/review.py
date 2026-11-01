@@ -109,7 +109,7 @@ if MODEL_PROVIDER == "gemini":
 
     client = genai.Client()
     response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     raw_ai_text = response.text
