@@ -64,7 +64,8 @@ function stageLabelColor(stage: number): string {
 
 function PromotionBox({ entry }: { entry: PromotedEntry }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg bg-shodo-ink px-3 py-3 text-center min-w-0">
+    // Stays a dark tile in dark mode too — the stage colours are tuned for a dark background.
+    <div className="flex flex-col items-center justify-center rounded-lg bg-shodo-ink dark:bg-shodo-paper-warm dark:ring-1 dark:ring-shodo-ink/15 px-3 py-3 text-center min-w-0">
       <span className="text-lg font-bold leading-tight truncate w-full text-center text-white">
         {entry.content}
       </span>
@@ -265,7 +266,7 @@ export default function DailyCheckInDialog({ plan, learnCount, onClose }: Props)
                     <button
                       onClick={() => handlePractice(opp)}
                       disabled={practicingKuId === opp.kuId}
-                      className="rounded-lg bg-shodo-indigo px-3 py-1.5 text-xs font-medium text-white hover:bg-shodo-indigo/80 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                      className="rounded-lg bg-shodo-indigo px-3 py-1.5 text-xs font-medium text-shodo-paper hover:bg-shodo-indigo/80 transition-colors disabled:opacity-50 disabled:cursor-wait"
                     >
                       {practicingKuId === opp.kuId ? "Starting…" : "Practice in a Scenario"}
                     </button>

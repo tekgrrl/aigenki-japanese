@@ -19,7 +19,7 @@ function Bucket({ label, count, color }: BucketProps) {
       <span className={`text-3xl font-bold leading-none ${color}`}>
         {count.toLocaleString()}
       </span>
-      <span className="text-xs font-medium uppercase tracking-wide text-[#6b7079]">
+      <span className="text-xs font-medium uppercase tracking-wide text-shodo-ink-light">
         {label}
       </span>
     </div>
@@ -36,7 +36,7 @@ export default function Lessons({
       <div className="w-full max-w-lg">
         <Link
           href="/learn"
-          className="group relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-[#cad0d6] bg-[#e8ecf0] p-6 transition-all duration-200 hover:border-[#9ea5ac] hover:shadow-md active:scale-[0.99] active:border-[#cad0d6] active:shadow-sm"
+          className="group relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-shodo-ink/15 bg-shodo-mist p-6 transition-all duration-200 hover:border-shodo-ink/35 hover:shadow-md active:scale-[0.99] active:border-shodo-ink/15 active:shadow-sm"
         >
           <div className="flex flex-wrap items-center gap-4 sm:flex-nowrap">
             <div className="flex shrink-0 basis-[100px] items-center justify-center">
@@ -48,7 +48,7 @@ export default function Lessons({
             </div>
 
             <div className="flex grow flex-col gap-4">
-              <div className="text-[20px] font-bold leading-none text-[#333333]">
+              <div className="text-[20px] font-bold leading-none text-shodo-ink">
                 Knowledge Units
               </div>
 
@@ -58,13 +58,13 @@ export default function Lessons({
                   count={learningCount}
                   color="text-blue-500"
                 />
-                <div className="w-px self-stretch bg-[#cad0d6]" />
+                <div className="w-px self-stretch bg-shodo-ink/15" />
                 <Bucket
                   label="Review"
                   count={reviewingCount}
                   color="text-amber-500"
                 />
-                <div className="w-px self-stretch bg-[#cad0d6]" />
+                <div className="w-px self-stretch bg-shodo-ink/15" />
                 <Bucket
                   label="Mastered"
                   count={masteredCount}

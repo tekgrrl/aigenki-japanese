@@ -54,7 +54,7 @@ export default function ArrayFieldEditor<T>({
         {items.map((item, index) => (
           <div
             key={index}
-            className="flex gap-2 items-start border border-shodo-mist rounded p-3 bg-white"
+            className="flex gap-2 items-start border border-shodo-mist rounded p-3 bg-white dark:bg-shodo-paper-warm"
           >
             <div className="flex-1 space-y-2">{renderRow(item, index, updateAt(index))}</div>
             <button

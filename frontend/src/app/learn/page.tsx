@@ -12,15 +12,15 @@ type KUWithStatus = KnowledgeUnit & {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  learning: "#E08A46", // shodo-persimmon
-  reviewing: "#2E4B75", // shodo-indigo
-  mastered: "#C7A04D", // shodo-gold
+  learning: "var(--shodo-persimmon)",
+  reviewing: "var(--shodo-indigo)",
+  mastered: "var(--shodo-gold)",
 };
 
 const STATUS_BORDER_COLORS: Record<string, string> = {
-  learning: "#B36E38", // persimmon -20%
-  reviewing: "#253C5E", // indigo -20%
-  mastered: "#9F803E", // gold -20%
+  learning: "color-mix(in srgb, var(--shodo-persimmon) 80%, black)",
+  reviewing: "color-mix(in srgb, var(--shodo-indigo) 80%, black)",
+  mastered: "color-mix(in srgb, var(--shodo-gold) 80%, black)",
 };
 
 const TYPE_STYLES: Record<string, string> = {
@@ -29,11 +29,11 @@ const TYPE_STYLES: Record<string, string> = {
   Grammar: "text-shodo-matcha",
 };
 
-// Hex values from tailwind.config.ts — used via style prop to guarantee rendering
+// Shodo theme variables via style prop (they follow light/dark mode)
 const TYPE_COLORS: Record<string, string> = {
-  Vocab: "#2E4B75", // shodo-indigo
-  Kanji: "#595048", // shodo-ink-light (deep ink-brown)
-  Grammar: "#7B8D42", // shodo-matcha
+  Vocab: "var(--shodo-indigo)",
+  Kanji: "var(--shodo-ink-light)", // deep ink-brown
+  Grammar: "var(--shodo-matcha)",
 };
 
 export default function LearnListPage() {
@@ -74,7 +74,7 @@ export default function LearnListPage() {
             <Link
               key={ku.id}
               href={`/learn/${ku.id}`}
-              style={{ borderLeftColor: TYPE_COLORS[ku.type] ?? "#A69E96" }}
+              style={{ borderLeftColor: TYPE_COLORS[ku.type] ?? "var(--shodo-ink-faint)" }}
               className={`flex items-center gap-3 pl-3 pr-4 py-2.5 border-l-4 hover:bg-shodo-paper-dark transition-colors
                 ${i < rows.length - 1 ? "border-b border-shodo-paper-dark" : ""}
                 dark:hover:bg-gray-700`}
@@ -123,7 +123,7 @@ export default function LearnListPage() {
                   backgroundColor: STATUS_COLORS[ku.ukuStatus ?? "learning"],
                   borderColor: STATUS_BORDER_COLORS[ku.ukuStatus ?? "learning"],
                 }}
-                className="text-xs px-2 py-0.5 rounded-full font-medium capitalize w-20 text-center text-white border"
+                className="text-xs px-2 py-0.5 rounded-full font-medium capitalize w-20 text-center text-shodo-paper border"
               >
                 {ku.ukuStatus ?? "learning"}
               </span>
@@ -145,8 +145,7 @@ export default function LearnListPage() {
         </div>
         <button
           onClick={() => router.push("/learn/session")}
-          style={{ backgroundColor: "#2E4B75" }}
-          className="mt-1 px-5 py-2 rounded-lg text-white text-sm font-semibold shrink-0 hover:opacity-90 transition-opacity"
+          className="mt-1 px-5 py-2 rounded-lg bg-shodo-indigo text-shodo-paper text-sm font-semibold shrink-0 hover:opacity-90 transition-opacity"
         >
           Start Learning
         </button>

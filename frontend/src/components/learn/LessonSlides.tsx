@@ -399,7 +399,9 @@ export function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text
 }
 
 export const TYPE_COLORS: Record<string, string> = {
-  Vocab: "#2E4B75",
-  Kanji: "#C0392B",
-  Grammar: "#7B8D42",
+  Vocab: "var(--shodo-indigo)",
+  Kanji: "var(--shodo-stamp-red)",
+  Grammar: "var(--shodo-matcha)",
 };
+// Shodo theme variables (follow light/dark mode). Used as inline style colours, so
+// derive tints with color-mix() rather than appending hex alpha.

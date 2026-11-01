@@ -110,7 +110,7 @@ export default function ReportContentIssue({ kuId, kuContent, lesson, tone = "li
     : "border-shodo-ink/15 bg-shodo-paper-warm text-shodo-ink";
   const fieldCls = dark
     ? "bg-gray-800 border-gray-600 text-gray-200 placeholder-gray-500"
-    : "bg-white border-shodo-ink/15 text-shodo-ink placeholder-shodo-ink-faint";
+    : "bg-white dark:bg-shodo-paper-warm border-shodo-ink/15 text-shodo-ink placeholder-shodo-ink-faint";
   const chipCls = (active: boolean) =>
     active
       ? "bg-shodo-ink text-shodo-paper border-shodo-ink"

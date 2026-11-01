@@ -201,7 +201,7 @@ export default function AdminKnowledgeUnitsPage() {
     setEditTarget(prev => prev && prev.id === id ? { ...prev, ...updates } as KnowledgeUnit : prev);
   };
 
-  const selectClass = "px-3 py-1.5 text-sm border border-shodo-mist rounded bg-white text-shodo-ink focus:outline-none focus:border-shodo-indigo";
+  const selectClass = "px-3 py-1.5 text-sm border border-shodo-mist rounded bg-white dark:bg-shodo-paper-warm text-shodo-ink focus:outline-none focus:border-shodo-indigo";
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -214,7 +214,7 @@ export default function AdminKnowledgeUnitsPage() {
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search by content…"
-          className="px-3 py-1.5 text-sm border border-shodo-mist rounded bg-white text-shodo-ink placeholder-shodo-ink-light focus:outline-none focus:border-shodo-indigo w-64"
+          className="px-3 py-1.5 text-sm border border-shodo-mist rounded bg-white dark:bg-shodo-paper-warm text-shodo-ink placeholder-shodo-ink-light focus:outline-none focus:border-shodo-indigo w-64"
         />
 
         <select value={filterType} onChange={e => setFilterType(e.target.value)} className={selectClass}>
