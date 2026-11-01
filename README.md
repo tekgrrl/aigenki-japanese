@@ -17,7 +17,7 @@ If you are a contributor or an AI agent working on this project, please consult 
 
 ## Getting Started
 
-You'll need to supply your own Gemini API key (as `GEMINI_API_KEY`) and store it in an `.env` or `.env.local` file in the backend directory. The app currently requires `gemini-3-flash-preview` for reliable lesson generation. (If the model is upgraded, be sure to update this documentation).
+You'll need to supply your own Gemini API key (as `GEMINI_API_KEY`) and store it in an `.env` or `.env.local` file in the backend directory. The app currently requires `gemini-3.8-flash` for reliable lesson generation. (If the model is upgraded, be sure to update this documentation).
 
 **Prerequisites:**
 - Node.js (LTS version)
