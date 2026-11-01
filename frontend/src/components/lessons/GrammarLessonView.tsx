@@ -1,5 +1,6 @@
 "use client";
 
+import LessonNotes from "./LessonNotes";
 import React, { useState } from "react";
 import { GrammarLesson, UserGrammarLesson } from "@/types";
 import { normalizeFormation } from "@/lib/grammar-lesson";
@@ -60,9 +61,11 @@ export default function GrammarLessonView({
         </div>
         {lesson.notes && (
           <div className="border-t border-shodo-ink/10 pt-4 space-y-3">
-            {lesson.notes.replace(/\\n/g, '\n').split(/\n\n+/).map((para, i) => (
-              <p key={i} className="text-shodo-ink-light text-base leading-relaxed">{para}</p>
-            ))}
+            <LessonNotes
+              notes={lesson.notes}
+              className="text-shodo-ink-light text-base leading-relaxed"
+              headingClassName="text-lg font-semibold text-shodo-ink"
+            />
           </div>
         )}
       </div>
