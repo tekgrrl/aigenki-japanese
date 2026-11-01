@@ -19,6 +19,7 @@ import VocabLessonView from "@/components/lessons/VocabLessonView";
 import KanjiLessonView from "@/components/lessons/KanjiLessonView";
 import GrammarLessonView from "@/components/lessons/GrammarLessonView";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { useQuestionScout, type ScoutedQuestion } from "@/hooks/useQuestionScout";
 import { Mic } from "lucide-react";
 
 type AnswerState = "unanswered" | "evaluating" | "correct" | "incorrect";
@@ -113,9 +114,23 @@ export default function ReviewPage() {
   };
 
   const currentItem = reviewQueue[currentIndex];
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
 
-  const reviewCount = reviewQueue.length;
-  const isSessionComplete = reviewQueue.length > 0 && currentIndex >= reviewQueue.length;
+  // Scout ahead for AI questions. A parked item (question still loading when reached)
+  // is put back straight after the item currently being reviewed once its question arrives.
+  const reinsertScouted = useCallback((item: ReviewItem) => {
+    setReviewQueue((prev) => {
+      const idx = currentIndexRef.current;
+      const at = idx < prev.length ? idx + 1 : prev.length;
+      return [...prev.slice(0, at), item, ...prev.slice(at)];
+    });
+  }, []);
+  const scout = useQuestionScout(reviewQueue, currentIndex, reinsertScouted);
+
+  const reviewCount = reviewQueue.length + scout.parkedCount;
+  const isSessionComplete =
+    reviewQueue.length > 0 && currentIndex >= reviewQueue.length && scout.parkedCount === 0;
 
   // Refresh header stats when session ends, with a delay to let fire-and-forget
   // stage advancement (checkAndAdvanceStage) finish updating UKU status.
@@ -127,11 +142,8 @@ export default function ReviewPage() {
     return () => clearTimeout(timer);
   }, [isSessionComplete]);
 
-  const lastFetchedIndex = useRef<number | null>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
   const answerInputRef = useRef<HTMLInputElement>(null);
-  const currentIndexRef = useRef(currentIndex);
-  currentIndexRef.current = currentIndex;
 
   // --- Level change toast: auto-dismiss (matches the 2.5s animate-toast-in-out) ---
   const LEVEL_TOAST_MS = 2500;
@@ -181,43 +193,14 @@ export default function ReviewPage() {
     }
   }, [isFetchingDynamicQuestion, dynamicQuestion, currentItem]);
 
-  // --- Fetch Dynamic Question Logic ---
-  const fetchDynamicQuestion = async (
-    topic: string,
-    facetId: string,
-    kuId: string,
-  ) => {
-    setIsFetchingDynamicQuestion(true);
-    setError(null);
-    try {
-      const response = await apiFetch(
-        `/api/questions/generate?topic=${encodeURIComponent(topic)}&facetId=${facetId}&kuId=${kuId}`,
-        // `/api/generate-question?topic=${encodeURIComponent(topic)}&facetId=${facetId}&kuId=${kuId}`,
-      );
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed to generate question");
-      }
-      const {
-        question,
-        answer,
-        context,
-        accepted_alternatives,
-        questionId,
-        isNew,
-      } = await response.json();
-      setDynamicQuestion(question);
-      setDynamicAnswer(answer);
-      setDynamicContext(context || null);
-      setDynamicAltAnswers(accepted_alternatives || null);
-      setDynamicQuestionId(questionId || null);
-      setDynamicQuestionIsNew(isNew ?? false);
-    } catch (err) {
-      if (err instanceof Error) setError(err.message);
-      else setError("An unknown error occurred");
-    } finally {
-      setIsFetchingDynamicQuestion(false);
-    }
+  // --- AI question state from the scout ---
+  const applyScoutedQuestion = (q: ScoutedQuestion | null) => {
+    setDynamicQuestion(q?.question ?? null);
+    setDynamicAnswer(q?.answer ?? null);
+    setDynamicContext(q?.context ?? null);
+    setDynamicAltAnswers(q?.altAnswers ?? []);
+    setDynamicQuestionId(q?.questionId ?? null);
+    setDynamicQuestionIsNew(q?.isNew ?? false);
   };
 
   // --- Data Fetching ---
@@ -252,13 +235,14 @@ export default function ReviewPage() {
       setShowLesson(false);
       setLessonForReview(null);
       setShowFeedbackModal(false);
+      scout.reset();
       fetchDueItems();
     };
     window.addEventListener("reloadReviews", handleReload);
     return () => window.removeEventListener("reloadReviews", handleReload);
-  }, [fetchDueItems]);
+  }, [fetchDueItems, scout.reset]);
 
-  // --- Effect to handle current item changes ---
+  // --- Effect to handle current item changes (audio autoplay) ---
   useEffect(() => {
     if (
       currentItem &&
@@ -269,42 +253,51 @@ export default function ReviewPage() {
         fetchAndPlayAudio(currentItem.facet.data?.reading || currentItem.facet.data?.content);
       }, 50);
     }
-
-    if (
-      currentItem &&
-      currentItem.facet.facetType === "AI-Generated-Question"
-    ) {
-      // --- FIX: Double Fetch Prevention ---
-      // If we have already triggered a fetch for this exact index, do nothing.
-      if (lastFetchedIndex.current === currentIndex) {
-        return;
-      }
-
-      // Mark this index as fetched
-      lastFetchedIndex.current = currentIndex;
-
-      setDynamicQuestion(null);
-      setDynamicAnswer(null);
-      setDynamicAltAnswers([]);
-      setDynamicContext(null);
-      setDynamicQuestionId(null);
-      setDynamicQuestionIsNew(false);
-
-      const topic = currentItem.facet.data?.topic || currentItem.facet.data?.content || '';
-      fetchDynamicQuestion(
-        topic,
-        currentItem.facet.id,
-        currentItem.facet.kuId,
-      );
-    } else {
-      setDynamicQuestion(null);
-      setDynamicAnswer(null);
-      setDynamicAltAnswers([]);
-      setDynamicContext(null);
-      setDynamicQuestionId(null);
-      setDynamicQuestionIsNew(false);
-    }
   }, [currentItem, currentIndex]); // Re-run whenever the currentItem OR the index changes
+
+  const shownScoutError = useRef<unknown>(null);
+
+  // --- AI question for the current item (scout ahead) ---
+  // Ready → show instantly. Still loading → park it and keep reviewing other items (the scout
+  // puts it back right after the current item when its question arrives); only if nothing else
+  // is left, wait on it here. Re-runs when any scout entry settles (scout.version).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the current item and scout.version only; answerState/queue are read at run time on purpose
+  useEffect(() => {
+    if (!currentItem || currentItem.facet.facetType !== "AI-Generated-Question") {
+      applyScoutedQuestion(null);
+      setIsFetchingDynamicQuestion(false);
+      return;
+    }
+    const facetId = currentItem.facet.id;
+    const entry = scout.ensure(currentItem, { retryOnError: true });
+
+    if (entry.status === "ready") {
+      applyScoutedQuestion(entry.payload ?? null);
+      setIsFetchingDynamicQuestion(false);
+      return;
+    }
+    if (entry.status === "error") {
+      applyScoutedQuestion(null);
+      setIsFetchingDynamicQuestion(false);
+      // Surface each failure once, so a dismissed error doesn't reappear when another entry settles.
+      if (shownScoutError.current !== entry) {
+        shownScoutError.current = entry;
+        setError(entry.error ?? "Failed to generate question");
+      }
+      return;
+    }
+
+    // Still loading
+    if (answerState === "unanswered" && currentIndex + 1 < reviewQueue.length) {
+      scout.park(currentItem);
+      setReviewQueue((prev) =>
+        prev[currentIndex]?.facet.id === facetId ? prev.filter((_, i) => i !== currentIndex) : prev,
+      );
+      return;
+    }
+    applyScoutedQuestion(null);
+    setIsFetchingDynamicQuestion(true);
+  }, [currentItem, currentIndex, scout.version]);
 
   function shuffleArray<T>(array: T[]): T[] {
     // Create a copy to avoid mutating the original state directly
@@ -525,6 +518,7 @@ export default function ReviewPage() {
 
   /** After an admin regenerate-and-reset, drop later queue items whose facets were just deleted, then move on. */
   const handleRegenerated = (kuId: string) => {
+    scout.dropKu(kuId);
     setReviewQueue((prev) =>
       prev.filter((item, i) => i <= currentIndex || (item.facet.kuId !== kuId && item.facet.source?.id !== kuId)),
     );
@@ -785,6 +779,17 @@ export default function ReviewPage() {
     );
   }
 
+  // Queue exhausted but AI questions are still being generated: wait for them.
+  if ((!currentItem || currentIndex >= reviewQueue.length) && scout.parkedCount > 0) {
+    return (
+      <main className="container mx-auto max-w-2xl p-8 text-center">
+        <p className="text-xl text-gray-400 animate-pulse">
+          Preparing your last {scout.parkedCount === 1 ? "question" : `${scout.parkedCount} questions`}…
+        </p>
+      </main>
+    );
+  }
+
   // Handle both "no items" and "all items done"
   if (!currentItem || currentIndex >= reviewQueue.length) {
     return (
@@ -847,16 +852,7 @@ export default function ReviewPage() {
                 type="button"
                 onClick={() => {
                   setError(null);
-                  setDynamicQuestion(null);
-                  setDynamicAnswer(null);
-                  setDynamicAltAnswers([]);
-                  setDynamicContext(null);
-                  lastFetchedIndex.current = null;
-                  fetchDynamicQuestion(
-                    currentItem.facet.data?.topic || currentItem.facet.data?.content || '',
-                    currentItem.facet.id,
-                    currentItem.facet.kuId,
-                  );
+                  scout.retry(currentItem);
                 }}
                 className="text-sm px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded font-medium"
               >
