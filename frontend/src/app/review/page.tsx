@@ -462,6 +462,7 @@ export default function ReviewPage() {
           questionId,
           kuId: currentItem.facet.kuId,
           facetType: currentItem.facet.facetType,
+          facetId: currentItem.facet.id,
         }),
       });
 
@@ -705,6 +706,15 @@ export default function ReviewPage() {
     if (facet.facetType === "AI-Generated-Question") {
       return [...(dynamicAltAnswers ?? []), ...(dynamicAnswer ? [dynamicAnswer] : [])];
     }
+
+    // Answers the AI evaluator previously accepted for this facet (stored per-user on the facet).
+    const learnedAlts: string[] = facet.data?.acceptedAlternatives ?? [];
+    const base = getBaseExpectedAnswer(item);
+    return base.length > 0 ? Array.from(new Set([...base, ...learnedAlts])) : base;
+  };
+
+  const getBaseExpectedAnswer = (item: ReviewItem): string[] => {
+    const { facet } = item;
 
     if (facet.facetType === "Definition-to-Content" || facet.facetType === "Reading-to-Content") {
       return facet.data?.content ? [facet.data.content] : [];
