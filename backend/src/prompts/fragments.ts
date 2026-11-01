@@ -52,6 +52,10 @@ export const FRAGMENT_CONTRACT =
   `The 'fragments' array MUST split the sentence into minimal grammatical chunks. ` +
   `When concatenated in order, the strings in 'fragments' MUST perfectly reconstruct the 'japanese' string. ` +
   `ALWAYS group particles with their preceding nouns. ` +
+  `NEVER split inside a word. ` +
+  `There MUST be at least 4 fragments — a 2- or 3-piece split is a guess, not an exercise; if the sentence is too short to split into 4 meaningful chunks, write a longer sentence. ` +
+  `The grammar pattern being practised MUST be split out into its own fragment(s), separate from the content words around it, so that assembling the sentence means rebuilding the pattern's structure ` +
+  `(e.g. for 〜の中で〜が一番: ["クラスの中で", "田中さんが", "一番", "背が高いです。"] — NOT ["クラスの中で", "田中さんが", "一番背が高いです。"]). ` +
   `NEVER include Romaji or furigana in fragments.`;
 
 /**

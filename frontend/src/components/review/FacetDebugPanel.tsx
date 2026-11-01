@@ -9,14 +9,20 @@ import { ReviewFacet, KnowledgeUnit } from "@/types";
 
 interface Props {
   facet: ReviewFacet;
+  /** Called after a successful regenerate-and-reset, so the review page can move past the now-deleted facet. */
+  onRegenerated?: (kuId: string) => void;
 }
 
-export default function FacetDebugPanel({ facet }: Props) {
+type RegenState = "idle" | "confirm" | "running" | "done" | "error";
+
+export default function FacetDebugPanel({ facet, onRegenerated }: Props) {
   const { isAdmin } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [targetKu, setTargetKu] = useState<KnowledgeUnit | null>(null);
   const [originKu, setOriginKu] = useState<KnowledgeUnit | null>(null);
+  const [regenState, setRegenState] = useState<RegenState>("idle");
+  const [regenMessage, setRegenMessage] = useState<string | null>(null);
 
   if (!isAdmin) return null;
 
@@ -43,9 +49,39 @@ export default function FacetDebugPanel({ facet }: Props) {
     }
   };
 
-  // Reports target the lesson the facet's sequence came from (the parent word for kanji-component facets).
-  const reportKuId = originId ?? facet.kuId;
-  const reportLabel = (originId ? originKu?.content : targetKu?.content) ?? reportKuId;
+  // Regeneration rebuilds the lesson the facet's sequence came from (the parent word for
+  // kanji-component facets). Concepts and scenarios regenerate differently — not offered.
+  const regenKuId = originId ?? facet.kuId;
+  const regenLabel = (originId ? originKu?.content : targetKu?.content) ?? regenKuId;
+  const canRegenerate = facet.sourceCollection !== "concepts" && facet.sourceCollection !== "scenarios";
+
+  const handleRegenerate = async () => {
+    setRegenState("running");
+    setRegenMessage(null);
+    try {
+      const res = await apiFetch(`/api/reviews/regenerate-and-reset/${regenKuId}`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `Request failed (${res.status})`);
+      }
+      const { facetsDeleted, facetsCreated } = await res.json();
+      setRegenState("done");
+      setRegenMessage(`Regenerated. Deleted ${facetsDeleted} review item(s), created ${facetsCreated}.`);
+      // Brief pause so the result is readable before the card advances.
+      setTimeout(() => onRegenerated?.(regenKuId), 1500);
+    } catch (err) {
+      console.error("[FacetDebugPanel] regenerate-and-reset failed", err);
+      setRegenState("error");
+      // The request can fail (e.g. a proxy timeout) while the backend carries on and deletes
+      // this KU's facets anyway — so move past them either way rather than leaving stale
+      // items in the session that would 404 when answered. If it really failed, they simply
+      // come back next session.
+      setRegenMessage(
+        `${err instanceof Error ? err.message : "Request failed"} — it may still be running; check the backend console. Skipping this item.`,
+      );
+      setTimeout(() => onRegenerated?.(regenKuId), 2500);
+    }
+  };
 
   return (
     <div className="mt-4">
@@ -90,8 +126,50 @@ export default function FacetDebugPanel({ facet }: Props) {
 
               {facet.data && <JsonDisplay data={facet.data} />}
 
+              {canRegenerate && (
+                <div className="pt-2 border-t border-gray-700 space-y-2">
+                  {regenState === "idle" && (
+                    <button
+                      type="button"
+                      onClick={() => setRegenState("confirm")}
+                      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-md transition-colors"
+                    >
+                      Regenerate lesson &amp; reset reviews
+                    </button>
+                  )}
+                  {regenState === "confirm" && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-300">
+                        Regenerates the lesson for <span className="font-semibold">{regenLabel}</span> and deletes your
+                        review items and SRS progress for it. New items start from scratch.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleRegenerate}
+                          className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-md transition-colors"
+                        >
+                          Confirm regenerate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRegenState("idle")}
+                          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-md transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {regenState === "running" && <p className="text-xs text-gray-400">Regenerating… (can take ~30s)</p>}
+                  {(regenState === "done" || regenState === "error") && regenMessage && (
+                    <p className={`text-xs ${regenState === "done" ? "text-green-300" : "text-red-300"}`}>{regenMessage}</p>
+                  )}
+                </div>
+              )}
+
               <div className="pt-2 border-t border-gray-700">
-                <ReportContentIssue kuId={reportKuId} kuContent={reportLabel} tone="dark" />
+                <ReportContentIssue kuId={regenKuId} kuContent={regenLabel} tone="dark" />
               </div>
             </>
           )}

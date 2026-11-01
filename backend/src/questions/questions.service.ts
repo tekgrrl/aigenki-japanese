@@ -83,6 +83,10 @@ export class QuestionsService {
       ? await this.reviewsService.getByFacetId(uid, facetId) as ReviewFacet | null
       : null;
 
+    // The facet can be gone if it was deleted mid-session (e.g. an admin regenerate-and-reset).
+    // Fail cleanly instead of generating a question and then crashing on the facet write.
+    if (facetId && !facetData) throw new NotFoundException(`Facet ${facetId} not found`);
+
     // 1. Try to reuse the question already on the facet
     if (facetData?.currentQuestionId) {
       const reused = await this.tryReuseQuestion(uid, facetData.currentQuestionId);
