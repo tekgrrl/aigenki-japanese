@@ -740,6 +740,10 @@ export interface ContentFlag {
   status: 'open' | 'resolved' | 'dismissed';
   /** Set when the flag was created manually rather than by the automated validator. */
   manualNote?: string;
+  /** Manual flags: the exact sentence/part of the content being reported (picked in the lesson UI). */
+  quotedSegment?: string;
+  /** Manual flags: quick category picked in the lesson UI (e.g. "Above level"). */
+  category?: string;
   dismissNote?: string;
   resolvedAt?: Timestamp;
   createdAt: Timestamp;

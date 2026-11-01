@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
 import { Firestore, Timestamp, Query } from 'firebase-admin/firestore';
-import { FIRESTORE_CONNECTION, CONTENT_FLAGS_COLLECTION, LESSONS_COLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, CONTENT_FLAGS_COLLECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { ApilogService } from '../apilog/apilog.service';
 import { ValidationResult, ContentFlag } from '../types';
 import { buildValidationPrompt } from '../prompts/validation.prompts';
@@ -137,26 +137,47 @@ export class ValidationService implements OnModuleInit {
     }
   }
 
-  async createManualFlag(params: {
+  /**
+   * Creates a manual flag. kuContent/userLevel may be omitted when kuId is given —
+   * they're filled in here so in-lesson reporting never asks for what the system knows.
+   */
+  async createManualFlag(uid: string, params: {
     sourceType: 'lesson' | 'scenario';
     sourceId: string;
     kuId?: string;
-    kuContent: string;
-    userLevel: string;
-    manualNote: string;
+    kuContent?: string;
+    userLevel?: string;
+    manualNote?: string;
+    quotedSegment?: string;
+    category?: string;
   }): Promise<string> {
+    let kuContent = params.kuContent;
+    if (!kuContent && params.kuId) {
+      const kuDoc = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(params.kuId).get();
+      kuContent = (kuDoc.data()?.content as string | undefined) ?? params.kuId;
+    }
+    let userLevel = params.userLevel;
+    if (!userLevel) {
+      const userDoc = await this.db.collection('users').doc(uid).get();
+      userLevel = (userDoc.data()?.preferences?.jlptLevel as string | undefined) ?? 'N5';
+    }
+
     const flag: Omit<ContentFlag, 'id'> = {
       sourceType: params.sourceType,
       sourceId: params.sourceId,
       ...(params.kuId ? { kuId: params.kuId } : {}),
-      kuContent: params.kuContent,
-      userLevel: params.userLevel,
+      kuContent: kuContent ?? params.sourceId,
+      userLevel,
       violations: [],
       status: 'open',
-      manualNote: params.manualNote,
+      manualNote: params.manualNote ?? '',
+      ...(params.quotedSegment ? { quotedSegment: params.quotedSegment } : {}),
+      ...(params.category ? { category: params.category } : {}),
+      userId: uid,
       createdAt: Timestamp.now(),
     };
     const ref = await this.db.collection(CONTENT_FLAGS_COLLECTION).add(flag);
+    this.logger.log(`Manual content flag ${ref.id} created by uid=${uid} for ${params.sourceType}:${params.sourceId}${params.category ? ` [${params.category}]` : ''}`);
     return ref.id;
   }
 
