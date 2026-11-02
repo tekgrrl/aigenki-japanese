@@ -58,6 +58,8 @@ export default function PicturesAdminPage() {
   const [uploadUsage, setUploadUsage] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Bumped after each upload to remount (clear) the file input.
+  const [fileInputKey, setFileInputKey] = useState(0);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
@@ -127,8 +129,11 @@ export default function PicturesAdminPage() {
       setUploadWord("");
       setUploadUsage("");
       setUploadFile(null);
-      setTab("approved");
-      await load();
+      setFileInputKey((k) => k + 1);
+      // Switching tab reloads via the effect; only reload directly if we're already there
+      // (calling load() after setTab would fetch the old tab and race the effect's fetch).
+      if (tab === "approved") await load();
+      else setTab("approved");
     } finally {
       setUploading(false);
     }
@@ -268,6 +273,7 @@ export default function PicturesAdminPage() {
               className="w-72 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
             />
             <input
+              key={fileInputKey}
               aria-label="Image file"
               type="file"
               accept="image/png,image/jpeg,image/webp"

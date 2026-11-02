@@ -44,7 +44,18 @@ export interface UploadedImage {
   size: number;
 }
 
-const UPLOAD_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const IMAGE_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+/** The single rule for matching usage labels (case- and whitespace-insensitive). */
+export const usageKey = (u: string | undefined | null) => (u ?? '').trim().toLowerCase();
+
+/** Does the buffer really hold a PNG / JPEG / WebP? (The client's mimetype is only a claim.) */
+function sniffImage(buf: Buffer): string | null {
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 const MAX_ATTEMPTS = 3;
@@ -195,12 +206,15 @@ export class PicturesService {
     if (!lessonDoc.exists) throw new BadRequestException(`KU ${kuId} has no lesson yet`);
     const lesson = lessonDoc.data() as VocabLesson;
 
-    const key = (u: string) => u.trim().toLowerCase();
+    const key = usageKey;
     const sources = usageSources(lesson);
     const have = new Set(existing.docs.map(d => key(d.data().usage ?? '')));
-    // An uploaded picture is the authority for its usage: never generate over it, even forced.
+    // An uploaded picture is the authority for its usage: never generate over it, even
+    // forced. A REJECTED upload isn't — its usage can be generated again.
     const uploaded = new Set(
-      existing.docs.filter(d => d.data().origin === 'uploaded').map(d => key(d.data().usage ?? '')),
+      existing.docs
+        .filter(d => d.data().origin === 'uploaded' && d.data().status !== 'rejected')
+        .map(d => key(d.data().usage ?? '')),
     );
     const todo = (force ? sources : sources.filter(s => !have.has(key(s.usage)))).filter(s => !uploaded.has(key(s.usage)));
 
@@ -208,6 +222,8 @@ export class PicturesService {
     let failed = 0;
     for (const source of todo) {
       try {
+        // Generation is slow; an upload may have arrived for this usage since we started.
+        if (await this.hasActiveUpload(kuId, source.usage)) continue;
         pictures.push(await this.generateOne(kuId, lesson, source));
       } catch (e: any) {
         failed++;
@@ -300,7 +316,7 @@ export class PicturesService {
     }
     // Unique name per generation, so a redraw isn't masked by the image's long cache.
     this.ensureDir();
-    const ext = image!.mimeType === 'image/jpeg' ? 'jpg' : image!.mimeType === 'image/webp' ? 'webp' : 'png';
+    const ext = IMAGE_EXT[image!.mimeType] ?? 'png';
     const file = `${ref.id}-${Date.now()}.${ext}`;
     fs.writeFileSync(path.join(this.dir, file), image!.data);
     const status: PictureStatus = attempts[attempts.length - 1].hasText ? 'needs-review' : 'approved';
@@ -317,9 +333,10 @@ export class PicturesService {
    * origin 'uploaded' so generation never redraws, replaces or cleans it up.
    */
   async upload(kuId: string, usage: string | undefined, image: UploadedImage): Promise<Picture> {
-    const ext = UPLOAD_TYPES[image.mimetype];
-    if (!ext) throw new BadRequestException(`Unsupported image type ${image.mimetype} (use PNG, JPEG or WebP)`);
     if (!image.size || image.size > MAX_UPLOAD_BYTES) throw new BadRequestException('Image must be under 5 MB');
+    const actual = sniffImage(image.buffer);
+    if (!actual) throw new BadRequestException('File is not a PNG, JPEG or WebP image');
+    const ext = IMAGE_EXT[actual];
 
     const [kuDoc, lessonDoc] = await Promise.all([
       this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).get(),
@@ -332,9 +349,11 @@ export class PicturesService {
 
     // Default the usage to the lesson's first usage, so the picture lines up with the slides.
     const sources = lesson ? usageSources(lesson) : [];
-    const chosen = usage?.trim()
-      ? sources.find(s => s.usage.trim().toLowerCase() === usage.trim().toLowerCase())
-      : sources[0];
+    const chosen = usage?.trim() ? sources.find(s => usageKey(s.usage) === usageKey(usage)) : sources[0];
+    // A typed usage that matches none of the lesson's usages would never be shown: refuse it.
+    if (usage?.trim() && !chosen && sources.length) {
+      throw new BadRequestException(`"${usage.trim()}" isn't one of this word's usages: ${sources.map(s => s.usage).join(', ')}`);
+    }
     const source: PictureSource = chosen ?? {
       usage: usage?.trim() || ku.data?.definition || ku.content,
       definition: (lesson?.definitions ?? [])[0] ?? ku.data?.definition ?? '',
@@ -345,7 +364,8 @@ export class PicturesService {
     const ref = this.col().doc();
     this.ensureDir();
     const file = `${ref.id}-${Date.now()}.${ext}`;
-    fs.writeFileSync(path.join(this.dir, file), image.buffer);
+    const filePath = path.join(this.dir, file);
+    fs.writeFileSync(filePath, image.buffer);
     const doc = {
       kuId,
       content: lesson?.vocab ?? ku.content,
@@ -358,7 +378,21 @@ export class PicturesService {
       attempts: [],
       createdAt: Timestamp.now(),
     };
-    await ref.set(doc);
+    try {
+      await ref.set(doc);
+    } catch (e) {
+      fs.rmSync(filePath, { force: true }); // don't leave an orphaned file if the doc write fails
+      throw e;
+    }
+
+    // The upload replaces any other picture for this usage: those are marked rejected
+    // (reversible from the admin grid) so learners only ever get the upload.
+    const others = await this.col().where('kuId', '==', kuId).get();
+    for (const d of others.docs) {
+      if (d.id !== ref.id && usageKey(d.data().usage) === usageKey(doc.usage) && d.data().status !== 'rejected') {
+        await d.ref.update({ status: 'rejected' });
+      }
+    }
     this.logger.log(`Uploaded picture ${ref.id} for ${doc.content} (${doc.usage})`);
     return { id: ref.id, ...doc };
   }
@@ -371,12 +405,19 @@ export class PicturesService {
     const lessons = await this.db.getAll(...kuIds.map(id => col.doc(id)));
     const usages = new Map<string, Set<string>>();
     lessons.forEach((l, i) => {
-      if (l.exists) usages.set(kuIds[i], new Set(usageSources(l.data() as VocabLesson).map(s => s.usage.trim().toLowerCase())));
+      if (l.exists) usages.set(kuIds[i], new Set(usageSources(l.data() as VocabLesson).map(s => usageKey(s.usage))));
     });
     return pictures.map(p =>
-      p.origin === 'uploaded' && usages.has(p.kuId) && !usages.get(p.kuId)!.has(p.usage.trim().toLowerCase())
+      p.origin === 'uploaded' && usages.has(p.kuId) && !usages.get(p.kuId)!.has(usageKey(p.usage))
         ? { ...p, staleUsage: true }
         : p,
+    );
+  }
+
+  private async hasActiveUpload(kuId: string, usage: string): Promise<boolean> {
+    const snap = await this.col().where('kuId', '==', kuId).get();
+    return snap.docs.some(
+      d => d.data().origin === 'uploaded' && d.data().status !== 'rejected' && usageKey(d.data().usage) === usageKey(usage),
     );
   }
 
@@ -399,7 +440,7 @@ export class PicturesService {
       this.db.collection(LESSONS_COLLECTION).where('type', '==', 'Vocab').get(),
       this.col().select('kuId', 'usage').get(),
     ]);
-    const key = (u: string) => u.trim().toLowerCase();
+    const key = usageKey;
     const have = new Map<string, Set<string>>();
     for (const d of pictures.docs) {
       const k = d.data().kuId as string;
@@ -439,7 +480,7 @@ export function usageSources(lesson: VocabLesson): PictureSource[] {
   const seen = new Set<string>();
   const sources: PictureSource[] = [];
   for (const e of examples) {
-    const key = e.usage!.trim().toLowerCase();
+    const key = usageKey(e.usage);
     if (seen.has(key)) continue;
     seen.add(key);
     sources.push({ usage: e.usage!.trim(), definition, sentence: strip(e.sentence), translation: e.translation });

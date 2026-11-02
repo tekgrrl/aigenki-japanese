@@ -44,6 +44,7 @@ export class PicturesController {
     // must revalidate, since a redraw changes the image behind the same id.
     const current = file.split(/[\\/]/).pop();
     res.setHeader('Cache-Control', version && version === current ? 'public, max-age=31536000, immutable' : 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.sendFile(file);
   }
 

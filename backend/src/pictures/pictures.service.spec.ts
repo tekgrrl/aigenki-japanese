@@ -351,7 +351,11 @@ describe('PicturesService', () => {
   });
 
   describe('uploaded pictures (made outside the system)', () => {
-    const png = (bytes = 'diagram') => ({ buffer: Buffer.from(bytes), mimetype: 'image/png', size: bytes.length });
+    const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const png = (body = 'diagram') => {
+      const buffer = Buffer.concat([PNG_MAGIC, Buffer.from(body)]);
+      return { buffer, mimetype: 'image/png', size: buffer.length };
+    };
 
     function uploadedPicture(id: string, usage: string) {
       fs.writeFileSync(path.join(dir, `${id}-1.png`), 'up');
@@ -364,7 +368,7 @@ describe('PicturesService', () => {
       seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
       const pic = await service.upload(KU, 'COST', png());
       expect(pic).toMatchObject({ status: 'approved', origin: 'uploaded', usage: 'cost', kuId: KU });
-      expect(fs.readFileSync(path.join(dir, pic.file!), 'utf8')).toBe('diagram');
+      expect(fs.readFileSync(path.join(dir, pic.file!)).subarray(8).toString()).toBe('diagram');
     });
 
     it('upload defaults the usage to the lesson\'s first usage', async () => {
@@ -404,6 +408,55 @@ describe('PicturesService', () => {
       const annotated = await service.annotateStale(await service.list({}));
       const stale = Object.fromEntries(annotated.map(p => [p.id, !!p.staleUsage]));
       expect(stale).toEqual({ up1: true, up2: false, gen: false });
+    });
+
+    it('upload checks the real file type, not the claimed one', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      const html = Buffer.from('<html><script>x</script></html>');
+      await expect(service.upload(KU, undefined, { buffer: html, mimetype: 'image/png', size: html.length }))
+        .rejects.toBeInstanceOf(BadRequestException);
+      const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]);
+      expect((await service.upload(KU, undefined, { buffer: jpeg, mimetype: 'image/png', size: jpeg.length })).file).toMatch(/\.jpg$/);
+    });
+
+    it('upload refuses a usage that is not one of the lesson\'s usages', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      await expect(service.upload(KU, 'costs', png())).rejects.toThrow(/time, cost/);
+    });
+
+    it('upload replaces other pictures for the same usage (marks them rejected)', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      existingPicture('gen-time', 'time', 'approved');
+      existingPicture('gen-cost', 'cost', 'approved');
+      const up = await service.upload(KU, 'time', png());
+      const status = Object.fromEntries(pictures().map(p => [p.id, p.status]));
+      expect(status).toEqual({ 'gen-time': 'rejected', 'gen-cost': 'approved', [up.id]: 'approved' });
+    });
+
+    it('a failed doc write removes the uploaded file', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      const spy = jest.spyOn(FakeDocRef.prototype, 'set').mockImplementationOnce(() => Promise.reject(new Error('firestore down')));
+      await expect(service.upload(KU, undefined, png())).rejects.toThrow('firestore down');
+      expect(fs.readdirSync(dir)).toEqual([]);
+      spy.mockRestore();
+    });
+
+    it('a rejected upload no longer blocks generation for its usage', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      uploadedPicture('up1', 'time');
+      await service.setStatus('up1', 'rejected');
+      const { pictures: made } = await service.generateForKu(KU, true);
+      expect(made.map(p => p.usage)).toEqual(['time']);
+    });
+
+    it('an upload that arrives mid-generation wins its usage', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      gemini.generatePictureBrief.mockImplementationOnce(async () => {
+        uploadedPicture('late', 'cost'); // uploaded while 'time' is being drawn
+        return okBrief;
+      });
+      const { pictures: made } = await service.generateForKu(KU);
+      expect(made.map(p => p.usage)).toEqual(['time']);
     });
 
     it('uploaded pictures cannot be redrawn', async () => {
