@@ -19,6 +19,7 @@ export const QUESTION_STATES_SUBCOLLECTION = 'question-states';
 export const USER_GRAMMAR_LESSONS_SUBCOLLECTION = 'user-grammar-lessons';
 export const USER_LESSONS_SUBCOLLECTION = 'user-lessons';
 export const CONTENT_FLAGS_COLLECTION = 'content-flags';
+export const PICTURES_COLLECTION = 'pictures';
 export const Timestamp = admin.firestore.Timestamp;
 export const FieldValue = admin.firestore.FieldValue;
 

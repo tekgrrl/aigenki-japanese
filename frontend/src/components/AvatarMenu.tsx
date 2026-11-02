@@ -138,6 +138,9 @@ export function AvatarMenu() {
               <Link href="/admin/content-quality" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
                 Content Quality
               </Link>
+              <Link href="/admin/pictures" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Picture Cards
+              </Link>
             </>
           )}
 

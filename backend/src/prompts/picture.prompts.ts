@@ -1,0 +1,120 @@
+/**
+ * Prompts for picture cards: a text-free illustration that anchors a Vocab word's
+ * meaning to its sound (audio-first vocab, #246). Two steps — a text model writes a
+ * scene brief (the judgement: cast or not, background or not), then an image model
+ * renders it inside a fixed house style with the Fude / Suzuri cast. A third call
+ * checks the result for leaked text. Tuned against 8 test words on 2026-11-02.
+ */
+
+export interface PictureBrief {
+  picturable: boolean;
+  includeCast: boolean;
+  /** "none", or at most two simple meaning-carrying background elements. */
+  background: string;
+  scene: string;
+}
+
+export const PICTURE_BRIEF_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    picturable: { type: 'BOOLEAN' },
+    includeCast: { type: 'BOOLEAN' },
+    background: { type: 'STRING' },
+    scene: { type: 'STRING' },
+  },
+  required: ['picturable', 'includeCast', 'background', 'scene'],
+};
+
+export function buildPictureBriefMessage(w: {
+  word: string;
+  reading: string;
+  usage: string;
+  definition: string;
+  sentence: string;
+  translation: string;
+}): string {
+  return `You are designing a single illustration that helps a learner remember a Japanese
+word by its meaning, without any text. The picture will be shown alongside spoken
+audio of the word and an example sentence.
+
+Word: ${w.word} (${w.reading})
+Meaning / usage to depict: ${w.usage} — ${w.definition}
+Example sentence: ${w.sentence} — ${w.translation}
+
+Decide:
+- picturable: false ONLY for particles, grammatical endings and pure function words.
+  Everything else, including abstract nouns and adverbs of time or manner, is
+  picturable: show a situation in which the meaning is evident (e.g. "beforehand":
+  someone getting things ready the night before, with a cue that the event is later).
+- includeCast: true only if the meaning needs someone doing or feeling something
+  (actions, feelings, adjectives describing reactions, social situations). False for
+  objects, places, animals and things.
+- When includeCast is true, the person in the scene is "Fude" (a young woman); the
+  little inkstone mascot "Suzuri" may join only if it helps. No other people unless
+  the meaning needs them.
+- background: "none" unless a background element is part of the meaning (time of
+  day for timing words, a recognisable place for place words, weather for weather
+  words). If needed, name at most two simple elements.
+- For place words, show one or two iconic elements of the place, not the whole place.
+- Avoid objects that normally carry writing or logos (signs, ticket gates, display
+  boards, shop fronts, packaging, vehicle destination boards, app icons). Screens are
+  blank or a soft abstract colour.
+- scene: one or two sentences describing exactly what is shown. The subject must be
+  the obvious focus. Use modern, everyday Japan (modern kitchens, streets, trains,
+  phones), not traditional or historical settings, unless the word itself is
+  traditional.
+- For adjectives, show the quality through contrast or a reaction, not just an
+  object that has it.
+- Make the scene point to THIS word, not a more concrete neighbour (e.g. for
+  "practice", show repetition and effort, not a performance).
+
+Return JSON only:
+{"picturable": bool, "includeCast": bool, "background": "none" | string,
+ "scene": string}`;
+}
+
+const CAST_BLOCK = `
+CHARACTERS (keep exactly as in the attached reference images):
+- Fude (first reference): a young woman with a brown bob and a topknot shaped like a
+  calligraphy brush tip, white bristles fading to a black ink tip; pink kimono with a
+  green obi.
+- Suzuri (second reference): a small rectangular black inkstone with round glasses,
+  rosy cheeks, a maroon beret and short stubby arms and legs.
+Fude and Suzuri ARE the people in the scene; do not add other people unless the scene
+explicitly requires them. Use only the characters the scene needs. Each character
+appears at most once, and the brush shape exists only as Fude's topknot: no loose
+brushes or extra brush tips.
+`;
+
+export function buildPictureImagePrompt(brief: PictureBrief): string {
+  const bg = brief.background && brief.background.trim().toLowerCase() !== 'none'
+    ? `, with only: ${brief.background}, kept simple, minimal and desaturated`
+    : '';
+  return `A single square illustration (1:1). No panels, no border.
+
+STYLE: soft watercolour with clean, fine ink linework; gentle, warm, slightly muted
+palette; friendly chibi-manga proportions; simple shapes; soft shadows.
+
+BACKGROUND: flat plain cream paper (#F9F7F2) filling the whole frame${bg}.
+Nothing else in the background. Any background elements form a small, soft vignette
+around the subject that fades into the cream paper: never a full-bleed room or a
+framed rectangle.
+
+COMPOSITION: the subject is centred and clearly the focus, filling about 60–70% of
+the frame, with an even margin on all sides.
+${brief.includeCast ? CAST_BLOCK : ''}
+SCENE: ${brief.scene}
+
+ABSOLUTELY NO TEXT OF ANY KIND: no letters, words, kana, kanji, numbers, labels,
+signs, captions, logos or symbols. Any paper, book, screen, scroll or sign must be
+blank. Clocks have hands but no numerals. Calendars, if shown, have blank squares.`;
+}
+
+export const PICTURE_TEXT_CHECK_PROMPT =
+  'Does this image contain any writing of any kind: letters, words, kana, kanji, numbers, labels, signs, captions, logos or symbols that read as text (including fake or illegible text)? Answer with JSON {"hasText": boolean, "where": string}.';
+
+export const PICTURE_TEXT_CHECK_SCHEMA = {
+  type: 'OBJECT',
+  properties: { hasText: { type: 'BOOLEAN' }, where: { type: 'STRING' } },
+  required: ['hasText', 'where'],
+};
