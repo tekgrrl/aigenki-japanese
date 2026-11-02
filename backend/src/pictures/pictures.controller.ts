@@ -36,10 +36,13 @@ export class PicturesController {
    * and the images are generic illustrations, not user data.
    */
   @Get(':id/image')
-  async image(@Param('id') id: string, @Res() res: Response) {
+  async image(@Param('id') id: string, @Query('v') version: string | undefined, @Res() res: Response) {
     const file = await this.picturesService.filePath(id);
     if (!file) throw new NotFoundException(`No image for picture ${id}`);
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    // Cache forever only when the URL names the current file (?v=<file>); a bare id URL
+    // must revalidate, since a redraw changes the image behind the same id.
+    const current = file.split(/[\\/]/).pop();
+    res.setHeader('Cache-Control', version && version === current ? 'public, max-age=31536000, immutable' : 'no-cache');
     res.sendFile(file);
   }
 

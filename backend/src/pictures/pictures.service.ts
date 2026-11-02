@@ -33,7 +33,6 @@ export interface Picture {
   createdAt: Timestamp;
 }
 
-const MAX_USAGES = 3;
 const MAX_ATTEMPTS = 3;
 const CONCURRENCY = 2;
 
@@ -106,7 +105,8 @@ export class PicturesService {
   }
 
   async setStatus(id: string, status: PictureStatus): Promise<Picture> {
-    await this.get(id);
+    const pic = await this.get(id);
+    if (status === 'approved' && !pic.file) throw new BadRequestException('A picture without an image cannot be approved');
     await this.col().doc(id).update({ status });
     return this.get(id);
   }
@@ -163,10 +163,11 @@ export class PicturesService {
   }
 
   /**
-   * One picture per distinct example usage (up to 3).
+   * One picture per distinct example usage.
    * - Normal: only usages that don't have a picture yet (so a partial word gets completed).
-   * - Forced: rebuild every usage; old pictures are removed only once their replacement
-   *   exists (or their usage no longer exists), so a failure never loses approved images.
+   * - Forced: rebuild every usage; an old picture is removed only once an approved
+   *   replacement exists, so a failure or worse result never loses an approved image.
+   * Pictures for usages that no longer exist are removed in both modes.
    * One usage failing doesn't stop the others.
    */
   async generateForKu(kuId: string, force = false): Promise<{ pictures: Picture[]; failed: number }> {
@@ -196,13 +197,22 @@ export class PicturesService {
       }
     }
 
-    if (force && pictures.length > 0) {
-      const replaced = new Set(pictures.map(p => key(p.usage)));
-      const current = new Set(sources.map(s => key(s.usage)));
-      for (const d of existing.docs) {
-        const u = key(d.data().usage ?? '');
-        if (replaced.has(u) || !current.has(u)) await this.deletePicture(d.id, d.data().file);
-      }
+    // Clean up old pictures (both modes):
+    // - stale: its usage no longer exists (e.g. after a relabel) and the word now has at
+    //   least one picture for a current usage;
+    // - replaced (forced only): its usage got a new APPROVED picture. A worse replacement
+    //   (needs-review / unpicturable) never removes an approved image.
+    // Pictures mid-redraw are left alone.
+    const current = new Set(sources.map(s => key(s.usage)));
+    const approvedNew = new Set(pictures.filter(p => p.status === 'approved').map(p => key(p.usage)));
+    const coversCurrent =
+      pictures.some(p => p.file) || existing.docs.some(d => d.data().file && current.has(key(d.data().usage ?? '')));
+    for (const d of existing.docs) {
+      if (this.redrawing.has(d.id)) continue;
+      const u = key(d.data().usage ?? '');
+      const stale = !current.has(u) && coversCurrent;
+      const replaced = force && approvedNew.has(u);
+      if (stale || replaced) await this.deletePicture(d.id, d.data().file);
     }
     return { pictures, failed };
   }
@@ -213,10 +223,17 @@ export class PicturesService {
    */
   async startRedraw(id: string): Promise<{ id: string; redrawing: true }> {
     if (this.redrawing.has(id)) throw new BadRequestException('This picture is already being redrawn');
-    const pic = await this.get(id);
-    const lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(pic.kuId).get();
-    if (!lessonDoc.exists) throw new BadRequestException(`KU ${pic.kuId} has no lesson`);
-    this.redrawing.add(id);
+    this.redrawing.add(id); // claim before any await, so a double click can't start two
+    let pic: Picture;
+    let lessonDoc: FirebaseFirestore.DocumentSnapshot;
+    try {
+      pic = await this.get(id);
+      lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(pic.kuId).get();
+      if (!lessonDoc.exists) throw new BadRequestException(`KU ${pic.kuId} has no lesson`);
+    } catch (e) {
+      this.redrawing.delete(id);
+      throw e;
+    }
     this.generateOne(pic.kuId, lessonDoc.data() as VocabLesson, pic.source, id)
       .catch(e => this.logger.error(`Redraw of picture ${id} failed: ${e?.message}`))
       .finally(() => this.redrawing.delete(id));
@@ -249,10 +266,18 @@ export class PicturesService {
     const attempts: Picture['attempts'] = [];
     let image: { data: Buffer; mimeType: string } | null = null;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      image = await this.geminiService.generatePicture(brief, references, kuId);
-      const check = await this.geminiService.checkPictureForText(image.data, image.mimeType, kuId);
-      attempts.push(check);
-      if (!check.hasText) break;
+      try {
+        const next = await this.geminiService.generatePicture(brief, references, kuId);
+        const check = await this.geminiService.checkPictureForText(next.data, next.mimeType, kuId);
+        image = next;
+        attempts.push(check);
+        if (!check.hasText) break;
+      } catch (e) {
+        // A later attempt failing shouldn't throw away an earlier image: keep it for review.
+        if (!image) throw e;
+        this.logger.warn(`Picture attempt ${i + 1} for ${lesson.vocab} failed, keeping the earlier image: ${(e as Error).message}`);
+        break;
+      }
     }
     // Unique name per generation, so a redraw isn't masked by the image's long cache.
     this.ensureDir();
@@ -284,12 +309,17 @@ export class PicturesService {
   private async vocabMissingPictures(limit: number): Promise<string[]> {
     const [lessons, pictures] = await Promise.all([
       this.db.collection(LESSONS_COLLECTION).where('type', '==', 'Vocab').get(),
-      this.col().select('kuId').get(),
+      this.col().select('kuId', 'usage').get(),
     ]);
-    const count = new Map<string, number>();
-    for (const d of pictures.docs) count.set(d.data().kuId, (count.get(d.data().kuId) ?? 0) + 1);
+    const key = (u: string) => u.trim().toLowerCase();
+    const have = new Map<string, Set<string>>();
+    for (const d of pictures.docs) {
+      const k = d.data().kuId as string;
+      if (!have.has(k)) have.set(k, new Set());
+      have.get(k)!.add(key(d.data().usage ?? ''));
+    }
     return lessons.docs
-      .filter(d => (count.get(d.id) ?? 0) < usageSources(d.data() as VocabLesson).length)
+      .filter(d => usageSources(d.data() as VocabLesson).some(s => !have.get(d.id)?.has(key(s.usage))))
       .map(d => d.id)
       .slice(0, limit);
   }
@@ -298,7 +328,8 @@ export class PicturesService {
 /**
  * Which usages get a picture — the same rule as the Start Learning slides
  * (frontend LessonSlides.vocabExampleSlides): the first example of each distinct
- * usage when every example is labelled, otherwise just the first example. Capped at 3.
+ * usage when every example is labelled, otherwise just the first example. No cap: every
+ * usage the slides teach gets a picture. (No examples at all → one definition-based picture.)
  */
 export function usageSources(lesson: VocabLesson): PictureSource[] {
   const examples = lesson.context_examples ?? [];
@@ -316,7 +347,6 @@ export function usageSources(lesson: VocabLesson): PictureSource[] {
     if (seen.has(key)) continue;
     seen.add(key);
     sources.push({ usage: e.usage!.trim(), definition, sentence: strip(e.sentence), translation: e.translation });
-    if (sources.length >= MAX_USAGES) break;
   }
   return sources;
 }

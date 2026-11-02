@@ -82,10 +82,14 @@ export default function PicturesAdminPage() {
   const resolveKuIds = async (lines: string[]): Promise<{ ids: string[]; missing: string[] }> => {
     const ids: string[] = [];
     const missing: string[] = [];
-    for (const line of lines) {
-      const res = await apiFetch(`/api/knowledge-units/search?${new URLSearchParams({ q: line, type: "Vocab" })}`);
-      const hits = res.ok ? ((await res.json()) as { id: string; content: string }[]) : [];
-      const match = hits.find((k) => k.content === line || k.id === line);
+    const results = await Promise.all(
+      lines.map(async (line) => {
+        const res = await apiFetch(`/api/knowledge-units/search?${new URLSearchParams({ q: line, type: "Vocab" })}`);
+        const hits = res.ok ? ((await res.json()) as { id: string; content: string }[]) : [];
+        return { line, match: hits.find((k) => k.content === line || k.id === line) };
+      }),
+    );
+    for (const { line, match } of results) {
       if (match) ids.push(match.id);
       else if (/^(wk-\d+|[A-Za-z0-9]{20})$/.test(line)) ids.push(line); // a WaniKani-style or Firestore id
       else missing.push(line);
