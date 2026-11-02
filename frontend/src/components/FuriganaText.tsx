@@ -2,9 +2,11 @@ import React from "react";
 
 interface FuriganaTextProps {
   text: string;
+  /** Classes for the reading (rt), e.g. to keep it legible on a coloured background. */
+  rtClassName?: string;
 }
 
-export const FuriganaText: React.FC<FuriganaTextProps> = ({ text }) => {
+export const FuriganaText: React.FC<FuriganaTextProps> = ({ text, rtClassName = "text-xs text-gray-500 dark:text-gray-400" }) => {
   // Regex to find Kanji[Reading] pattern
   // Capture group 1: Kanji range
   // Capture group 2: Kana range (Hiragana/Katakana)
@@ -29,7 +31,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({ text }) => {
             <ruby key={i} className="mx-0.5">
               {part}
               <rp>(</rp>
-              <rt className="text-xs text-gray-500 dark:text-gray-400">
+              <rt className={rtClassName}>
                 {reading}
               </rt>
               <rp>)</rp>

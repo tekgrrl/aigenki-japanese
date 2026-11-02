@@ -10,7 +10,6 @@ import { ApiLog, Lesson, ScenarioEvaluation } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
 import { performance } from "perf_hooks"; // For timing
-import { CLOZE_SYSTEM_PROMPT, buildClozeUserMessage } from '../prompts/cloze.prompts';
 import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageLabelMessage } from '../prompts/vocab.prompts';
 import { buildScenarioEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
@@ -718,84 +717,6 @@ export class GeminiService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Failed to create context cache', error);
       throw error;
-    }
-  }
-
-  async generateClozeSentence(targetVocab: string, sentence: string): Promise<string> {
-    // Strip inline furigana (format: 漢字[ふりがな]) before sending to the AI and using in fallbacks.
-    const cleanSentence = sentence.replace(/\[[^\]]*\]/g, '');
-
-    const systemPrompt = CLOZE_SYSTEM_PROMPT;
-    const userMessage = buildClozeUserMessage(targetVocab, cleanSentence);
-
-    const schema = {
-      type: 'OBJECT',
-      properties: {
-        clozeSentence: { type: 'STRING' }
-      },
-      required: ['clozeSentence']
-    };
-
-    const initialLogData: ApiLog = {
-      timestamp: Timestamp.now(),
-      route: '/reviews/generate-cloze',
-      status: 'pending',
-      modelUsed: this.modelName,
-      requestData: {
-        userMessage,
-        content: targetVocab,
-        topic: targetVocab,
-      },
-    };
-
-    const logRef = await this.apilogService.startLog(initialLogData);
-    const startTime = performance.now();
-    let errorOccurred = false;
-    let capturedError: any;
-    let aiJsonText: string | undefined;
-    let parsedJson: any;
-
-    try {
-      const response = await this.client.models.generateContent({
-        model: this.modelName,
-        contents: [{ parts: [{ text: userMessage }] }],
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: schema,
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          temperature: 0.1,
-        },
-      });
-
-      aiJsonText = response.text;
-      if (!aiJsonText) return cleanSentence.replace(targetVocab, '[_____]');
-
-      parsedJson = JSON.parse(aiJsonText);
-      return parsedJson.clozeSentence || cleanSentence.replace(targetVocab, '[_____]');
-    } catch (error: any) {
-      errorOccurred = true;
-      capturedError = error;
-      this.logger.error('Failed to generate cloze sentence', error);
-      return cleanSentence.replace(targetVocab, '[_____]');
-    } finally {
-      if (logRef) {
-        const endTime = performance.now();
-        const durationMs = endTime - startTime;
-        const updateData: any = { durationMs };
-        if (errorOccurred) {
-          updateData.status = 'error';
-          updateData.errorData = { message: capturedError?.message || 'Unknown error' };
-        } else {
-          updateData.status = 'success';
-          updateData.responseData = {
-            rawText: aiJsonText,
-            parsedJson,
-          };
-        }
-        this.apilogService.completeLog(logRef, updateData).catch(err =>
-          console.error('Failed to update cloze log', err)
-        );
-      }
     }
   }
 

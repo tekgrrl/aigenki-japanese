@@ -448,17 +448,6 @@ export class ReviewsService {
                 continue;
             }
 
-            let modifiedData = data ? { ...data } : undefined;
-
-            if (key === 'audio' && modifiedData?.contextExample && modifiedData?.content) {
-                try {
-                    const clozeSentence = await this.geminiService.generateClozeSentence(modifiedData.content, modifiedData.contextExample.sentence);
-                    modifiedData.clozeSentence = clozeSentence;
-                } catch (err) {
-                    this.logger.error(`Failed to generate cloze for audio facet ${kuId}`, err);
-                }
-            }
-
             // --- Create the Facet (Batch) ---
             const isSelfCertified = selfCertifiedFacets.includes(key);
             const startStage = isSelfCertified ? SELF_CERTIFIED_STAGE : 0;
@@ -476,7 +465,7 @@ export class ReviewsService {
                 source: { type: 'lesson', id: kuId },
                 ...(isSelfCertified ? { selfCertified: true } : {}),
                 ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
-                ...(modifiedData ? { data: modifiedData } : {}),
+                ...(data ? { data } : {}),
             });
 
             count++;

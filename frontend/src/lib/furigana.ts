@@ -40,3 +40,14 @@ export function buildFuriganaMarkup(
   }
   return result;
 }
+
+/**
+ * Removes FuriganaText reading annotations, leaving the plain sentence:
+ * "食[た]べ物[もの]を買[か]う" → "食べ物を買う".
+ *
+ * Used for TTS input: sending the kanji (not a kana conversion) keeps the word
+ * boundaries, homophone choice and pitch accent the TTS engine infers from them.
+ */
+export function stripFurigana(s: string): string {
+  return s.replace(/\[[^\]]*\]/g, "");
+}
