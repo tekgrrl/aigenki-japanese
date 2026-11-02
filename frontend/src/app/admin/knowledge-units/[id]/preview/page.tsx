@@ -43,6 +43,7 @@ export default function PreviewLessonPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [relabelling, setRelabelling] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const { audioRef, playAudio } = useLessonAudio();
 
@@ -80,12 +81,19 @@ export default function PreviewLessonPage() {
 
   const handleRelabel = async () => {
     setRelabelling(true);
+    setNotice(null);
     try {
       const res = await apiFetch(`/api/lessons/${kuId}/relabel-usages`, { method: "POST" });
-      if (!res.ok) throw new Error("Relabel failed");
+      if (!res.ok) throw new Error(`Relabel failed (${res.status})`);
+      const { usages, saved } = (await res.json()) as { usages: (string | null)[]; saved: boolean };
+      setNotice(
+        saved
+          ? `Relabelled: ${[...new Set(usages.filter(Boolean))].join(" · ")}`
+          : "Labels unchanged: labelling failed, the lesson has fewer than 2 examples, or its examples changed meanwhile (see backend log).",
+      );
       await load();
     } catch (e) {
-      setErrorMsg((e as Error).message || "Relabel failed");
+      setNotice((e as Error).message || "Relabel failed");
     } finally {
       setRelabelling(false);
     }
@@ -134,6 +142,7 @@ export default function PreviewLessonPage() {
           Preview — {ku.content}
         </h1>
         <p className="text-xs text-shodo-ink-light font-mono">{ku.type} · {kuId}</p>
+        {notice && <p className="text-xs text-shodo-persimmon mt-1">{notice}</p>}
       </div>
       <div className="flex gap-2">
       {ku.type === "Vocab" && (

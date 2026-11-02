@@ -23,6 +23,7 @@ interface Job {
   done: number;
   failed: number;
   current: string[];
+  redrawing: string[];
 }
 
 const TABS: { key: PictureStatus | "all"; label: string }[] = [
@@ -69,12 +70,13 @@ export default function PicturesAdminPage() {
     load();
   }, [load]);
 
-  // Poll while a generation job is running.
+  // Poll while a generation job or a redraw is running (both run in the background).
+  const busy = !!job?.running || (job?.redrawing.length ?? 0) > 0;
   useEffect(() => {
-    if (!job?.running) return;
+    if (!busy) return;
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, [job?.running, load]);
+  }, [busy, load]);
 
   /** Lines are KU ids or Vocab words; words are resolved by exact match via KU search. */
   const resolveKuIds = async (lines: string[]): Promise<{ ids: string[]; missing: string[] }> => {
@@ -85,7 +87,7 @@ export default function PicturesAdminPage() {
       const hits = res.ok ? ((await res.json()) as { id: string; content: string }[]) : [];
       const match = hits.find((k) => k.content === line || k.id === line);
       if (match) ids.push(match.id);
-      else if (/^[A-Za-z0-9_-]{6,}$/.test(line)) ids.push(line); // looks like an id
+      else if (/^(wk-\d+|[A-Za-z0-9]{20})$/.test(line)) ids.push(line); // a WaniKani-style or Firestore id
       else missing.push(line);
     }
     return { ids, missing };
@@ -127,7 +129,7 @@ export default function PicturesAdminPage() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ status: action === "approve" ? "approved" : "rejected" }),
             });
-      if (!res.ok) setMessage(`${action} failed (${res.status})`);
+      if (!res.ok) setMessage(`${action} failed: ${(await res.json().catch(() => ({}))).message ?? res.status}`);
       await load();
     } finally {
       setBusyId(null);
@@ -221,7 +223,9 @@ export default function PicturesAdminPage() {
         <p className="text-sm text-shodo-ink-faint">No pictures here.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {pictures.map((pic) => (
+          {pictures.map((pic) => {
+            const working = busyId === pic.id || !!job?.redrawing.includes(pic.id);
+            return (
             <div key={pic.id} className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm overflow-hidden">
               {pic.file ? (
                 // biome-ignore lint/performance/noImgElement: served by the backend from local disk; next/image optimisation isn't wanted here
@@ -251,26 +255,27 @@ export default function PicturesAdminPage() {
                 )}
                 <div className="flex gap-2 pt-1">
                   {pic.status !== "approved" && pic.file && (
-                    <button type="button" disabled={busyId === pic.id} onClick={() => act(pic, "approve")}
+                    <button type="button" disabled={working} onClick={() => act(pic, "approve")}
                       className="rounded bg-shodo-ink px-3 py-1 text-xs font-semibold text-shodo-paper disabled:opacity-40">
                       Approve
                     </button>
                   )}
                   {pic.status !== "rejected" && (
-                    <button type="button" disabled={busyId === pic.id} onClick={() => act(pic, "reject")}
+                    <button type="button" disabled={working} onClick={() => act(pic, "reject")}
                       className="rounded border border-shodo-ink/20 px-3 py-1 text-xs font-semibold disabled:opacity-40">
                       Reject
                     </button>
                   )}
-                  <button type="button" disabled={busyId === pic.id} onClick={() => act(pic, "regenerate")}
+                  <button type="button" disabled={working} onClick={() => act(pic, "regenerate")}
                     title="Draw this picture again for the same usage"
                     className="rounded border border-shodo-ink/20 px-3 py-1 text-xs font-semibold disabled:opacity-40">
-                    {busyId === pic.id ? "Working…" : "Redraw"}
+                    {working ? "Working…" : "Redraw"}
                   </button>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

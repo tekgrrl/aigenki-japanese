@@ -859,7 +859,7 @@ export class GeminiService implements OnModuleInit {
     brief: PictureBrief,
     references: { mimeType: string; data: string }[],
     kuId: string,
-  ): Promise<Buffer> {
+  ): Promise<{ data: Buffer; mimeType: string }> {
     const prompt = buildPictureImagePrompt(brief);
     const parts: any[] = [{ text: prompt }];
     if (brief.includeCast) parts.push(...references.map(r => ({ inlineData: r })));
@@ -882,13 +882,14 @@ export class GeminiService implements OnModuleInit {
             throw new Error(`No image returned (finishReason=${candidate?.finishReason ?? 'unknown'})`);
           }
           const buf = Buffer.from(image.inlineData.data, 'base64');
+          const mimeType = image.inlineData.mimeType || 'image/png';
           return {
-            result: buf,
-            responseData: { parsedJson: { bytes: buf.length, mimeType: image.inlineData.mimeType, finishReason: candidate?.finishReason } },
+            result: { data: buf, mimeType },
+            responseData: { parsedJson: { bytes: buf.length, mimeType, finishReason: candidate?.finishReason } },
           };
         } catch (error: any) {
           lastError = error;
-          const transient = /\b(503|UNAVAILABLE|Deadline expired)\b/.test(String(error?.message ?? error));
+          const transient = /\b(429|500|503|RESOURCE_EXHAUSTED|INTERNAL|UNAVAILABLE|Deadline expired)\b/.test(String(error?.message ?? error));
           if (!transient) throw error;
           this.logger.warn(`generatePicture: transient error for ${kuId}, retrying: ${error?.message}`);
         }
@@ -898,11 +899,11 @@ export class GeminiService implements OnModuleInit {
   }
 
   /** Step 3: does the image contain any writing? (binary, checkable — not a quality judge) */
-  async checkPictureForText(image: Buffer, kuId: string): Promise<{ hasText: boolean; where: string }> {
+  async checkPictureForText(image: Buffer, mimeType: string, kuId: string): Promise<{ hasText: boolean; where: string }> {
     return this.logged('/pictures/text-check', this.modelName, { userMessage: PICTURE_TEXT_CHECK_PROMPT, kuId }, async () => {
       const response = await this.client.models.generateContent({
         model: this.modelName,
-        contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/png', data: image.toString('base64') } }, { text: PICTURE_TEXT_CHECK_PROMPT }] }],
+        contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: image.toString('base64') } }, { text: PICTURE_TEXT_CHECK_PROMPT }] }],
         config: { responseMimeType: 'application/json', responseSchema: PICTURE_TEXT_CHECK_SCHEMA, temperature: 0 },
       });
       const parsedJson = JSON.parse(response.text ?? '');

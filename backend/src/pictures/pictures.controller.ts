@@ -53,7 +53,7 @@ export class PicturesController {
   @Post(':id/regenerate')
   @UseGuards(AdminGuard)
   async regenerate(@Param('id') id: string) {
-    return this.picturesService.regenerate(id);
+    return this.picturesService.startRedraw(id);
   }
 
   @Patch(':id')
