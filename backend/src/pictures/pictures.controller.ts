@@ -1,8 +1,9 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Query, Res, UseGuards, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Query, Res, UseGuards, BadRequestException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
-import { PicturesService, PictureStatus } from './pictures.service';
+import { MAX_UPLOAD_BYTES, PicturesService, PictureStatus, UploadedImage } from './pictures.service';
 
 const STATUSES: PictureStatus[] = ['approved', 'needs-review', 'rejected', 'unpicturable'];
 
@@ -28,7 +29,7 @@ export class PicturesController {
       status: (status as PictureStatus) || undefined,
       limit: limit ? Number(limit) : undefined,
     });
-    return { pictures, job: this.picturesService.getJob() };
+    return { pictures: await this.picturesService.annotateStale(pictures), job: this.picturesService.getJob() };
   }
 
   /**
@@ -43,6 +44,7 @@ export class PicturesController {
     // must revalidate, since a redraw changes the image behind the same id.
     const current = file.split(/[\\/]/).pop();
     res.setHeader('Cache-Control', version && version === current ? 'public, max-age=31536000, immutable' : 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.sendFile(file);
   }
 
@@ -51,6 +53,16 @@ export class PicturesController {
   @UseGuards(AdminGuard)
   async generate(@Body() body: { kuIds?: string[]; missingLimit?: number; force?: boolean }) {
     return this.picturesService.startGeneration(body ?? {});
+  }
+
+  /** Attach a hand-made image (multipart: file, kuId, optional usage). */
+  @Post('upload')
+  @UseGuards(AdminGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  async upload(@UploadedFile() file: UploadedImage | undefined, @Body() body: { kuId?: string; usage?: string }) {
+    if (!file) throw new BadRequestException('file is required');
+    if (!body?.kuId) throw new BadRequestException('kuId is required');
+    return this.picturesService.upload(body.kuId, body.usage, file);
   }
 
   @Post(':id/regenerate')

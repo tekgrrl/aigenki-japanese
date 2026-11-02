@@ -30,8 +30,33 @@ export interface Picture {
   /** File name inside PICTURES_DIR; absent for unpicturable entries. */
   file?: string;
   attempts: { hasText: boolean; where: string }[];
+  /** 'uploaded' = made outside the system (e.g. a hand-made diagram). Absent = generated. */
+  origin?: 'generated' | 'uploaded';
+  /** Admin list only: an uploaded picture whose usage no longer exists in the lesson. */
+  staleUsage?: boolean;
   createdAt: Timestamp;
 }
+
+/** A file accepted by upload (the subset of multer's file object we use). */
+export interface UploadedImage {
+  buffer: Buffer;
+  mimetype: string;
+  size: number;
+}
+
+const IMAGE_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+/** The single rule for matching usage labels (case- and whitespace-insensitive). */
+export const usageKey = (u: string | undefined | null) => (u ?? '').trim().toLowerCase();
+
+/** Does the buffer really hold a PNG / JPEG / WebP? (The client's mimetype is only a claim.) */
+function sniffImage(buf: Buffer): string | null {
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 const MAX_ATTEMPTS = 3;
 const CONCURRENCY = 2;
@@ -181,15 +206,24 @@ export class PicturesService {
     if (!lessonDoc.exists) throw new BadRequestException(`KU ${kuId} has no lesson yet`);
     const lesson = lessonDoc.data() as VocabLesson;
 
-    const key = (u: string) => u.trim().toLowerCase();
+    const key = usageKey;
     const sources = usageSources(lesson);
     const have = new Set(existing.docs.map(d => key(d.data().usage ?? '')));
-    const todo = force ? sources : sources.filter(s => !have.has(key(s.usage)));
+    // An uploaded picture is the authority for its usage: never generate over it, even
+    // forced. A REJECTED upload isn't — its usage can be generated again.
+    const uploaded = new Set(
+      existing.docs
+        .filter(d => d.data().origin === 'uploaded' && d.data().status !== 'rejected')
+        .map(d => key(d.data().usage ?? '')),
+    );
+    const todo = (force ? sources : sources.filter(s => !have.has(key(s.usage)))).filter(s => !uploaded.has(key(s.usage)));
 
     const pictures: Picture[] = [];
     let failed = 0;
     for (const source of todo) {
       try {
+        // Generation is slow; an upload may have arrived for this usage since we started.
+        if (await this.hasActiveUpload(kuId, source.usage)) continue;
         pictures.push(await this.generateOne(kuId, lesson, source));
       } catch (e: any) {
         failed++;
@@ -202,13 +236,13 @@ export class PicturesService {
     //   least one picture for a current usage;
     // - replaced (forced only): its usage got a new APPROVED picture. A worse replacement
     //   (needs-review / unpicturable) never removes an approved image.
-    // Pictures mid-redraw are left alone.
+    // Pictures mid-redraw, and uploaded pictures, are left alone.
     const current = new Set(sources.map(s => key(s.usage)));
     const approvedNew = new Set(pictures.filter(p => p.status === 'approved').map(p => key(p.usage)));
     const coversCurrent =
       pictures.some(p => p.file) || existing.docs.some(d => d.data().file && current.has(key(d.data().usage ?? '')));
     for (const d of existing.docs) {
-      if (this.redrawing.has(d.id)) continue;
+      if (this.redrawing.has(d.id) || d.data().origin === 'uploaded') continue; // never auto-delete uploads
       const u = key(d.data().usage ?? '');
       const stale = !current.has(u) && coversCurrent;
       const replaced = force && approvedNew.has(u);
@@ -228,6 +262,7 @@ export class PicturesService {
     let lessonDoc: FirebaseFirestore.DocumentSnapshot;
     try {
       pic = await this.get(id);
+      if (pic.origin === 'uploaded') throw new BadRequestException('Uploaded pictures can\'t be redrawn: upload a new one instead');
       lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(pic.kuId).get();
       if (!lessonDoc.exists) throw new BadRequestException(`KU ${pic.kuId} has no lesson`);
     } catch (e) {
@@ -281,7 +316,7 @@ export class PicturesService {
     }
     // Unique name per generation, so a redraw isn't masked by the image's long cache.
     this.ensureDir();
-    const ext = image!.mimeType === 'image/jpeg' ? 'jpg' : image!.mimeType === 'image/webp' ? 'webp' : 'png';
+    const ext = IMAGE_EXT[image!.mimeType] ?? 'png';
     const file = `${ref.id}-${Date.now()}.${ext}`;
     fs.writeFileSync(path.join(this.dir, file), image!.data);
     const status: PictureStatus = attempts[attempts.length - 1].hasText ? 'needs-review' : 'approved';
@@ -290,6 +325,100 @@ export class PicturesService {
     if (existingId) this.removeOldFiles(existingId, file);
     this.logger.log(`Picture ${ref.id} for ${lesson.vocab} (${source.usage}): ${status} after ${attempts.length} attempt(s)`);
     return { id: ref.id, ...doc };
+  }
+
+  /**
+   * Attach an image made outside the system (e.g. a hand-made diagram) to a Vocab KU.
+   * Stored like a generated picture, approved straight away, and marked
+   * origin 'uploaded' so generation never redraws, replaces or cleans it up.
+   */
+  async upload(kuId: string, usage: string | undefined, image: UploadedImage): Promise<Picture> {
+    if (!image.size || image.size > MAX_UPLOAD_BYTES) throw new BadRequestException('Image must be under 5 MB');
+    const actual = sniffImage(image.buffer);
+    if (!actual) throw new BadRequestException('File is not a PNG, JPEG or WebP image');
+    const ext = IMAGE_EXT[actual];
+
+    const [kuDoc, lessonDoc] = await Promise.all([
+      this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).get(),
+      this.db.collection(LESSONS_COLLECTION).doc(kuId).get(),
+    ]);
+    if (!kuDoc.exists) throw new NotFoundException(`KU ${kuId} not found`);
+    if (kuDoc.data()?.type !== 'Vocab') throw new BadRequestException(`KU ${kuId} is not Vocab`);
+    const lesson = lessonDoc.exists ? (lessonDoc.data() as VocabLesson) : null;
+    const ku = kuDoc.data() as Record<string, any>;
+
+    // Default the usage to the lesson's first usage, so the picture lines up with the slides.
+    const sources = lesson ? usageSources(lesson) : [];
+    const chosen = usage?.trim() ? sources.find(s => usageKey(s.usage) === usageKey(usage)) : sources[0];
+    // A typed usage that matches none of the lesson's usages would never be shown: refuse it.
+    if (usage?.trim() && !chosen && sources.length) {
+      throw new BadRequestException(`"${usage.trim()}" isn't one of this word's usages: ${sources.map(s => s.usage).join(', ')}`);
+    }
+    const source: PictureSource = chosen ?? {
+      usage: usage?.trim() || ku.data?.definition || ku.content,
+      definition: (lesson?.definitions ?? [])[0] ?? ku.data?.definition ?? '',
+      sentence: '',
+      translation: '',
+    };
+
+    const ref = this.col().doc();
+    this.ensureDir();
+    const file = `${ref.id}-${Date.now()}.${ext}`;
+    const filePath = path.join(this.dir, file);
+    fs.writeFileSync(filePath, image.buffer);
+    const doc = {
+      kuId,
+      content: lesson?.vocab ?? ku.content,
+      reading: lesson?.reading ?? ku.data?.reading ?? '',
+      usage: source.usage,
+      source,
+      status: 'approved' as const,
+      origin: 'uploaded' as const,
+      file,
+      attempts: [],
+      createdAt: Timestamp.now(),
+    };
+    try {
+      await ref.set(doc);
+    } catch (e) {
+      fs.rmSync(filePath, { force: true }); // don't leave an orphaned file if the doc write fails
+      throw e;
+    }
+
+    // The upload replaces any other picture for this usage: those are marked rejected
+    // (reversible from the admin grid) so learners only ever get the upload.
+    const others = await this.col().where('kuId', '==', kuId).get();
+    for (const d of others.docs) {
+      if (d.id !== ref.id && usageKey(d.data().usage) === usageKey(doc.usage) && d.data().status !== 'rejected') {
+        await d.ref.update({ status: 'rejected' });
+      }
+    }
+    this.logger.log(`Uploaded picture ${ref.id} for ${doc.content} (${doc.usage})`);
+    return { id: ref.id, ...doc };
+  }
+
+  /** Flags uploaded pictures whose usage is no longer one of their lesson's usages. */
+  async annotateStale(pictures: Picture[]): Promise<Picture[]> {
+    const kuIds = [...new Set(pictures.filter(p => p.origin === 'uploaded').map(p => p.kuId))];
+    if (!kuIds.length) return pictures;
+    const col = this.db.collection(LESSONS_COLLECTION);
+    const lessons = await this.db.getAll(...kuIds.map(id => col.doc(id)));
+    const usages = new Map<string, Set<string>>();
+    lessons.forEach((l, i) => {
+      if (l.exists) usages.set(kuIds[i], new Set(usageSources(l.data() as VocabLesson).map(s => usageKey(s.usage))));
+    });
+    return pictures.map(p =>
+      p.origin === 'uploaded' && usages.has(p.kuId) && !usages.get(p.kuId)!.has(usageKey(p.usage))
+        ? { ...p, staleUsage: true }
+        : p,
+    );
+  }
+
+  private async hasActiveUpload(kuId: string, usage: string): Promise<boolean> {
+    const snap = await this.col().where('kuId', '==', kuId).get();
+    return snap.docs.some(
+      d => d.data().origin === 'uploaded' && d.data().status !== 'rejected' && usageKey(d.data().usage) === usageKey(usage),
+    );
   }
 
   private async deletePicture(id: string, file?: string) {
@@ -311,7 +440,7 @@ export class PicturesService {
       this.db.collection(LESSONS_COLLECTION).where('type', '==', 'Vocab').get(),
       this.col().select('kuId', 'usage').get(),
     ]);
-    const key = (u: string) => u.trim().toLowerCase();
+    const key = usageKey;
     const have = new Map<string, Set<string>>();
     for (const d of pictures.docs) {
       const k = d.data().kuId as string;
@@ -351,7 +480,7 @@ export function usageSources(lesson: VocabLesson): PictureSource[] {
   const seen = new Set<string>();
   const sources: PictureSource[] = [];
   for (const e of examples) {
-    const key = e.usage!.trim().toLowerCase();
+    const key = usageKey(e.usage);
     if (seen.has(key)) continue;
     seen.add(key);
     sources.push({ usage: e.usage!.trim(), definition, sentence: strip(e.sentence), translation: e.translation });
