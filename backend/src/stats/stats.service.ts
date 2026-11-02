@@ -463,7 +463,18 @@ export class StatsService {
             .filter(k => k.type === 'Grammar' && !isAboveLevel((k.data as Record<string, any>)?.jlptLevel, userLevel))
             .map(k => k.id);
         // arrayUnion, not a plain set: an enrolment's addToAllowedGrammar can land mid-backfill.
-        await userRef.update({ 'tutorContext.allowedGrammarKuIds': FieldValue.arrayUnion(...grammarIds) });
+        // arrayUnion() with no elements throws, so with nothing to add just create the empty
+        // list (only if still absent) so the backfill doesn't rerun on every call.
+        if (grammarIds.length > 0) {
+            await userRef.update({ 'tutorContext.allowedGrammarKuIds': FieldValue.arrayUnion(...grammarIds) });
+        } else {
+            await this.db.runTransaction(async tx => {
+                const fresh = await tx.get(userRef);
+                if (!Array.isArray(fresh.data()?.tutorContext?.allowedGrammarKuIds)) {
+                    tx.update(userRef, { 'tutorContext.allowedGrammarKuIds': [] });
+                }
+            });
+        }
         this.logger.log(`Backfilled allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
         return grammarIds;
     }
