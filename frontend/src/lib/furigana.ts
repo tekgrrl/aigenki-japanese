@@ -42,15 +42,12 @@ export function buildFuriganaMarkup(
 }
 
 /**
- * Converts FuriganaText markup to plain kana for TTS, so the reading the lesson
- * specifies is the one spoken (TTS can misread bare kanji).
+ * Removes FuriganaText reading annotations, leaving the plain sentence:
+ * "食[た]べ物[もの]を買[か]う" → "食べ物を買う".
  *
- * e.g. "食[た]べ物[もの]を買[か]う" → "たべものをかう", "漢字[かんじ]" → "かんじ"
- *
- * Kanji without an annotation are left as-is; any stray brackets are dropped.
+ * Used for TTS input: sending the kanji (not a kana conversion) keeps the word
+ * boundaries, homophone choice and pitch accent the TTS engine infers from them.
  */
-export function furiganaToKana(s: string): string {
-  return s
-    .replace(/[一-鿿々]+\[([^\]]+)\]/g, "$1")
-    .replace(/\[[^\]]*\]/g, "");
+export function stripFurigana(s: string): string {
+  return s.replace(/\[[^\]]*\]/g, "");
 }

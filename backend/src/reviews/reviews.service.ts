@@ -448,8 +448,6 @@ export class ReviewsService {
                 continue;
             }
 
-            const modifiedData = data ? { ...data } : undefined;
-
             // --- Create the Facet (Batch) ---
             const isSelfCertified = selfCertifiedFacets.includes(key);
             const startStage = isSelfCertified ? SELF_CERTIFIED_STAGE : 0;
@@ -467,7 +465,7 @@ export class ReviewsService {
                 source: { type: 'lesson', id: kuId },
                 ...(isSelfCertified ? { selfCertified: true } : {}),
                 ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
-                ...(modifiedData ? { data: modifiedData } : {}),
+                ...(data ? { data } : {}),
             });
 
             count++;

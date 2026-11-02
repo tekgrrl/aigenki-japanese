@@ -377,9 +377,6 @@ export class ReviewProgressService {
       const dataItems = this.buildFacetData(entry, lesson);
       if (dataItems.length === 0) continue;
 
-      // Audio facets need no cloze: the card is listening-only and reveals the
-      // context sentence after answering (no Gemini call at facet creation).
-
       // Kanji-component facets belong to the character's own Kanji KU, not the
       // parent's — ensure/create that per-character stub so "Review Lesson" and
       // other kuId-based lookups resolve to the Kanji itself instead of the parent.
