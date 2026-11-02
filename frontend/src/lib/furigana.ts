@@ -40,3 +40,17 @@ export function buildFuriganaMarkup(
   }
   return result;
 }
+
+/**
+ * Converts FuriganaText markup to plain kana for TTS, so the reading the lesson
+ * specifies is the one spoken (TTS can misread bare kanji).
+ *
+ * e.g. "食[た]べ物[もの]を買[か]う" → "たべものをかう", "漢字[かんじ]" → "かんじ"
+ *
+ * Kanji without an annotation are left as-is; any stray brackets are dropped.
+ */
+export function furiganaToKana(s: string): string {
+  return s
+    .replace(/[一-鿿々]+\[([^\]]+)\]/g, "$1")
+    .replace(/\[[^\]]*\]/g, "");
+}

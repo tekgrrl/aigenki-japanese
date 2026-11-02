@@ -448,16 +448,7 @@ export class ReviewsService {
                 continue;
             }
 
-            let modifiedData = data ? { ...data } : undefined;
-
-            if (key === 'audio' && modifiedData?.contextExample && modifiedData?.content) {
-                try {
-                    const clozeSentence = await this.geminiService.generateClozeSentence(modifiedData.content, modifiedData.contextExample.sentence);
-                    modifiedData.clozeSentence = clozeSentence;
-                } catch (err) {
-                    this.logger.error(`Failed to generate cloze for audio facet ${kuId}`, err);
-                }
-            }
+            const modifiedData = data ? { ...data } : undefined;
 
             // --- Create the Facet (Batch) ---
             const isSelfCertified = selfCertifiedFacets.includes(key);

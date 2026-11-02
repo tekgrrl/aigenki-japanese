@@ -9,6 +9,7 @@ import { QuestionFeedbackModal } from "@/components/QuestionFeedbackModal";
 import EditKnowledgeUnitModal from "@/components/EditKnowledgeUnitModal";
 import { getSrsLevelName, getSrsLevelIndex } from "@/utils/srs";
 import { apiFetch } from "@/lib/api-client";
+import { furiganaToKana } from "@/lib/furigana";
 import SentenceAssemblyCard from "@/components/review/SentenceAssemblyCard";
 import SentenceClozeCard from "@/components/review/SentenceClozeCard";
 import InputModeBadge from "@/components/review/InputModeBadge";
@@ -648,7 +649,9 @@ export default function ReviewPage() {
     const { facet } = item;
     switch (facet.facetType) {
       case "audio":
-        return facet.data?.clozeSentence || facet.data?.contextExample?.sentence || "Context not found";
+        // Listening practice: no Japanese text before answering (the word and sentence
+        // are revealed afterwards). Any stored clozeSentence is ignored.
+        return "Listen, then type the meaning of the word";
       case "AI-Generated-Question":
         return dynamicQuestion;
       case "Content-to-Definition":
@@ -945,7 +948,35 @@ export default function ReviewPage() {
                 {questionText || "[Question not loaded]"}
               </p>
 
-              {(currentItem.facet.facetType === "audio" || currentItem.facet.facetType === "Content-to-Definition") && (
+              {currentItem.facet.facetType === "audio" && (
+                <div className="mt-6 flex justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => fetchAndPlayAudio(currentItem.facet.data?.reading || currentItem.facet.data?.content)}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-full text-white font-semibold transition-transform transform active:scale-95 shadow-md"
+                  >
+                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M4.018 14L14.41 9 4.018 4v10z"></path>
+                    </svg>
+                    Word
+                  </button>
+                  {currentItem.facet.data?.contextExample?.sentence && (
+                    <button
+                      type="button"
+                      onClick={() => fetchAndPlayAudio(furiganaToKana(currentItem.facet.data.contextExample.sentence))}
+                      title="Hear the word used in a sentence"
+                      className="flex items-center gap-2 px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded-full text-white font-semibold transition-transform transform active:scale-95 shadow-md"
+                    >
+                      <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                        <path d="M4.018 14L14.41 9 4.018 4v10z"></path>
+                      </svg>
+                      Sentence
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {currentItem.facet.facetType === "Content-to-Definition" && (
                 <div className="mt-6 flex justify-center">
                   <button
                     type="button"
@@ -1090,8 +1121,13 @@ export default function ReviewPage() {
               </p>
               <p className="text-lg text-gray-200 mt-2">
                 <span className="font-semibold">In context:</span>{" "}
-                {currentItem.facet.data?.contextExample?.sentence}
+                {currentItem.facet.data?.contextExample?.sentence?.replace(/\[[^\]]*\]/g, "")}
               </p>
+              {currentItem.facet.data?.contextExample?.translation && (
+                <p className="text-base text-gray-300 mt-1 italic">
+                  {currentItem.facet.data.contextExample.translation}
+                </p>
+              )}
             </div>
           )}
           {aiExplanation === "No answer provided." ? (

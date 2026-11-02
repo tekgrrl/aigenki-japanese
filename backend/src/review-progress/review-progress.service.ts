@@ -21,7 +21,6 @@ import {
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { GeminiService } from '../gemini/gemini.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 
 @Injectable()
@@ -33,7 +32,6 @@ export class ReviewProgressService {
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly lessonsService: LessonsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
-    private readonly geminiService: GeminiService,
     private readonly learningProgressService: LearningProgressService,
   ) {}
 
@@ -376,27 +374,11 @@ export class ReviewProgressService {
     const facetCountByKuId = new Map<string, number>();
 
     for (const entry of stageDef.facets) {
-      let dataItems = this.buildFacetData(entry, lesson);
+      const dataItems = this.buildFacetData(entry, lesson);
       if (dataItems.length === 0) continue;
 
-      // Audio facets: generate cloze sentences before the batch write
-      if (entry.type === 'audio') {
-        dataItems = await Promise.all(
-          dataItems.map(async d => {
-            if (d.contextExample?.sentence) {
-              try {
-                d.clozeSentence = await this.geminiService.generateClozeSentence(
-                  ku.content,
-                  d.contextExample.sentence,
-                );
-              } catch (e) {
-                this.logger.error(`Cloze generation failed for kuId=${kuId}`, e);
-              }
-            }
-            return d;
-          }),
-        );
-      }
+      // Audio facets need no cloze: the card is listening-only and reveals the
+      // context sentence after answering (no Gemini call at facet creation).
 
       // Kanji-component facets belong to the character's own Kanji KU, not the
       // parent's — ensure/create that per-character stub so "Review Lesson" and
