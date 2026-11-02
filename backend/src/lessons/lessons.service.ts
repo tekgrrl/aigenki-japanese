@@ -266,9 +266,22 @@ export class LessonsService {
     );
     if (!usages) return { usages: current };
 
-    await lessonRef.update({
-      context_examples: examples.map((e, i) => ({ ...e, usage: usages[i] })),
+    // The Gemini call takes seconds; a regenerate or admin edit may have replaced the
+    // examples meanwhile. Only write if they're still the ones that were labelled.
+    const sameSentences = (a: { sentence: string }[] = [], b: { sentence: string }[] = []) =>
+      a.length === b.length && a.every((e, i) => e.sentence === b[i].sentence);
+    const written = await this.db.runTransaction(async tx => {
+      const fresh = (await tx.get(lessonRef)).data() as VocabLesson | undefined;
+      if (!fresh || !sameSentences(fresh.context_examples, examples)) return false;
+      tx.update(lessonRef, {
+        context_examples: (fresh.context_examples ?? []).map((e, i) => ({ ...e, usage: usages[i] })),
+      });
+      return true;
     });
+    if (!written) {
+      this.logger.warn(`Examples for ${lesson.vocab} (${kuId}) changed during labelling; labels not saved`);
+      return { usages: current };
+    }
     this.logger.log(`Labelled ${usages.length} example usages for ${lesson.vocab} (${kuId}): ${[...new Set(usages)].join(' | ')}`);
     return { usages };
   }

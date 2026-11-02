@@ -9,6 +9,7 @@ import {
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
+import { isAboveLevel } from '../lib/jlpt';
 
 @Injectable()
 export class StatsService {
@@ -451,14 +452,18 @@ export class StatsService {
      */
     private async backfillAllowedGrammarKuIds(uid: string): Promise<string[]> {
         const userRef = this.db.collection('users').doc(uid);
-        const ukus = await userRef.collection(USER_KUS_SUBCOLLECTION).get();
+        const [userDoc, ukus] = await Promise.all([userRef.get(), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
+        const userLevel = userDoc.data()?.preferences?.jlptLevel;
         const candidateIds = ukus.docs
             .filter(d => d.data().aboveLevel !== true)
             .map(d => (d.data().kuId as string | undefined) ?? d.id);
+        // Re-check the level against the KU itself: legacy UKUs have no aboveLevel flag, and a
+        // fresh enrolment's flag is written after the UKU, so the flag alone can let N3+ through.
         const grammarIds = (await this.knowledgeUnitsService.getManyCached(candidateIds))
-            .filter(k => k.type === 'Grammar')
+            .filter(k => k.type === 'Grammar' && !isAboveLevel((k.data as Record<string, any>)?.jlptLevel, userLevel))
             .map(k => k.id);
-        await userRef.update({ 'tutorContext.allowedGrammarKuIds': grammarIds });
+        // arrayUnion, not a plain set: an enrolment's addToAllowedGrammar can land mid-backfill.
+        await userRef.update({ 'tutorContext.allowedGrammarKuIds': FieldValue.arrayUnion(...grammarIds) });
         this.logger.log(`Backfilled allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
         return grammarIds;
     }

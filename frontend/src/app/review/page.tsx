@@ -573,6 +573,7 @@ export default function ReviewPage() {
   };
 
   const advanceToNext = () => {
+    if (currentItem?.facet.facetType === "AI-Generated-Question") scout.markSeen(currentItem.facet.id);
     setUserAnswer("");
     setAnswerState("unanswered");
     setAiExplanation("");
@@ -632,12 +633,14 @@ export default function ReviewPage() {
 
   const handleFeedbackRequestNew = async () => {
     if (dynamicQuestionId) await recordFeedback(dynamicQuestionId, "request-new");
+    if (currentItem) scout.forget(currentItem.facet.id);
     // Don't update SRS — facet stays due so it reappears with a fresh question next session
     advanceToNext();
   };
 
   const handleFeedbackUndecided = async () => {
     if (dynamicQuestionId) await recordFeedback(dynamicQuestionId, "report");
+    if (currentItem) scout.forget(currentItem.facet.id);
     if (pendingSrsResult) await handleUpdateSrs(pendingSrsResult);
     advanceToNext();
   };
