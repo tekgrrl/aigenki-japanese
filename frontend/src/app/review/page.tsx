@@ -1113,7 +1113,7 @@ export default function ReviewPage() {
                 <>
                   <p className="text-lg text-gray-200 mt-2">
                     <span className="font-semibold">In context:</span>{" "}
-                    <FuriganaText text={currentItem.facet.data.contextExample.sentence} />
+                    <FuriganaText text={currentItem.facet.data.contextExample.sentence} rtClassName="text-xs text-white/90" />
                   </p>
                   {currentItem.facet.data.contextExample.translation && (
                     <p className="text-base text-gray-300 mt-1 italic">
