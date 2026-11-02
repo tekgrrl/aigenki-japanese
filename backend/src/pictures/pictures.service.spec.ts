@@ -58,6 +58,9 @@ class FakeCollection extends FakeQuery {
 
 class FakeDb {
   readonly stores = new Map<string, Map<string, Data>>();
+  async getAll(...refs: FakeDocRef[]) {
+    return Promise.all(refs.map(r => r.get()));
+  }
   collection(name: string) {
     if (!this.stores.has(name)) this.stores.set(name, new Map());
     return new FakeCollection(this.stores.get(name)!);
@@ -381,6 +384,15 @@ describe('PicturesService', () => {
       db.collection('knowledge-units').doc('done').set({ type: 'Vocab' });
       db.collection('lessons').doc('done').set(vocabLesson([ex('x', 1)]));
       db.collection('pictures').doc('d1').set({ kuId: 'done', usage: 'x', status: 'approved', file: 'd1-1.png', attempts: [], createdAt: ts });
+      const ids = await (service as any).vocabMissingPictures(10);
+      expect(ids).toEqual([KU]);
+    });
+
+    it('the missing-pictures batch skips lessons whose KU was deleted or is not Vocab', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      db.collection('lessons').doc('orphan').set(vocabLesson([ex('x', 1)])); // no KU at all
+      db.collection('knowledge-units').doc('gram').set({ type: 'Grammar' });
+      db.collection('lessons').doc('gram').set(vocabLesson([ex('y', 1)])); // stray Vocab-shaped lesson
       const ids = await (service as any).vocabMissingPictures(10);
       expect(ids).toEqual([KU]);
     });

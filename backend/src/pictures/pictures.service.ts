@@ -318,8 +318,16 @@ export class PicturesService {
       if (!have.has(k)) have.set(k, new Set());
       have.get(k)!.add(key(d.data().usage ?? ''));
     }
-    return lessons.docs
-      .filter(d => usageSources(d.data() as VocabLesson).some(s => !have.get(d.id)?.has(key(s.usage))))
+    const candidates = lessons.docs.filter(d =>
+      usageSources(d.data() as VocabLesson).some(s => !have.get(d.id)?.has(key(s.usage))),
+    );
+    if (!candidates.length) return [];
+    // Lessons can outlive their KU (deleting a KU leaves its lesson behind): only pick
+    // lessons whose KU still exists and is Vocab, or the batch fills up with failures.
+    const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
+    const kus = await this.db.getAll(...candidates.map(d => kuCol.doc(d.id)));
+    return candidates
+      .filter((_, i) => kus[i].exists && kus[i].data()?.type === 'Vocab')
       .map(d => d.id)
       .slice(0, limit);
   }
