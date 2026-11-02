@@ -69,7 +69,18 @@ export class KnowledgeUnitsService {
     async getManyCached(ids: string[]): Promise<KnowledgeUnit[]> {
         if (ids.length === 0) return [];
         const want = new Set(ids);
-        return (await this.ensureSearchCache()).filter(k => want.has(k.id));
+        const found = (await this.ensureSearchCache()).filter(k => want.has(k.id));
+        // KUs written outside this service (scripts, Firebase console) aren't in the cache
+        // until restart — read those directly rather than silently dropping them.
+        const missing = [...want].filter(id => !found.some(k => k.id === id));
+        if (missing.length === 0) return found;
+        const col = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
+        const docs = await this.db.getAll(...missing.map(id => col.doc(id)));
+        const fetched = docs
+            .filter(d => d.exists)
+            .map(d => ({ id: d.id, ...d.data() }) as KnowledgeUnit);
+        fetched.forEach(ku => this.upsertSearchCacheEntry(ku));
+        return [...found, ...fetched];
     }
 
     private invalidateSearchCache(): void {

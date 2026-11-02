@@ -71,7 +71,7 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
   });
   if (!res.ok) throw new Error("Failed to generate lesson");
   const lesson: Lesson = await res.json();
-  if (lesson.type === "Vocab") await ensureUsageLabels(lesson as VocabLesson, item.kuId, signal);
+  if (lesson.type === "Vocab") await ensureUsageLabels(lesson as VocabLesson, item.kuId);
   return lesson;
 }
 
@@ -80,18 +80,24 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
  * saves the labels on the lesson) so the slideshow can show one example per usage.
  * Best-effort: on any failure the slideshow just shows the first example.
  */
-async function ensureUsageLabels(vl: VocabLesson, kuId: string, signal: AbortSignal) {
+const LABEL_TIMEOUT_MS = 30_000;
+
+async function ensureUsageLabels(vl: VocabLesson, kuId: string) {
   const examples = vl.context_examples ?? [];
   if (examples.length < 2 || examples.every((e) => e.usage)) return;
   try {
-    const res = await apiFetch(`/api/lessons/${kuId}/label-usages`, { method: "POST", signal });
+    // Own timeout, not the lesson fetch's: a slow labelling call must never fail a lesson
+    // that has already loaded.
+    const res = await apiFetch(`/api/lessons/${kuId}/label-usages`, {
+      method: "POST",
+      signal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
+    });
     if (!res.ok) return;
     const { usages } = (await res.json()) as { usages: (string | null)[] };
     if (Array.isArray(usages) && usages.length === examples.length) {
       vl.context_examples = examples.map((e, i) => ({ ...e, usage: usages[i] ?? undefined }));
     }
   } catch (e) {
-    if (signal.aborted) throw e;
     console.warn(`[lesson-slides] usage labelling failed for ${vl.vocab}`, e);
   }
 }

@@ -84,7 +84,7 @@ Output:
   "meaning_explanation": "A term used to address or refer to teachers, doctors, lawyers, politicians, and other authority figures or experts. It literally means 'one born before'.",
   "reading_explanation": "Note that 'sei' (せい) is prolonged, so it sounds like 'sensee'. This is a common pronunciation change in Japanese.",
   "context_examples": [
-    { "sentence": "田中[たなか]先生[せんせい]は日本語[にほんご]を教[おし]えています。", "translation": "Professor Tanaka teaches Japanese." }
+    { "sentence": "田中[たなか]先生[せんせい]は日本語[にほんご]を教[おし]えています。", "translation": "Professor Tanaka teaches Japanese.", "usage": "teacher (title)" }
   ],
   "kanaOnly": false,
   "component_kanji": [
@@ -118,7 +118,7 @@ Output:
   "meaning_explanation": "The standard verb for 'to eat'. It is a transitive verb, so it takes an object marked by 'o' (を).",
   "reading_explanation": "The reading 'ta' comes from the kanji 食 and 'beru' is okurigana.",
   "context_examples": [
-    { "sentence": "朝[あさ]ごはんにパンを食[た]べました。", "translation": "I ate bread for breakfast." }
+    { "sentence": "朝[あさ]ごはんにパンを食[た]べました。", "translation": "I ate bread for breakfast.", "usage": "to eat" }
   ],
   "kanaOnly": false,
   "component_kanji": [
@@ -145,7 +145,7 @@ Output:
   "meaning_explanation": "Describes something or someone that has a name widely known. It is a Na-adjective, so you use 'na' to modify nouns (e.g. 有名のな人 - famous person).",
   "reading_explanation": "Standard on'yomi readings. 'Yuu' (有) + 'Mei' (名).",
   "context_examples": [
-    { "sentence": "彼[かれ]は有名[ゆうめい]な歌手[かしゅ]です。", "translation": "He is a famous singer." }
+    { "sentence": "彼[かれ]は有名[ゆうめい]な歌手[かしゅ]です。", "translation": "He is a famous singer.", "usage": "famous" }
   ],
   "kanaOnly": false,
   "component_kanji": [
@@ -179,7 +179,7 @@ Output:
   "meaning_explanation": "The primary verb for 'to study'. It is composed of the noun 'Benkyou' (study) and the auxiliary verb 'suru' (to do).",
   "reading_explanation": "Ben (勉) + Kyou (強) + Suru. Note that 'strong' (強) is usually read 'kyo' as a standalone on'yomi, but here it is 'kyou'.",
   "context_examples": [
-    { "sentence": "毎日[まいにち]日本語[にほんご]を勉強[べんきょう]します。", "translation": "I study Japanese every day." }
+    { "sentence": "毎日[まいにち]日本語[にほんご]を勉強[べんきょう]します。", "translation": "I study Japanese every day.", "usage": "to study" }
   ],
   "kanaOnly": false,
   "component_kanji": [
@@ -213,7 +213,7 @@ Output:
   "meaning_explanation": "The country of Japan. Literally 'sun origin' (Land of the Rising Sun).",
   "reading_explanation": "Usually read 'Nihon', but sometimes 'Nippon' (more formal or emphatic).",
   "context_examples": [
-    { "sentence": "日本[にほん]に行[い]きたいです。", "translation": "I want to go to Japan." }
+    { "sentence": "日本[にほん]に行[い]きたいです。", "translation": "I want to go to Japan.", "usage": "Japan (the country)" }
   ],
   "kanaOnly": false,
   "component_kanji": [
@@ -247,7 +247,7 @@ Output:
   "meaning_explanation": "Used when someone gives something to the speaker (or someone in the speaker's in-group). Always written in kana in modern Japanese — the kanji 呉れる exists but is essentially never used.",
   "reading_explanation": "No kanji reading to explain — this word is written entirely in kana.",
   "context_examples": [
-    { "sentence": "友達[ともだち]がプレゼントをくれました。", "translation": "My friend gave me a present." }
+    { "sentence": "友達[ともだち]がプレゼントをくれました。", "translation": "My friend gave me a present.", "usage": "someone gives (to me)" }
   ],
   "kanaOnly": true,
   "component_kanji": []

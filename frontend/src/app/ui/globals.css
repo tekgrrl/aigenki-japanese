@@ -110,6 +110,15 @@ html[data-theme="dark"] {
   --shodo-gold: #d4b062;
 }
 
+/* Pages not yet on Shodo tokens (Scenarios, some admin tools; #288) keep hard-coded white
+   surfaces. In dark mode they'd inherit the light ink, making typed text invisible, so give
+   un-themed white surfaces dark ink. Base layer, so any explicit text-* utility still wins. */
+@layer base {
+  html[data-theme="dark"] .bg-white:not([class*="dark:bg-"]) {
+    color: #1c1a18;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

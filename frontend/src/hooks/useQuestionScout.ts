@@ -154,6 +154,21 @@ export function useQuestionScout(
     bump();
   }, [bump]);
 
+  /**
+   * After an AI item has been shown: a requeued copy (failed answer) reuses the same
+   * question, but it's no longer "new" — so the keep/request-new modal doesn't open twice.
+   */
+  const markSeen = useCallback((facetId: string) => {
+    const entry = entries.current.get(facetId);
+    if (entry?.payload?.isNew) entry.payload = { ...entry.payload, isNew: false };
+  }, []);
+
+  /** Drop a question the user rejected (request-new / report), so a requeued copy fetches a fresh one. */
+  const forget = useCallback((facetId: string) => {
+    entries.current.delete(facetId);
+    retried.current.delete(facetId);
+  }, []);
+
   /** Forget everything (new session / reload). */
   const reset = useCallback(() => {
     generation.current++;
@@ -182,6 +197,8 @@ export function useQuestionScout(
     ensure,
     retry,
     park,
+    markSeen,
+    forget,
     reset,
     dropKu,
     parkedCount: parked.current.size,
