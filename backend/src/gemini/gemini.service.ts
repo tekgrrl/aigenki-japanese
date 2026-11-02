@@ -13,6 +13,14 @@ import { performance } from "perf_hooks"; // For timing
 import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageLabelMessage } from '../prompts/vocab.prompts';
 import { buildScenarioEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
+import {
+  PictureBrief,
+  PICTURE_BRIEF_SCHEMA,
+  PICTURE_TEXT_CHECK_PROMPT,
+  PICTURE_TEXT_CHECK_SCHEMA,
+  buildPictureBriefMessage,
+  buildPictureImagePrompt,
+} from '../prompts/picture.prompts';
 
 @Injectable()
 export class GeminiService implements OnModuleInit {
@@ -21,6 +29,7 @@ export class GeminiService implements OnModuleInit {
   private client: GoogleGenAI;
   private modelName: string;
   private conceptModelName: string;
+  private imageModelName: string;
 
   constructor(
     private configService: ConfigService,
@@ -31,6 +40,7 @@ export class GeminiService implements OnModuleInit {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
     this.modelName = this.configService.get<string>('MODEL_GEMINI_FLASH') || 'gemini-3-flash-preview';
     this.conceptModelName = this.configService.get<string>('GEMINI_MODEL') || this.modelName;
+    this.imageModelName = this.configService.get<string>('MODEL_GEMINI_IMAGE') || 'gemini-3.1-flash-image';
     this.logger.log(`Using Gemini model: ${this.modelName}`);
     this.logger.log(`Using Gemini concept model: ${this.conceptModelName}`);
 
@@ -730,8 +740,9 @@ export class GeminiService implements OnModuleInit {
     definitions: string[],
     examples: { sentence: string; translation: string }[],
     kuId: string,
+    partOfSpeech?: string,
   ): Promise<string[] | null> {
-    const userMessage = buildUsageLabelMessage(vocab, definitions, examples);
+    const userMessage = buildUsageLabelMessage(vocab, definitions, examples, partOfSpeech);
     const schema = {
       type: 'OBJECT',
       properties: { usages: { type: 'ARRAY', items: { type: 'STRING' } } },
@@ -782,6 +793,122 @@ export class GeminiService implements OnModuleInit {
         );
       }
     }
+  }
+
+  // ─── Picture cards (audio-first vocab) ──────────────────────────────────────
+
+  /** Runs a Gemini call wrapped in the standard api-logs start/complete bookkeeping. */
+  private async logged<T>(
+    route: string,
+    model: string,
+    requestData: ApiLog['requestData'],
+    call: () => Promise<{ result: T; responseData: ApiLog['responseData'] }>,
+  ): Promise<T> {
+    const logRef = await this.apilogService.startLog({
+      timestamp: Timestamp.now(),
+      route,
+      status: 'pending',
+      modelUsed: model,
+      requestData,
+    });
+    const startTime = performance.now();
+    try {
+      const { result, responseData } = await call();
+      if (logRef) {
+        this.apilogService
+          .completeLog(logRef, { status: 'success', durationMs: performance.now() - startTime, responseData })
+          .catch(err => console.error(`Failed to update ${route} log`, err));
+      }
+      return result;
+    } catch (error: any) {
+      if (logRef) {
+        this.apilogService
+          .completeLog(logRef, {
+            status: 'error',
+            durationMs: performance.now() - startTime,
+            errorData: { message: error?.message || 'Unknown error' },
+          })
+          .catch(err => console.error(`Failed to update ${route} log`, err));
+      }
+      throw error;
+    }
+  }
+
+  /** Step 1: decide what to draw (cast or not, background or not, the scene). */
+  async generatePictureBrief(
+    w: { word: string; reading: string; usage: string; definition: string; sentence: string; translation: string },
+    kuId: string,
+  ): Promise<PictureBrief> {
+    const userMessage = buildPictureBriefMessage(w);
+    return this.logged('/pictures/brief', this.modelName, { userMessage, content: w.word, kuId }, async () => {
+      const response = await this.client.models.generateContent({
+        model: this.modelName,
+        contents: [{ parts: [{ text: userMessage }] }],
+        config: { responseMimeType: 'application/json', responseSchema: PICTURE_BRIEF_SCHEMA, temperature: 0.4 },
+      });
+      const parsedJson = JSON.parse(response.text ?? '') as PictureBrief;
+      return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
+    });
+  }
+
+  /**
+   * Step 2: render the brief in the house style. `references` are the cast images,
+   * attached only when the brief includes the cast. Retries transient 503s.
+   */
+  async generatePicture(
+    brief: PictureBrief,
+    references: { mimeType: string; data: string }[],
+    kuId: string,
+  ): Promise<{ data: Buffer; mimeType: string }> {
+    const prompt = buildPictureImagePrompt(brief);
+    const parts: any[] = [{ text: prompt }];
+    if (brief.includeCast) parts.push(...references.map(r => ({ inlineData: r })));
+
+    // Image bytes are never logged (they'd blow the Firestore doc limit) — only metadata.
+    return this.logged('/pictures/image', this.imageModelName, { userMessage: prompt, kuId }, async () => {
+      const delays = [0, 3000, 8000];
+      let lastError: any;
+      for (const delay of delays) {
+        if (delay) await new Promise(r => setTimeout(r, delay));
+        try {
+          const response = await this.client.models.generateContent({
+            model: this.imageModelName,
+            contents: [{ role: 'user', parts }],
+            config: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '1:1' } },
+          });
+          const candidate = response.candidates?.[0];
+          const image = candidate?.content?.parts?.find(p => p.inlineData?.data);
+          if (!image?.inlineData?.data) {
+            throw new Error(`No image returned (finishReason=${candidate?.finishReason ?? 'unknown'})`);
+          }
+          const buf = Buffer.from(image.inlineData.data, 'base64');
+          const mimeType = image.inlineData.mimeType || 'image/png';
+          return {
+            result: { data: buf, mimeType },
+            responseData: { parsedJson: { bytes: buf.length, mimeType, finishReason: candidate?.finishReason } },
+          };
+        } catch (error: any) {
+          lastError = error;
+          const transient = /\b(429|500|503|RESOURCE_EXHAUSTED|INTERNAL|UNAVAILABLE|Deadline expired)\b/.test(String(error?.message ?? error));
+          if (!transient) throw error;
+          this.logger.warn(`generatePicture: transient error for ${kuId}, retrying: ${error?.message}`);
+        }
+      }
+      throw lastError;
+    });
+  }
+
+  /** Step 3: does the image contain any writing? (binary, checkable — not a quality judge) */
+  async checkPictureForText(image: Buffer, mimeType: string, kuId: string): Promise<{ hasText: boolean; where: string }> {
+    return this.logged('/pictures/text-check', this.modelName, { userMessage: PICTURE_TEXT_CHECK_PROMPT, kuId }, async () => {
+      const response = await this.client.models.generateContent({
+        model: this.modelName,
+        contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: image.toString('base64') } }, { text: PICTURE_TEXT_CHECK_PROMPT }] }],
+        config: { responseMimeType: 'application/json', responseSchema: PICTURE_TEXT_CHECK_SCHEMA, temperature: 0 },
+      });
+      const parsedJson = JSON.parse(response.text ?? '');
+      return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
+    });
   }
 
   /**

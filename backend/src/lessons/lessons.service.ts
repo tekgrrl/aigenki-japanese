@@ -247,7 +247,8 @@ export class LessonsService {
    * rewritten — only a `usage` field is added. Runs at most once per lesson (labels are
    * saved on the global lesson); a no-op if already labelled or fewer than 2 examples.
    */
-  async labelVocabUsages(kuId: string): Promise<{ usages: (string | null)[] }> {
+  /** `force` relabels even an already-labelled lesson (admin "Relabel usages"). */
+  async labelVocabUsages(kuId: string, force = false): Promise<{ usages: (string | null)[]; saved: boolean }> {
     const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
     const doc = await lessonRef.get();
     if (!doc.exists) throw new NotFoundException('Lesson not found');
@@ -256,15 +257,16 @@ export class LessonsService {
     if (lesson.type !== 'Vocab') throw new BadRequestException('Only Vocab lessons have usage labels');
 
     const current = examples.map(e => e.usage ?? null);
-    if (examples.length < 2 || current.every(u => u)) return { usages: current };
+    if (examples.length < 2 || (!force && current.every(u => u))) return { usages: current, saved: false };
 
     const usages = await this.geminiService.labelExampleUsages(
       lesson.vocab,
       lesson.definitions ?? [],
       examples.map(e => ({ sentence: e.sentence, translation: e.translation })),
       kuId,
+      lesson.partOfSpeech,
     );
-    if (!usages) return { usages: current };
+    if (!usages) return { usages: current, saved: false };
 
     // The Gemini call takes seconds; a regenerate or admin edit may have replaced the
     // examples meanwhile. Only write if they're still the ones that were labelled.
@@ -280,10 +282,10 @@ export class LessonsService {
     });
     if (!written) {
       this.logger.warn(`Examples for ${lesson.vocab} (${kuId}) changed during labelling; labels not saved`);
-      return { usages: current };
+      return { usages: current, saved: false };
     }
     this.logger.log(`Labelled ${usages.length} example usages for ${lesson.vocab} (${kuId}): ${[...new Set(usages)].join(' | ')}`);
-    return { usages };
+    return { usages, saved: true };
   }
 
   private async writeGlobalLesson(kuId: string, updates: Record<string, any>): Promise<void> {

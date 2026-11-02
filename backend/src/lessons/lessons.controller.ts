@@ -127,6 +127,14 @@ export class LessonsController {
     return this.lessonsService.labelVocabUsages(kuId);
   }
 
+  /** Admin: relabel a Vocab lesson's example usages even if already labelled. */
+  @Post(':kuId/relabel-usages')
+  @UseGuards(AdminGuard)
+  async relabelUsages(@Param('kuId') kuId: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    return this.lessonsService.labelVocabUsages(kuId, true);
+  }
+
   @Post('regenerate/:kuId')
   @UseGuards(AdminGuard)
   async regenerate(@UserId() uid: string, @Param('kuId') kuId: string) {
