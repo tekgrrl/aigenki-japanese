@@ -15,6 +15,8 @@ interface Picture {
   file?: string;
   brief?: { picturable: boolean; includeCast: boolean; background: string; scene: string };
   attempts: { hasText: boolean; where: string }[];
+  origin?: "generated" | "uploaded";
+  staleUsage?: boolean;
 }
 
 interface Job {
@@ -52,6 +54,10 @@ export default function PicturesAdminPage() {
   const [force, setForce] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [uploadWord, setUploadWord] = useState("");
+  const [uploadUsage, setUploadUsage] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
@@ -95,6 +101,37 @@ export default function PicturesAdminPage() {
       else missing.push(line);
     }
     return { ids, missing };
+  };
+
+  /** Attach a hand-made image (e.g. a diagram) to one word. */
+  const upload = async () => {
+    if (!uploadFile || !uploadWord.trim()) return;
+    setUploading(true);
+    try {
+      const { ids, missing } = await resolveKuIds([uploadWord.trim()]);
+      if (!ids.length) {
+        setMessage(`No Vocab found for: ${missing.join(", ")}`);
+        return;
+      }
+      const form = new FormData();
+      form.append("file", uploadFile);
+      form.append("kuId", ids[0]);
+      if (uploadUsage.trim()) form.append("usage", uploadUsage.trim());
+      const res = await apiFetch("/api/pictures/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        setMessage(`Upload failed: ${(await res.json().catch(() => ({}))).message ?? res.status}`);
+        return;
+      }
+      const pic = (await res.json()) as Picture;
+      setMessage(`Uploaded for ${pic.content} (${pic.usage})`);
+      setUploadWord("");
+      setUploadUsage("");
+      setUploadFile(null);
+      setTab("approved");
+      await load();
+    } finally {
+      setUploading(false);
+    }
   };
 
   const startJob = async (body: Record<string, unknown>, note?: string) => {
@@ -209,6 +246,44 @@ export default function PicturesAdminPage() {
             </p>
           )}
         </div>
+        <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4 md:col-span-2">
+          <p className="text-sm font-semibold mb-1">Upload a hand-made image</p>
+          <p className="text-xs text-shodo-ink-faint mb-3">
+            For words a generated picture can&apos;t show (e.g. a diagram). Uploaded images are approved straight away and
+            are never redrawn or replaced by generation.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              aria-label="Word"
+              value={uploadWord}
+              onChange={(e) => setUploadWord(e.target.value)}
+              placeholder="Word, e.g. くれる"
+              className="w-40 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
+            />
+            <input
+              aria-label="Usage (optional)"
+              value={uploadUsage}
+              onChange={(e) => setUploadUsage(e.target.value)}
+              placeholder="Usage (optional; defaults to the first)"
+              className="w-72 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
+            />
+            <input
+              aria-label="Image file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+              className="text-sm"
+            />
+            <button
+              type="button"
+              onClick={upload}
+              disabled={uploading || !uploadFile || !uploadWord.trim()}
+              className="rounded bg-shodo-ink px-4 py-2 text-sm font-semibold text-shodo-paper disabled:opacity-40"
+            >
+              {uploading ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+        </div>
       </section>
 
       {message && <p className="mb-4 text-sm text-shodo-persimmon">{message}</p>}
@@ -248,9 +323,19 @@ export default function PicturesAdminPage() {
                   <span className="text-lg font-bold">
                     {pic.content} <span className="text-sm font-normal text-shodo-ink-light">{pic.reading}</span>
                   </span>
-                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[pic.status]}`}>{pic.status}</span>
+                  <span className="flex gap-1">
+                    {pic.origin === "uploaded" && (
+                      <span className="rounded px-2 py-0.5 text-xs font-semibold bg-shodo-indigo/15 text-shodo-indigo">uploaded</span>
+                    )}
+                    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[pic.status]}`}>{pic.status}</span>
+                  </span>
                 </div>
                 <p className="text-sm text-shodo-ink-light">{pic.usage}</p>
+                {pic.staleUsage && (
+                  <p className="text-xs text-shodo-persimmon">
+                    This usage is no longer in the lesson (relabelled?). Uploads aren&apos;t cleaned up automatically: reject it or upload a replacement.
+                  </p>
+                )}
                 {pic.brief?.scene && <p className="text-xs text-shodo-ink-faint">{pic.brief.scene}</p>}
                 {pic.attempts.some((a) => a.hasText) && (
                   <p className="text-xs text-shodo-persimmon">
@@ -270,11 +355,13 @@ export default function PicturesAdminPage() {
                       Reject
                     </button>
                   )}
-                  <button type="button" disabled={working} onClick={() => act(pic, "regenerate")}
-                    title="Draw this picture again for the same usage"
-                    className="rounded border border-shodo-ink/20 px-3 py-1 text-xs font-semibold disabled:opacity-40">
-                    {working ? "Working…" : "Redraw"}
-                  </button>
+                  {pic.origin !== "uploaded" && (
+                    <button type="button" disabled={working} onClick={() => act(pic, "regenerate")}
+                      title="Draw this picture again for the same usage"
+                      className="rounded border border-shodo-ink/20 px-3 py-1 text-xs font-semibold disabled:opacity-40">
+                      {working ? "Working…" : "Redraw"}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

@@ -350,6 +350,70 @@ describe('PicturesService', () => {
     });
   });
 
+  describe('uploaded pictures (made outside the system)', () => {
+    const png = (bytes = 'diagram') => ({ buffer: Buffer.from(bytes), mimetype: 'image/png', size: bytes.length });
+
+    function uploadedPicture(id: string, usage: string) {
+      fs.writeFileSync(path.join(dir, `${id}-1.png`), 'up');
+      db.collection('pictures').doc(id).set({
+        kuId: KU, usage, status: 'approved', origin: 'uploaded', file: `${id}-1.png`, source: { usage }, attempts: [], createdAt: ts,
+      });
+    }
+
+    it('upload stores an approved, uploaded picture with its file', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      const pic = await service.upload(KU, 'COST', png());
+      expect(pic).toMatchObject({ status: 'approved', origin: 'uploaded', usage: 'cost', kuId: KU });
+      expect(fs.readFileSync(path.join(dir, pic.file!), 'utf8')).toBe('diagram');
+    });
+
+    it('upload defaults the usage to the lesson\'s first usage', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      expect((await service.upload(KU, undefined, png())).usage).toBe('time');
+    });
+
+    it('upload rejects unsupported types, empty files and non-Vocab KUs', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      await expect(service.upload(KU, undefined, { buffer: Buffer.from('x'), mimetype: 'image/gif', size: 1 })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.upload(KU, undefined, { buffer: Buffer.alloc(0), mimetype: 'image/png', size: 0 })).rejects.toBeInstanceOf(BadRequestException);
+      db.collection('knowledge-units').doc('g').set({ type: 'Grammar' });
+      await expect(service.upload('g', undefined, png())).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('forced generation never replaces an upload nor generates over its usage', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      uploadedPicture('up1', 'time');
+      const { pictures: made } = await service.generateForKu(KU, true);
+      expect(made.map(p => p.usage)).toEqual(['cost']);
+      expect(pictures().find(p => p.id === 'up1')).toBeDefined();
+      expect(fs.existsSync(path.join(dir, 'up1-1.png'))).toBe(true);
+    });
+
+    it('stale cleanup leaves an upload whose usage no longer exists', async () => {
+      seed(vocabLesson([ex('practice', 1)]));
+      uploadedPicture('up1', 'old usage');
+      await service.generateForKu(KU);
+      expect(pictures().some(p => p.id === 'up1')).toBe(true);
+    });
+
+    it('annotateStale flags uploads whose usage is gone, and nothing else', async () => {
+      seed(vocabLesson([ex('practice', 1)]));
+      uploadedPicture('up1', 'old usage');
+      uploadedPicture('up2', 'practice');
+      existingPicture('gen', 'gone too', 'approved');
+      const annotated = await service.annotateStale(await service.list({}));
+      const stale = Object.fromEntries(annotated.map(p => [p.id, !!p.staleUsage]));
+      expect(stale).toEqual({ up1: true, up2: false, gen: false });
+    });
+
+    it('uploaded pictures cannot be redrawn', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      uploadedPicture('up1', 'time');
+      await expect(service.startRedraw('up1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(service.getJob().redrawing).toEqual([]);
+    });
+  });
+
   describe('setStatus', () => {
     it('refuses to approve a picture without an image', async () => {
       existingPicture('u1', 'particle', 'unpicturable', false);

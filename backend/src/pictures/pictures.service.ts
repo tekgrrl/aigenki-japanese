@@ -30,8 +30,22 @@ export interface Picture {
   /** File name inside PICTURES_DIR; absent for unpicturable entries. */
   file?: string;
   attempts: { hasText: boolean; where: string }[];
+  /** 'uploaded' = made outside the system (e.g. a hand-made diagram). Absent = generated. */
+  origin?: 'generated' | 'uploaded';
+  /** Admin list only: an uploaded picture whose usage no longer exists in the lesson. */
+  staleUsage?: boolean;
   createdAt: Timestamp;
 }
+
+/** A file accepted by upload (the subset of multer's file object we use). */
+export interface UploadedImage {
+  buffer: Buffer;
+  mimetype: string;
+  size: number;
+}
+
+const UPLOAD_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 const MAX_ATTEMPTS = 3;
 const CONCURRENCY = 2;
@@ -184,7 +198,11 @@ export class PicturesService {
     const key = (u: string) => u.trim().toLowerCase();
     const sources = usageSources(lesson);
     const have = new Set(existing.docs.map(d => key(d.data().usage ?? '')));
-    const todo = force ? sources : sources.filter(s => !have.has(key(s.usage)));
+    // An uploaded picture is the authority for its usage: never generate over it, even forced.
+    const uploaded = new Set(
+      existing.docs.filter(d => d.data().origin === 'uploaded').map(d => key(d.data().usage ?? '')),
+    );
+    const todo = (force ? sources : sources.filter(s => !have.has(key(s.usage)))).filter(s => !uploaded.has(key(s.usage)));
 
     const pictures: Picture[] = [];
     let failed = 0;
@@ -202,13 +220,13 @@ export class PicturesService {
     //   least one picture for a current usage;
     // - replaced (forced only): its usage got a new APPROVED picture. A worse replacement
     //   (needs-review / unpicturable) never removes an approved image.
-    // Pictures mid-redraw are left alone.
+    // Pictures mid-redraw, and uploaded pictures, are left alone.
     const current = new Set(sources.map(s => key(s.usage)));
     const approvedNew = new Set(pictures.filter(p => p.status === 'approved').map(p => key(p.usage)));
     const coversCurrent =
       pictures.some(p => p.file) || existing.docs.some(d => d.data().file && current.has(key(d.data().usage ?? '')));
     for (const d of existing.docs) {
-      if (this.redrawing.has(d.id)) continue;
+      if (this.redrawing.has(d.id) || d.data().origin === 'uploaded') continue; // never auto-delete uploads
       const u = key(d.data().usage ?? '');
       const stale = !current.has(u) && coversCurrent;
       const replaced = force && approvedNew.has(u);
@@ -228,6 +246,7 @@ export class PicturesService {
     let lessonDoc: FirebaseFirestore.DocumentSnapshot;
     try {
       pic = await this.get(id);
+      if (pic.origin === 'uploaded') throw new BadRequestException('Uploaded pictures can\'t be redrawn: upload a new one instead');
       lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(pic.kuId).get();
       if (!lessonDoc.exists) throw new BadRequestException(`KU ${pic.kuId} has no lesson`);
     } catch (e) {
@@ -290,6 +309,75 @@ export class PicturesService {
     if (existingId) this.removeOldFiles(existingId, file);
     this.logger.log(`Picture ${ref.id} for ${lesson.vocab} (${source.usage}): ${status} after ${attempts.length} attempt(s)`);
     return { id: ref.id, ...doc };
+  }
+
+  /**
+   * Attach an image made outside the system (e.g. a hand-made diagram) to a Vocab KU.
+   * Stored like a generated picture, approved straight away, and marked
+   * origin 'uploaded' so generation never redraws, replaces or cleans it up.
+   */
+  async upload(kuId: string, usage: string | undefined, image: UploadedImage): Promise<Picture> {
+    const ext = UPLOAD_TYPES[image.mimetype];
+    if (!ext) throw new BadRequestException(`Unsupported image type ${image.mimetype} (use PNG, JPEG or WebP)`);
+    if (!image.size || image.size > MAX_UPLOAD_BYTES) throw new BadRequestException('Image must be under 5 MB');
+
+    const [kuDoc, lessonDoc] = await Promise.all([
+      this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).get(),
+      this.db.collection(LESSONS_COLLECTION).doc(kuId).get(),
+    ]);
+    if (!kuDoc.exists) throw new NotFoundException(`KU ${kuId} not found`);
+    if (kuDoc.data()?.type !== 'Vocab') throw new BadRequestException(`KU ${kuId} is not Vocab`);
+    const lesson = lessonDoc.exists ? (lessonDoc.data() as VocabLesson) : null;
+    const ku = kuDoc.data() as Record<string, any>;
+
+    // Default the usage to the lesson's first usage, so the picture lines up with the slides.
+    const sources = lesson ? usageSources(lesson) : [];
+    const chosen = usage?.trim()
+      ? sources.find(s => s.usage.trim().toLowerCase() === usage.trim().toLowerCase())
+      : sources[0];
+    const source: PictureSource = chosen ?? {
+      usage: usage?.trim() || ku.data?.definition || ku.content,
+      definition: (lesson?.definitions ?? [])[0] ?? ku.data?.definition ?? '',
+      sentence: '',
+      translation: '',
+    };
+
+    const ref = this.col().doc();
+    this.ensureDir();
+    const file = `${ref.id}-${Date.now()}.${ext}`;
+    fs.writeFileSync(path.join(this.dir, file), image.buffer);
+    const doc = {
+      kuId,
+      content: lesson?.vocab ?? ku.content,
+      reading: lesson?.reading ?? ku.data?.reading ?? '',
+      usage: source.usage,
+      source,
+      status: 'approved' as const,
+      origin: 'uploaded' as const,
+      file,
+      attempts: [],
+      createdAt: Timestamp.now(),
+    };
+    await ref.set(doc);
+    this.logger.log(`Uploaded picture ${ref.id} for ${doc.content} (${doc.usage})`);
+    return { id: ref.id, ...doc };
+  }
+
+  /** Flags uploaded pictures whose usage is no longer one of their lesson's usages. */
+  async annotateStale(pictures: Picture[]): Promise<Picture[]> {
+    const kuIds = [...new Set(pictures.filter(p => p.origin === 'uploaded').map(p => p.kuId))];
+    if (!kuIds.length) return pictures;
+    const col = this.db.collection(LESSONS_COLLECTION);
+    const lessons = await this.db.getAll(...kuIds.map(id => col.doc(id)));
+    const usages = new Map<string, Set<string>>();
+    lessons.forEach((l, i) => {
+      if (l.exists) usages.set(kuIds[i], new Set(usageSources(l.data() as VocabLesson).map(s => s.usage.trim().toLowerCase())));
+    });
+    return pictures.map(p =>
+      p.origin === 'uploaded' && usages.has(p.kuId) && !usages.get(p.kuId)!.has(p.usage.trim().toLowerCase())
+        ? { ...p, staleUsage: true }
+        : p,
+    );
   }
 
   private async deletePicture(id: string, file?: string) {
