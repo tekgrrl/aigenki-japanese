@@ -25,7 +25,7 @@ The lesson should be in English. Where you want to use Japanese text for example
 * Generate context examples appropriate for the user's current JLPT level even if the vocabulary itself is more advanced. (Level constraint is injected at call time.)
 * Every context example MUST use the target word as a genuinely independent occurrence. Never pick or write a sentence where the word only appears as a bound fragment fused inside a larger, unrelated compound (jukugo) that has its own distinct meaning — e.g. do not use 三月 (March) to exemplify the number 三, or 学校 (school) to exemplify 学. If the target word forms a real compound with a related, compositional meaning, that compound may appear, but the target word's own reading and meaning must still be recoverable as a distinct unit within it — when in doubt, prefer a sentence where the word stands entirely alone.
 * ${PREFER_SPOKEN_REGISTER}
-* Give each context example a short \`usage\` label (a few English words) naming the usage or sense of the target word it shows, e.g. "asking why" vs "how come (surprise)". Examples showing the same usage MUST share the identical label. If the word has more than one distinct usage, the examples should cover them.
+* Give each context example a short \`usage\` label (a few English words) naming the usage or sense of the target word it shows, e.g. "asking why" vs "how come (surprise)". Examples showing the same usage MUST share the identical label. Usages are differences in MEANING, never in grammar: a change of grammatical role is not a new usage. For noun-suru words (nouns that also take する), the noun use and the する-verb use are ONE usage (e.g. 練習 "practice" and 練習する "to practise" share one label), unless the noun also names a distinct thing (e.g. 電話: "a telephone" vs "making a call"; 料理: "a dish / cuisine" vs "cooking"). Genuinely different meanings get different labels (e.g. 掛かる: "takes (time)" vs "costs (money)" vs "hangs"). If the word has more than one distinct usage, the examples should cover them.
 * Analyze component Kanji. If the word is normally or almost always written in kana alone in modern Japanese (e.g. もらう, くれる, いる, ある, すごい, かわいい), set \`kanaOnly\` to true and \`component_kanji\` to an empty array — do not include the kanji breakdown even if kanji exist for it. Otherwise set \`kanaOnly\` to false.
 * Do not explain what "rendaku" means.
 
@@ -305,13 +305,14 @@ export function buildUsageLabelMessage(
   vocab: string,
   definitions: string[],
   examples: { sentence: string; translation: string }[],
+  partOfSpeech?: string,
 ): string {
   const list = examples
     .map((e, i) => `${i + 1}. ${e.sentence.replace(/\[[^\]]*\]/g, '')} — ${e.translation}`)
     .join('\n');
-  return `You are labelling example sentences for the Japanese word 「${vocab}」 (definitions: ${definitions.join('; ')}).
+  return `You are labelling example sentences for the Japanese word 「${vocab}」 (${partOfSpeech ? `part of speech: ${partOfSpeech}; ` : ''}definitions: ${definitions.join('; ')}).
 
-For each example below, give a short label (a few English words) naming the usage or sense of 「${vocab}」 that the example shows, e.g. "asking why" vs "how come (surprise)". Examples that show the same usage MUST get the identical label; only use different labels for genuinely different usages, not for synonyms or different contexts.
+For each example below, give a short label (a few English words) naming the usage or sense of 「${vocab}」 that the example shows, e.g. "asking why" vs "how come (surprise)". Examples that show the same usage MUST get the identical label; only use different labels for genuinely different usages, not for synonyms or different contexts. Usages are differences in MEANING, never in grammar: a change of grammatical role is not a new usage. For noun-suru words (nouns that also take する), the noun use and the する-verb use are ONE usage (e.g. 練習 "practice" and 練習する "to practise" share one label), unless the noun also names a distinct thing (e.g. 電話: "a telephone" vs "making a call"; 料理: "a dish / cuisine" vs "cooking"). Genuinely different meanings get different labels (e.g. 掛かる: "takes (time)" vs "costs (money)" vs "hangs").
 
 Examples:
 ${list}

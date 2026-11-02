@@ -730,8 +730,9 @@ export class GeminiService implements OnModuleInit {
     definitions: string[],
     examples: { sentence: string; translation: string }[],
     kuId: string,
+    partOfSpeech?: string,
   ): Promise<string[] | null> {
-    const userMessage = buildUsageLabelMessage(vocab, definitions, examples);
+    const userMessage = buildUsageLabelMessage(vocab, definitions, examples, partOfSpeech);
     const schema = {
       type: 'OBJECT',
       properties: { usages: { type: 'ARRAY', items: { type: 'STRING' } } },

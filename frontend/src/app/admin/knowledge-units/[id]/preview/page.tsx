@@ -42,6 +42,7 @@ export default function PreviewLessonPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  const [relabelling, setRelabelling] = useState(false);
 
   const { audioRef, playAudio } = useLessonAudio();
 
@@ -76,6 +77,19 @@ export default function PreviewLessonPage() {
     if (!isAdmin) return;
     load();
   }, [isAdmin, load]);
+
+  const handleRelabel = async () => {
+    setRelabelling(true);
+    try {
+      const res = await apiFetch(`/api/lessons/${kuId}/relabel-usages`, { method: "POST" });
+      if (!res.ok) throw new Error("Relabel failed");
+      await load();
+    } catch (e) {
+      setErrorMsg((e as Error).message || "Relabel failed");
+    } finally {
+      setRelabelling(false);
+    }
+  };
 
   const handleRegenerate = async () => {
     setRegenerating(true);
@@ -121,6 +135,22 @@ export default function PreviewLessonPage() {
         </h1>
         <p className="text-xs text-shodo-ink-light font-mono">{ku.type} · {kuId}</p>
       </div>
+      <div className="flex gap-2">
+      {ku.type === "Vocab" && (
+        <button
+          type="button"
+          onClick={handleRelabel}
+          disabled={relabelling || regenerating}
+          title="Re-run usage labelling on this lesson's examples"
+          className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+            relabelling
+              ? "border-shodo-ink/10 text-shodo-ink-light/50 cursor-not-allowed"
+              : "border-shodo-ink/20 text-shodo-ink hover:bg-shodo-paper-dark"
+          }`}
+        >
+          {relabelling ? "Relabelling…" : "Relabel usages"}
+        </button>
+      )}
       <button
         onClick={handleRegenerate}
         disabled={regenerating}
@@ -132,6 +162,7 @@ export default function PreviewLessonPage() {
       >
         {regenerating ? "Regenerating…" : "Regenerate"}
       </button>
+      </div>
     </div>
   );
 

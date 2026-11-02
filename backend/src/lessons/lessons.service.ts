@@ -247,7 +247,8 @@ export class LessonsService {
    * rewritten — only a `usage` field is added. Runs at most once per lesson (labels are
    * saved on the global lesson); a no-op if already labelled or fewer than 2 examples.
    */
-  async labelVocabUsages(kuId: string): Promise<{ usages: (string | null)[] }> {
+  /** `force` relabels even an already-labelled lesson (admin "Relabel usages"). */
+  async labelVocabUsages(kuId: string, force = false): Promise<{ usages: (string | null)[] }> {
     const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
     const doc = await lessonRef.get();
     if (!doc.exists) throw new NotFoundException('Lesson not found');
@@ -256,13 +257,14 @@ export class LessonsService {
     if (lesson.type !== 'Vocab') throw new BadRequestException('Only Vocab lessons have usage labels');
 
     const current = examples.map(e => e.usage ?? null);
-    if (examples.length < 2 || current.every(u => u)) return { usages: current };
+    if (examples.length < 2 || (!force && current.every(u => u))) return { usages: current };
 
     const usages = await this.geminiService.labelExampleUsages(
       lesson.vocab,
       lesson.definitions ?? [],
       examples.map(e => ({ sentence: e.sentence, translation: e.translation })),
       kuId,
+      lesson.partOfSpeech,
     );
     if (!usages) return { usages: current };
 
