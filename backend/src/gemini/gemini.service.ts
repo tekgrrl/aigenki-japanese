@@ -13,6 +13,7 @@ import { performance } from "perf_hooks"; // For timing
 import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageLabelMessage } from '../prompts/vocab.prompts';
 import { buildScenarioEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
+import { buildFuriganaMessage } from '../prompts/grammar.prompts';
 import {
   PictureBrief,
   PICTURE_BRIEF_SCHEMA,
@@ -793,6 +794,30 @@ export class GeminiService implements OnModuleInit {
         );
       }
     }
+  }
+
+  /**
+   * Furigana for a Grammar lesson's example sentences (lazy backfill). Returns one annotated
+   * string per sentence (same order); the caller validates each against its original.
+   */
+  async addFurigana(sentences: string[], kuId: string): Promise<string[]> {
+    const userMessage = buildFuriganaMessage(sentences);
+    return this.logged('/lessons/furigana', this.modelName, { userMessage, kuId }, async () => {
+      const response = await this.client.models.generateContent({
+        model: this.modelName,
+        contents: [{ parts: [{ text: userMessage }] }],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: { type: 'OBJECT', properties: { annotated: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['annotated'] } as any,
+          temperature: 0.1,
+        },
+      });
+      const parsedJson = JSON.parse(response.text ?? '') as { annotated: string[] };
+      if (!Array.isArray(parsedJson.annotated) || parsedJson.annotated.length !== sentences.length) {
+        throw new Error(`Expected ${sentences.length} annotated sentences, got ${parsedJson.annotated?.length}`);
+      }
+      return { result: parsedJson.annotated, responseData: { rawText: response.text, parsedJson } };
+    });
   }
 
   // ─── Picture cards (audio-first vocab) ──────────────────────────────────────

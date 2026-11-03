@@ -282,6 +282,12 @@ export interface GrammarLesson {
      * matches a fragment's text against these terms rather than assuming 1:1.
      */
     learnableTerms?: { term: string; surfaceForm: string; reading: string; meaning: string }[];
+    /**
+     * `japanese` with furigana markup (食[た]べます), for display only — fragments and
+     * alternatives keep using `japanese`. Backfilled lazily (POST /lessons/:kuId/furigana);
+     * absent on lessons not yet shown.
+     */
+    furigana?: string;
   }[];
 }
 

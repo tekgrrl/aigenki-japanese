@@ -79,3 +79,26 @@ Example from context (USE AS examples[0] VERBATIM):
 
 ${buildGrammarInstructions(jlptLevel)}`;
 }
+
+/**
+ * Adds reading annotations to existing Grammar example sentences (lazy backfill: grammar
+ * lessons were generated without furigana). Output must keep every character of the input.
+ */
+export function buildFuriganaMessage(sentences: string[]): string {
+  return `Add furigana readings to each Japanese sentence below.
+
+Format: put the hiragana reading in square brackets directly after each kanji word, e.g.
+明日[あした]、学校[がっこう]へ行[い]きます。 Okurigana stays outside the brackets
+(食[た]べます, not 食べ[たべ]ます). Use the reading that fits this sentence.
+
+Rules:
+- Copy every character of the sentence exactly, in order. Only insert [reading] annotations.
+- Annotate every kanji. Never annotate kana, punctuation, numbers or Latin letters.
+- Readings are hiragana only.
+- A sentence with no kanji is returned unchanged.
+
+Return JSON: {"annotated": [one string per input sentence, same order]}
+
+Sentences:
+${sentences.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+}
