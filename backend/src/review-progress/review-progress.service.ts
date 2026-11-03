@@ -104,7 +104,9 @@ export class ReviewProgressService {
 
     await this.userKnowledgeUnitsService.update(uid, kuId, {
       currentStage: result.stage.stage,
-      ...(variant ? { sequenceVariant: variant } : {}),
+      // Always written: a reset re-chooses the variant, and a stale one would point
+      // checkAndAdvanceStage at a sequence the facets weren't built from.
+      sequenceVariant: variant ?? FieldValue.delete(),
     });
     await this.learningProgressService.recomputeAndCache(uid, kuId);
 
@@ -362,7 +364,6 @@ export class ReviewProgressService {
       .filter(f => f.sequenceStage === stage);
   }
 
-  /** Creates all facets for a stage and increments UKU facet_count. */
   /** The sequence for a KU type and variant (absent variant = the default sequence). */
   private sequenceFor(kuType: string, variant?: SequenceVariant) {
     return FACET_SEQUENCES.find(s => s.kuType === kuType && s.variant === variant);
@@ -389,6 +390,7 @@ export class ReviewProgressService {
       .map(d => ({ id: d.id, file: d.data().file as string, usage: d.data().usage as string }));
   }
 
+  /** Creates all facets for a stage and increments UKU facet_count. */
   private async createFacetsForStage(
     uid: string,
     kuId: string,

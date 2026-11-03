@@ -53,6 +53,7 @@ export default function LessonSessionPage() {
   const [checkIdx, setCheckIdx] = useState(0);
   // Audio-first words finished normally this session (not "already know this").
   const learnedAudioFirst = useRef<LoadedItem[]>([]);
+  const finishedKuIds = useRef(new Set<string>());
 
   const { audioRef, playAudio } = useLessonAudio();
   const enrollmentPromises = useRef<Promise<void>[]>([]);
@@ -103,8 +104,12 @@ export default function LessonSessionPage() {
   // both end the current item and move on, differing only in the SRS starting point.
   const finishItem = useCallback(async (alreadyKnown: boolean) => {
     const loaded = loadedItems[currentItemIdx];
-    triggerEnrollment(loaded.item, alreadyKnown);
-    if (!alreadyKnown && isAudioFirst(loaded)) learnedAudioFirst.current.push(loaded);
+    // Back then Next re-finishes an item: enroll and queue its check rounds only once.
+    if (!finishedKuIds.current.has(loaded.item.kuId)) {
+      finishedKuIds.current.add(loaded.item.kuId);
+      triggerEnrollment(loaded.item, alreadyKnown);
+      if (!alreadyKnown && isAudioFirst(loaded)) learnedAudioFirst.current.push(loaded);
+    }
     const isLastItem = currentItemIdx >= loadedItems.length - 1;
 
     if (!isLastItem) {

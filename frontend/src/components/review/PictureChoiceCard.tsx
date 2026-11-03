@@ -23,7 +23,13 @@ interface Props {
  * Audio-first vocab (#246): hear the word, pick its picture from four. Every round also
  * re-pairs sound and image (the right picture is highlighted and the word replays), so
  * the card is reinforcement as much as a test.
+ *
+ * It needs three distractors to be a fair test. With fewer (few approved pictures yet, or
+ * the fetch failed), it just shows the word's picture and records nothing, so the facet
+ * stays due rather than passing on a free pick.
  */
+const DISTRACTORS = 3;
+
 export default function PictureChoiceCard({ kuId, reading, meaning, pictures, onSpeak, onResult, onAdvance, tone = "dark" }: Props) {
   const [target] = useState<PictureRef>(() => pictures[Math.floor(Math.random() * pictures.length)]);
   const [options, setOptions] = useState<PictureRef[] | null>(null);
@@ -34,9 +40,14 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
   // biome-ignore lint/correctness/useExhaustiveDependencies: one round per mount (the card is keyed by item)
   useEffect(() => {
     let cancelled = false;
-    fetchChoices(kuId, 3).then((distractors) => {
+    fetchChoices(kuId, DISTRACTORS).then((distractors) => {
       if (cancelled) return;
-      setOptions(shuffle([{ ...target, kuId }, ...distractors]));
+      if (distractors.length < DISTRACTORS) {
+        setOptions([{ ...target, kuId }]);
+        setPicked(target.id); // reveal: nothing to choose between, nothing recorded
+      } else {
+        setOptions(shuffle([{ ...target, kuId }, ...distractors]));
+      }
       onSpeak(reading);
     });
     return () => {
@@ -67,13 +78,16 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
   });
 
   const correct = picked === target.id;
+  const showOnly = options?.length === 1;
   const text = tone === "dark" ? "text-gray-200" : "text-shodo-ink";
   const subtle = tone === "dark" ? "text-gray-400" : "text-shodo-ink-faint";
 
   return (
     <div className={`flex flex-col items-center gap-5 ${text}`}>
       <div className="flex items-center gap-3">
-        <span className={`text-sm ${subtle}`}>Which picture is this word?</span>
+        <span className={`text-sm ${subtle}`}>
+          {showOnly ? "This word:" : "Which picture is this word?"}
+        </span>
         <button
           type="button"
           onClick={() => onSpeak(reading)}
@@ -89,7 +103,7 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
       {!options ? (
         <p className={`text-sm ${subtle}`}>Loading…</p>
       ) : (
-        <div className="grid grid-cols-2 gap-3 w-full max-w-xl">
+        <div className={showOnly ? "w-full max-w-xs" : "grid grid-cols-2 gap-3 w-full max-w-xl"}>
           {options.map((option, i) => {
             const isTarget = option.id === target.id;
             const isPicked = option.id === picked;
@@ -120,9 +134,13 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
 
       {picked && (
         <div className="flex flex-col items-center gap-3">
-          <p className={`text-lg font-semibold ${correct ? "text-green-500" : "text-red-400"}`}>
-            {correct ? "Correct" : "Not quite: it's the highlighted picture"}
-          </p>
+          {showOnly ? (
+            <p className={`text-sm ${subtle}`}>Not enough pictures to quiz this yet: practice only, not recorded.</p>
+          ) : (
+            <p className={`text-lg font-semibold ${correct ? "text-green-500" : "text-red-400"}`}>
+              {correct ? "Correct" : "Not quite: it's the highlighted picture"}
+            </p>
+          )}
           {meaning && <p className={`text-sm ${subtle}`}>{meaning}</p>}
           <button
             ref={nextRef}
