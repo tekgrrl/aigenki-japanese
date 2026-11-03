@@ -77,7 +77,9 @@ export class LearningProgressService {
                 if (isNewlyReviewing && kuContent) {
                     const facetTypes = facets
                         .map(f => f.facetType)
-                        .filter(t => t !== 'AI-Generated-Question');
+                        // Audio-first words are known by sound and picture only: keep them out
+                        // of the tutor context, or Gemini writes them in kanji as reinforcement.
+                        .filter(t => t !== 'AI-Generated-Question' && t !== 'picture-choice');
                     if (facetTypes.length > 0) {
                         void this.statsService.addToFrontierVocab(uid, kuContent, facetTypes).catch(e =>
                             this.logger.error(`Failed to add frontierVocab uid=${uid} kuId=${kuId}`, e),

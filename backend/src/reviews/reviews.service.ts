@@ -206,6 +206,9 @@ export class ReviewsService {
                 try {
                     const ku = await this.knowledgeUnitsService.findOne(kuId);
                     const isGrammar = ku.type === 'Grammar';
+                    // Audio-first (picture-choice) words are never shown written: keep them out of the
+                    // tutor context (leechVocab, like frontierVocab) and the daily plan's promotions.
+                    if (facetType === 'picture-choice') return;
                     if (newConsecutiveFailures >= LEECH_THRESHOLD) {
                         await this.statsService.addToLeechVocab(uid, ku.content, facetType);
                         if (isGrammar) await this.statsService.addToWeakGrammarPoints(uid, ku.content, facetType);

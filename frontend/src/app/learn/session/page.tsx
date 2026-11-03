@@ -349,15 +349,22 @@ export default function LessonSessionPage() {
             You studied {loadedItems.length} {loadedItems.length === 1 ? "item" : "items"}.
           </p>
           <div className="flex flex-wrap justify-center gap-2 mb-8 mt-4">
-            {loadedItems.map(({ item }) => (
+            {loadedItems.map((loaded) => {
+              const { item, lesson } = loaded;
+              // Audio-first words are never shown written: use the meaning instead.
+              const label = isAudioFirst(loaded)
+                ? (lesson.type === "Vocab" && lesson.definitions?.[0]) || "🖼"
+                : item.content;
+              return (
               <span
                 key={item.kuId}
                 className="text-xl px-3 py-1.5 rounded-lg text-shodo-paper font-medium"
                 style={{ backgroundColor: TYPE_COLORS[item.type] ?? "var(--shodo-ink-light)" }}
               >
-                {item.content}
+                {label}
               </span>
-            ))}
+              );
+            })}
           </div>
           <div className="flex gap-3 justify-center">
             <button

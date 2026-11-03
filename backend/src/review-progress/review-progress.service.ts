@@ -25,6 +25,9 @@ import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 
+/** A picture card needs the word plus three distractor words, or it can't record a result. */
+const MIN_PICTURED_WORDS = 4;
+
 @Injectable()
 export class ReviewProgressService {
   private readonly logger = new Logger(ReviewProgressService.name);
@@ -47,11 +50,15 @@ export class ReviewProgressService {
   /**
    * Called when a user completes a lesson. Creates the first applicable stage's
    * facets and records currentStage on the UKU.
+   *
+   * `resetFrom` (resetSequence only): the variant the word had before the reset, which
+   * the reset keeps when it can, so the experiment flag never converts words in progress.
    */
   async initializeSequence(
     uid: string,
     kuId: string,
     startAtSrsStage = 0,
+    resetFrom?: { variant?: SequenceVariant },
   ): Promise<{ stage: number; facetsCreated: number }> {
     // Idempotent: if this KU's sequence was already initialized (e.g. a retried
     // enrollment call, or the item briefly reappearing in the learning queue),
@@ -76,7 +83,7 @@ export class ReviewProgressService {
       return { stage: 0, facetsCreated: 0 };
     }
 
-    const variant = await this.chooseVariant(uid, ku);
+    const variant = await this.chooseVariant(uid, ku, resetFrom);
     const sequence = this.sequenceFor(ku.type, variant);
     if (!sequence) {
       this.logger.warn(`initializeSequence: no sequence defined for kuType=${ku.type}`);
@@ -176,9 +183,10 @@ export class ReviewProgressService {
           await this.learningProgressService.recomputeAndCache(uid, target);
         }),
     );
+    const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
 
-    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId);
+    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
     if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
 
     this.logger.log(
@@ -371,13 +379,32 @@ export class ReviewProgressService {
 
   /**
    * Audio-first experiment: a Vocab word enrolled by a user with the flag on follows the
-   * audio-first sequence, if it has at least one approved picture. Otherwise the default.
+   * audio-first sequence, if it has an approved picture and enough other words are pictured
+   * for a full four-picture card. Otherwise the default.
+   *
+   * On a reset, the flag isn't consulted: the word stays audio-first only if it already was
+   * (and still qualifies), and a default word stays default.
    */
-  private async chooseVariant(uid: string, ku: KnowledgeUnit): Promise<SequenceVariant | undefined> {
+  private async chooseVariant(
+    uid: string,
+    ku: KnowledgeUnit,
+    resetFrom?: { variant?: SequenceVariant },
+  ): Promise<SequenceVariant | undefined> {
     if (ku.type !== 'Vocab') return undefined;
-    const user = await this.db.collection('users').doc(uid).get();
-    if (user.data()?.preferences?.audioFirstExperiment !== true) return undefined;
-    return (await this.approvedPictures(ku.id)).length > 0 ? 'audio-first' : undefined;
+    if (resetFrom) {
+      if (resetFrom.variant !== 'audio-first') return undefined;
+    } else {
+      const user = await this.db.collection('users').doc(uid).get();
+      if (user.data()?.preferences?.audioFirstExperiment !== true) return undefined;
+    }
+    if ((await this.approvedPictures(ku.id)).length === 0) return undefined;
+    return (await this.picturedWordCount()) >= MIN_PICTURED_WORDS ? 'audio-first' : undefined;
+  }
+
+  /** Distinct words with an approved picture: the pool picture-card distractors come from. */
+  private async picturedWordCount(): Promise<number> {
+    const snap = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
+    return new Set(snap.docs.map(d => d.data().kuId).filter(Boolean)).size;
   }
 
   private async approvedPictures(kuId: string): Promise<{ id: string; file: string; usage: string }[]> {
