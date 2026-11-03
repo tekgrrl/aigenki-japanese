@@ -71,6 +71,19 @@ erDiagram
     }
 
     Question {
+    Picture {
+        string id PK
+        string kuId          "FK → KnowledgeUnit.id OR Concept.id; null for free-standing"
+        object subject       "kind: ku-usage | ku | none, kuId, usage — absent on old docs = ku-usage"
+        string usage         "ku-usage only (matched by usageKey)"
+        string status        "approved | needs-review | rejected | unpicturable"
+        string origin        "generated | uploaded"
+        string style         "card | scene (absent = card)"
+        object brief         "picturable, includeCast, background, scene"
+        string file          "file name under PICTURES_DIR (local disk)"
+        array  attempts      "text-check results"
+    }
+
         string id PK
         string kuId             "FK → KnowledgeUnit.id OR Concept.id (POLYMORPHIC)"
         string sourceCollection "knowledge-units | concepts | scenarios — optional, absent on old docs"
@@ -190,6 +203,7 @@ erDiagram
 
     Question ||--o{ UserQuestionState : "per-user state"
     ReviewFacet o|--o| Question : "currentQuestionId"
+    KnowledgeUnit ||--o{ Picture : "pictured by (usage or whole KU)"
 
     UserRoot ||--o{ UserKnowledgeUnit : "owns"
     UserRoot ||--o{ ReviewFacet : "owns"

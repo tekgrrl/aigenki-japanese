@@ -11,6 +11,7 @@ import { buildVocabLessonMessage, buildVocabCacheContext } from '../prompts/voca
 import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { KanjiService } from '../kanji/kanji.service';
+import { isUsagePicture } from '../pictures/pictures.service';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -478,8 +479,9 @@ export class LessonsService {
     // corpus query above only samples the first 200 at the level.
     let picturedDocs: FirebaseFirestore.DocumentSnapshot[] = [];
     if ((userDoc.data() as UserRoot | undefined)?.preferences?.audioFirstExperiment === true) {
-      const pics = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
-      const ids = [...new Set(pics.docs.map(d => d.data().kuId as string))].filter(id => !seenKuIds.has(id));
+      const pics = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId', 'subject').get();
+      // Usage pictures only: free-standing ones have kuId null, and whole-KU ones aren't cards.
+      const ids = [...new Set(pics.docs.filter(d => isUsagePicture(d.data())).map(d => d.data().kuId as string))].filter(id => !seenKuIds.has(id));
       if (ids.length) {
         const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
         picturedDocs = (await this.db.getAll(...ids.map(id => kuCol.doc(id))))

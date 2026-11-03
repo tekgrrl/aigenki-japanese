@@ -20,6 +20,7 @@ import {
   ReviewFacet,
   VocabLesson,
 } from '../types';
+import { isUsagePicture } from '../pictures/pictures.service';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
@@ -447,8 +448,8 @@ export class ReviewProgressService {
 
   /** Distinct words with an approved picture: the pool picture-card distractors come from. */
   private async picturedWordCount(): Promise<number> {
-    const snap = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
-    return new Set(snap.docs.map(d => d.data().kuId).filter(Boolean)).size;
+    const snap = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId', 'subject').get();
+    return new Set(snap.docs.filter(d => isUsagePicture(d.data())).map(d => d.data().kuId)).size;
   }
 
   private async approvedPictures(kuId: string): Promise<{ id: string; file: string; usage: string }[]> {
@@ -457,7 +458,7 @@ export class ReviewProgressService {
       .where('status', '==', 'approved')
       .get();
     return snap.docs
-      .filter(d => d.data().file)
+      .filter(d => d.data().file && isUsagePicture(d.data()))
       .map(d => ({ id: d.id, file: d.data().file as string, usage: d.data().usage as string }));
   }
 

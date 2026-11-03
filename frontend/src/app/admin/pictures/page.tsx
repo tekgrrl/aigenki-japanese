@@ -1,13 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import NewPicturePanel from "@/components/admin/pictures/NewPicturePanel";
+import PictureCardTools from "@/components/admin/pictures/PictureCardTools";
+import { type PictureSubject, resolveKuId, SUBJECT_LABEL, type SubjectKind } from "@/components/admin/pictures/pictureApi";
 import { apiFetch } from "@/lib/api-client";
 
 type PictureStatus = "approved" | "needs-review" | "rejected" | "unpicturable";
 
 interface Picture {
   id: string;
-  kuId: string;
+  kuId: string | null;
+  subject?: PictureSubject;
+  style?: "card" | "scene";
+  note?: string;
   content: string;
   reading: string;
   usage: string;
@@ -26,6 +32,7 @@ interface Job {
   failed: number;
   current: string[];
   redrawing: string[];
+  rendering: { id: string; label: string }[];
 }
 
 const TABS: { key: PictureStatus | "all"; label: string }[] = [
@@ -54,6 +61,7 @@ export default function PicturesAdminPage() {
   const [force, setForce] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [uploadKind, setUploadKind] = useState<SubjectKind>("ku-usage");
   const [uploadWord, setUploadWord] = useState("");
   const [uploadUsage, setUploadUsage] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -79,12 +87,29 @@ export default function PicturesAdminPage() {
   }, [load]);
 
   // Poll while a generation job or a redraw is running (both run in the background).
-  const busy = !!job?.running || (job?.redrawing.length ?? 0) > 0;
+  const busy = !!job?.running || (job?.redrawing.length ?? 0) > 0 || (job?.rendering?.length ?? 0) > 0;
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [busy, load]);
+
+  // When a single render finishes, replace the "Rendering …" message with its outcome.
+  const renderingRef = useRef<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    const now = job?.rendering ?? [];
+    const finished = renderingRef.current.filter((r) => !now.some((n) => n.id === r.id));
+    renderingRef.current = now;
+    if (finished.length === 0) return;
+    setMessage(
+      finished
+        .map((r) => {
+          const pic = pictures.find((p) => p.id === r.id);
+          return pic ? `${r.label}: ${pic.status}` : `${r.label}: finished (not in this tab, or it failed: see the backend log)`;
+        })
+        .join(" · "),
+    );
+  }, [job, pictures]);
 
   /** Lines are KU ids or Vocab words; words are resolved by exact match via KU search. */
   const resolveKuIds = async (lines: string[]): Promise<{ ids: string[]; missing: string[] }> => {
@@ -107,25 +132,29 @@ export default function PicturesAdminPage() {
 
   /** Attach a hand-made image (e.g. a diagram) to one word. */
   const upload = async () => {
-    if (!uploadFile || !uploadWord.trim()) return;
+    if (!uploadFile || (uploadKind !== "none" && !uploadWord.trim())) return;
     setUploading(true);
     try {
-      const { ids, missing } = await resolveKuIds([uploadWord.trim()]);
-      if (!ids.length) {
-        setMessage(`No Vocab found for: ${missing.join(", ")}`);
-        return;
-      }
       const form = new FormData();
       form.append("file", uploadFile);
-      form.append("kuId", ids[0]);
-      if (uploadUsage.trim()) form.append("usage", uploadUsage.trim());
+      form.append("kind", uploadKind);
+      if (uploadKind !== "none") {
+        const kuId = await resolveKuId(uploadWord, uploadKind === "ku");
+        if (!kuId) {
+          setMessage(`No ${uploadKind === "ku" ? "KU" : "Vocab"} found for: ${uploadWord.trim()}`);
+          return;
+        }
+        form.append("kuId", kuId);
+      }
+      // The second field is the usage for a word, or the description of a free-standing image.
+      if (uploadUsage.trim()) form.append(uploadKind === "none" ? "note" : "usage", uploadUsage.trim());
       const res = await apiFetch("/api/pictures/upload", { method: "POST", body: form });
       if (!res.ok) {
         setMessage(`Upload failed: ${(await res.json().catch(() => ({}))).message ?? res.status}`);
         return;
       }
       const pic = (await res.json()) as Picture;
-      setMessage(`Uploaded for ${pic.content} (${pic.usage})`);
+      setMessage(`Uploaded: ${pic.content}${pic.usage ? ` (${pic.usage})` : ""}`);
       setUploadWord("");
       setUploadUsage("");
       setUploadFile(null);
@@ -169,7 +198,7 @@ export default function PicturesAdminPage() {
     try {
       const res =
         action === "regenerate"
-          ? await apiFetch(`/api/pictures/${pic.id}/regenerate`, { method: "POST" })
+          ? await apiFetch(`/api/pictures/${pic.id}/redraw`, { method: "POST" })
           : await apiFetch(`/api/pictures/${pic.id}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
@@ -191,11 +220,12 @@ export default function PicturesAdminPage() {
     <div className="max-w-6xl mx-auto px-4 py-8 text-shodo-ink">
       <h1 className="text-2xl font-bold mb-1">Picture Cards</h1>
       <p className="text-sm text-shodo-ink-faint mb-6">
-        Text-free illustrations for audio-first vocab. Generated images that pass the automatic text check are approved;
-        the rest wait here for review.
+        Text-free illustrations: picture cards for word usages, whole-KU pictures and diagrams, and free-standing
+        assets. Generated images that pass the automatic text check are approved; the rest wait here for review.
       </p>
 
-      <section className="mb-8 grid gap-4 md:grid-cols-2">
+      <Section title="Generate in bulk" hint="Picture cards for word usages, drafted and drawn automatically." first>
+      <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4">
           <label htmlFor="picture-words" className="block text-sm font-semibold mb-2">
             Generate for words or KU ids
@@ -251,27 +281,57 @@ export default function PicturesAdminPage() {
             </p>
           )}
         </div>
-        <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4 md:col-span-2">
-          <p className="text-sm font-semibold mb-1">Upload a hand-made image</p>
-          <p className="text-xs text-shodo-ink-faint mb-3">
-            For words a generated picture can&apos;t show (e.g. a diagram). Uploaded images are approved straight away and
-            are never redrawn or replaced by generation.
-          </p>
+      </div>
+      </Section>
+
+      <Section
+        title="Make one picture"
+        hint="Choose what it's of, draft a brief, adjust it, then render. A note steers the brief; for a free-standing picture the note is the description."
+      >
+        <NewPicturePanel
+          onStarted={(m) => {
+            setMessage(m);
+            load(); // picks up job.rendering, which starts the polling
+          }}
+        />
+      </Section>
+
+      <Section
+        title="Upload"
+        hint="For what a generated picture can't show (e.g. a diagram). Uploads are approved straight away and never redrawn or replaced by generation."
+      >
+        <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4">
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Upload for"
+              value={uploadKind}
+              onChange={(e) => setUploadKind(e.target.value as SubjectKind)}
+              className="rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
+            >
+              {(Object.keys(SUBJECT_LABEL) as SubjectKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {SUBJECT_LABEL[k]}
+                </option>
+              ))}
+            </select>
+            {uploadKind !== "none" && (
             <input
               aria-label="Word"
               value={uploadWord}
               onChange={(e) => setUploadWord(e.target.value)}
-              placeholder="Word, e.g. くれる"
+              placeholder={uploadKind === "ku" ? "KU content or id" : "Word, e.g. くれる"}
               className="w-40 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
             />
+            )}
+            {uploadKind !== "ku" && (
             <input
               aria-label="Usage (optional)"
               value={uploadUsage}
               onChange={(e) => setUploadUsage(e.target.value)}
-              placeholder="Usage (optional; defaults to the first)"
+              placeholder={uploadKind === "none" ? "Description (optional)" : "Usage (optional; defaults to the first)"}
               className="w-72 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
             />
+            )}
             <input
               key={fileInputKey}
               aria-label="Image file"
@@ -283,16 +343,22 @@ export default function PicturesAdminPage() {
             <button
               type="button"
               onClick={upload}
-              disabled={uploading || !uploadFile || !uploadWord.trim()}
+              disabled={uploading || !uploadFile || (uploadKind !== "none" && !uploadWord.trim())}
               className="rounded bg-shodo-ink px-4 py-2 text-sm font-semibold text-shodo-paper disabled:opacity-40"
             >
               {uploading ? "Uploading…" : "Upload"}
             </button>
           </div>
         </div>
-      </section>
+      </Section>
 
+      <Section title="Library" hint="Every picture, by review status.">
       {message && <p className="mb-4 text-sm text-shodo-persimmon">{message}</p>}
+      {(job?.rendering?.length ?? 0) > 0 && (
+        <p className="mb-4 text-sm text-shodo-ink-light">
+          Rendering: {job?.rendering.map((r) => r.label).join(" · ")}
+        </p>
+      )}
 
       <div className="flex border-b border-shodo-ink/10 mb-6">
         {TABS.map((t) => (
@@ -317,7 +383,7 @@ export default function PicturesAdminPage() {
                 <img
                   src={`/api/pictures/${pic.id}/image?v=${encodeURIComponent(pic.file)}`}
                   alt={`${pic.content}: ${pic.usage}`}
-                  className="w-full aspect-square object-cover bg-[#f9f7f2]"
+                  className={`w-full aspect-square bg-[#f9f7f2] ${pic.style === "scene" ? "object-contain" : "object-cover"}`}
                 />
               ) : (
                 <div className="w-full aspect-square flex items-center justify-center text-sm text-shodo-ink-faint">
@@ -336,7 +402,11 @@ export default function PicturesAdminPage() {
                     <span className={`rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[pic.status]}`}>{pic.status}</span>
                   </span>
                 </div>
-                <p className="text-sm text-shodo-ink-light">{pic.usage}</p>
+                <p className="text-sm text-shodo-ink-light">
+                  {pic.subject?.kind === "ku" ? "Whole KU" : pic.subject?.kind === "none" ? "Free-standing" : pic.usage}
+                  {pic.style === "scene" && <span className="text-shodo-ink-faint"> · scene</span>}
+                </p>
+                {pic.note && <p className="text-xs text-shodo-ink-faint">Note: {pic.note}</p>}
                 {pic.staleUsage && (
                   <p className="text-xs text-shodo-persimmon">
                     This usage is no longer in the lesson (relabelled?). Uploads aren&apos;t cleaned up automatically: reject it or upload a replacement.
@@ -369,12 +439,33 @@ export default function PicturesAdminPage() {
                     </button>
                   )}
                 </div>
+                <PictureCardTools
+                  pictureId={pic.id}
+                  canRedraw={pic.origin !== "uploaded"}
+                  disabled={working}
+                  onDone={(m) => {
+                    if (m) setMessage(m);
+                    load();
+                  }}
+                />
               </div>
             </div>
             );
           })}
         </div>
       )}
+      </Section>
     </div>
+  );
+}
+
+/** A page section: heading, one-line hint, and a rule above it (except the first). */
+function Section({ title, hint, first, children }: { title: string; hint: string; first?: boolean; children: React.ReactNode }) {
+  return (
+    <section className={first ? "mb-10" : "mb-10 border-t border-shodo-ink/15 pt-8"}>
+      <h2 className="text-lg font-bold">{title}</h2>
+      <p className="mb-4 text-sm text-shodo-ink-faint">{hint}</p>
+      {children}
+    </section>
   );
 }

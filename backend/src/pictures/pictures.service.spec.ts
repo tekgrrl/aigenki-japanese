@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BadRequestException } from '@nestjs/common';
-import { PicturesService, usageSources } from './pictures.service';
+import { PicturesService, subjectOf, usageSources } from './pictures.service';
+import { PictureRenderer } from './picture-renderer';
 
 // ─── Minimal in-memory Firestore (only what PicturesService uses) ────────────
 
@@ -91,6 +92,7 @@ describe('PicturesService', () => {
   let dir: string;
   let gemini: {
     generatePictureBrief: jest.Mock;
+    generateFreePictureBrief: jest.Mock;
     generatePicture: jest.Mock;
     checkPictureForText: jest.Mock;
   };
@@ -119,11 +121,12 @@ describe('PicturesService', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pictures-spec-'));
     gemini = {
       generatePictureBrief: jest.fn().mockResolvedValue(okBrief),
+      generateFreePictureBrief: jest.fn().mockResolvedValue(okBrief),
       generatePicture: jest.fn().mockResolvedValue({ data: Buffer.from('img'), mimeType: 'image/png' }),
       checkPictureForText: jest.fn().mockResolvedValue({ hasText: false, where: 'none' }),
     };
     const config = { get: (k: string) => (k === 'PICTURES_DIR' ? dir : undefined) };
-    service = new PicturesService(db as any, gemini as any, config as any);
+    service = new PicturesService(db as any, gemini as any, config as any, new PictureRenderer(gemini as any, config as any));
   });
 
   afterEach(() => {
@@ -541,6 +544,129 @@ describe('PicturesService', () => {
       db.collection('lessons').doc('gram').set(vocabLesson([ex('y', 1)])); // stray Vocab-shaped lesson
       const ids = await (service as any).vocabMissingPictures(10);
       expect(ids).toEqual([KU]);
+    });
+  });
+
+  describe('subjects and fine-grained steps', () => {
+    const doneRendering = () => waitFor(() => service.getJob().rendering.length === 0);
+
+    it('reads a doc without a subject as a Vocab usage picture', () => {
+      expect(subjectOf({ kuId: KU, usage: 'time' })).toEqual({ kind: 'ku-usage', kuId: KU, usage: 'time' });
+      expect(subjectOf({ kuId: null, subject: { kind: 'none' } })).toEqual({ kind: 'none' });
+    });
+
+    it('drafts a brief for a usage, passing the note, and saves nothing', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      const brief = await service.draftBrief({ kind: 'ku-usage', kuId: KU, usage: 'Cost' }, 'Fude on the left');
+      expect(brief).toEqual(okBrief);
+      expect(gemini.generatePictureBrief).toHaveBeenCalledWith(
+        expect.objectContaining({ usage: 'cost', sentence: '文2。', note: 'Fude on the left' }),
+        KU,
+      );
+      expect(pictures()).toEqual([]);
+    });
+
+    it('refuses a usage the word does not have, listing the real ones', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      await expect(service.draftBrief({ kind: 'ku-usage', kuId: KU, usage: 'weight' })).rejects.toThrow(/time, cost/);
+    });
+
+    it('makes a whole-KU picture for a Grammar KU in the background', async () => {
+      db.collection('knowledge-units').doc('g1').set({ type: 'Grammar', content: '〜てあげる', data: { title: 'Doing a favour' } });
+      const { id } = await service.create({ subject: { kind: 'ku', kuId: 'g1' } });
+      expect(service.getJob().rendering.map(r => r.id)).toEqual([id]);
+      await doneRendering();
+      const p = pictures().find(x => x.id === id)!;
+      expect(p).toMatchObject({ kuId: 'g1', usage: '', status: 'approved', subject: { kind: 'ku', kuId: 'g1' } });
+      expect(gemini.generatePictureBrief).toHaveBeenCalledWith(expect.objectContaining({ definition: 'Doing a favour' }), 'g1', '/pictures/brief-ku');
+      expect(fs.existsSync(path.join(dir, p.file))).toBe(true);
+    });
+
+    it('makes a free-standing picture from a note, with no KU', async () => {
+      const { id } = await service.create({ note: 'Fude waving hello' });
+      await doneRendering();
+      expect(gemini.generateFreePictureBrief).toHaveBeenCalledWith('Fude waving hello');
+      expect(pictures().find(x => x.id === id)).toMatchObject({ kuId: null, subject: { kind: 'none' }, note: 'Fude waving hello' });
+    });
+
+    it('a free-standing picture needs a description', async () => {
+      await expect(service.create({})).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('renders a given brief as-is (no brief call) in the requested style', async () => {
+      const brief = { ...okBrief, scene: 'a quiet station platform' };
+      const { id } = await service.create({ brief, style: 'scene' });
+      await doneRendering();
+      expect(gemini.generateFreePictureBrief).not.toHaveBeenCalled();
+      expect(gemini.generatePicture).toHaveBeenCalledWith(brief, [], id, 'scene');
+      expect(pictures().find(x => x.id === id)).toMatchObject({ style: 'scene', brief });
+    });
+
+    it('rejects an incomplete brief', async () => {
+      await expect(service.create({ brief: { scene: '' } as any, note: 'x' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('batch generation ignores whole-KU pictures on the same word (no cover, no cleanup)', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      db.collection('pictures').doc('whole').set({
+        kuId: KU, usage: '', subject: { kind: 'ku', kuId: KU }, status: 'approved', file: 'whole-1.png', source: { usage: '' }, attempts: [], createdAt: ts,
+      });
+      fs.writeFileSync(path.join(dir, 'whole-1.png'), 'w');
+      const { pictures: made } = await service.generateForKu(KU, true);
+      expect(made.map(p => p.usage)).toEqual(['time']);
+      expect(pictures().some(p => p.id === 'whole')).toBe(true);
+    });
+
+    it('redraws with an edited brief without a brief call', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'needs-review');
+      const brief = { ...okBrief, scene: 'edited scene' };
+      await service.redraw('p1', { brief });
+      await waitFor(() => service.getJob().redrawing.length === 0);
+      expect(gemini.generatePictureBrief).not.toHaveBeenCalled();
+      expect(pictures().find(p => p.id === 'p1')).toMatchObject({ brief, status: 'approved', usage: 'time' });
+    });
+
+    it('redraws with a note that steers the new brief', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'needs-review');
+      await service.redraw('p1', { note: 'show a clock' });
+      await waitFor(() => service.getJob().redrawing.length === 0);
+      expect(gemini.generatePictureBrief).toHaveBeenCalledWith(expect.objectContaining({ usage: 'time', note: 'show a clock' }), KU);
+      expect(pictures().find(p => p.id === 'p1')?.note).toBe('show a clock');
+    });
+
+    it('detaches a picture and re-attaches it to a usage', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      existingPicture('p1', 'time', 'approved');
+      const detached = await service.attach('p1', { kind: 'none' });
+      expect(detached).toMatchObject({ kuId: null, usage: '', subject: { kind: 'none' }, status: 'approved', file: 'p1-1.png' });
+      const back = await service.attach('p1', { kind: 'ku-usage', kuId: KU, usage: 'cost' });
+      expect(back).toMatchObject({ kuId: KU, usage: 'cost', subject: { kind: 'ku-usage', kuId: KU, usage: 'cost' } });
+      await expect(service.attach('p1', { kind: 'ku-usage', kuId: KU, usage: 'weight' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('re-runs the text check and records it', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'approved');
+      gemini.checkPictureForText.mockResolvedValue({ hasText: true, where: 'a clock face' });
+      expect(await service.check('p1')).toEqual({ hasText: true, where: 'a clock face' });
+      expect(pictures().find(p => p.id === 'p1')?.attempts).toEqual([{ hasText: true, where: 'a clock face' }]);
+    });
+
+    it('never offers whole-KU or free-standing pictures as distractors', async () => {
+      db.collection('pictures').doc('a').set({ kuId: 'other', usage: '', subject: { kind: 'ku', kuId: 'other' }, status: 'approved', file: 'a.png' });
+      db.collection('pictures').doc('b').set({ kuId: null, usage: '', subject: { kind: 'none' }, status: 'approved', file: 'b.png' });
+      db.collection('pictures').doc('c').set({ kuId: 'third', usage: 'x', status: 'approved', file: 'c.png' });
+      expect((await service.choices('u1', KU, 3)).map(c => c.id)).toEqual(['c']);
+    });
+
+    it('uploads a diagram for a whole Grammar KU', async () => {
+      db.collection('knowledge-units').doc('g1').set({ type: 'Grammar', content: '〜てくれる', data: { title: 'Receiving a favour' } });
+      const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('d')]);
+      const p = await service.upload('g1', undefined, { buffer: PNG, mimetype: 'image/png', size: PNG.length }, 'ku');
+      expect(p).toMatchObject({ kuId: 'g1', origin: 'uploaded', status: 'approved', subject: { kind: 'ku', kuId: 'g1' } });
+      expect(fs.existsSync(path.join(dir, p.file!))).toBe(true);
     });
   });
 });

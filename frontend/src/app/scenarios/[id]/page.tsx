@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, use, useRef, useMemo } from "react";
+import { useState, useEffect, use, useRef, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Scenario, ChatMessage, ScenarioAttempt } from "@/types/scenario";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { Volume2, Mic, MicOff } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import ScenePicture from "@/components/scenarios/ScenePicture";
 
 const API_BASE_URL = "http://localhost:3000/api";
 
@@ -106,6 +107,14 @@ export default function ScenarioPage({
 
   useEffect(() => {
     fetchScenario();
+  }, [id]);
+
+  // After a scene is drawn, pick up just the new picture (a full refetch would also reset chat state).
+  const refreshScenePicture = useCallback(async () => {
+    const res = await apiFetch(`${API_BASE_URL}/scenarios/${id}`);
+    if (!res.ok) return;
+    const data = (await res.json()) as Scenario;
+    setScenario((prev) => (prev ? { ...prev, setting: { ...prev.setting, picture: data.setting.picture } } : prev));
   }, [id]);
 
   const fetchScenario = async () => {
@@ -475,9 +484,12 @@ export default function ScenarioPage({
           <p>
             <strong>👥 Goal:</strong> {scenario.setting.goal}
           </p>
-          <p className="mt-2 text-slate-500 italic text-xs border-l-2 border-slate-300 pl-2">
-            Visual Context: {scenario.setting.visualPrompt}
-          </p>
+          <ScenePicture
+            scenarioId={id}
+            visualPrompt={scenario.setting.visualPrompt}
+            file={scenario.setting.picture?.file}
+            onDrawn={refreshScenePicture}
+          />
         </div>
       </header>
 

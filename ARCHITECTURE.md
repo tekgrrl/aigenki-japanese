@@ -197,6 +197,7 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 | `users` | Yes — doc path `users/{uid}` | `UserRoot` document — single source of truth for `stats`, `tutorContext`, and `preferences` |
 | `concepts` | **No** | Global grammar concept corpus — no `userId` on docs; `createdBy` field for audit only |
 | `api-logs` | **No** | Centralised logging; no user field |
+| `pictures` | **No** | Global picture catalogue (metadata only; image files on local disk in `PICTURES_DIR`). `subject` says what a picture is of; see Pictures below. Scenario scene images are NOT here: they're user data on `users/{uid}/scenarios/{id}.setting.picture`. |
 
 ---
 
@@ -753,3 +754,26 @@ Live `simulate`-state roleplay conversations previously produced only a star rat
 - **Known quirk, not a code bug**: `GeminiService.generateWithTools`'s final untooled turn can occasionally return `!finalResponse.text` (thrown as `"Empty response from Gemini on final turn"`) even on a well-formed request — confirmed via Google AI Studio's request logs showing no failed/rejected calls around the failure time, and confirmed transient by simply re-running `advanceState` against the same unchanged conversation, which succeeded immediately. Treat as retry-and-move-on, not a signal to debug the extraction prompt itself. `advanceState` has no guard against re-running on an already-`completed` scenario — calling it again re-generates the evaluation and retries extraction fresh, which is what the retry relies on. The frontend's own "Advance" button does no-op when already `completed`, so a manual re-trigger needs the backend call directly (or, going forward, the scenario page's own replay button, which hits the same endpoint).
 - **Independent bug found, not fixed (pre-existing, unrelated to this POC) — GitHub #213**: `getInitialChatHistory` (`scenarios.service.ts:585-625`) decides whether to seed the AI's opening line by fuzzy-matching `dialogue[0].speaker` against `scenario.roles.ai` via case-insensitive substring inclusion. Fails silently (returns `[]`, no error) whenever the two are in different languages — e.g. dialogue speaker `"店員"` vs `roles.ai: "Shop Assistant"` — which can happen on any scenario since the app's own `ALLOWED_AI_ROLES` list mixes English and Japanese variants of the same roles and nothing constrains the model to keep `dialogue[].speaker` consistent with whatever it chose for `roles`.
 - **Test-account hygiene (2026-08-06)**: testing this POC directly against real accounts (both the personal account above and the `+aigenki1/4/8@` Firebase Auth test accounts from earlier model-eval-harness work) turned out to be risky for data continuity. Going forward, use `backend/scripts/create-test-user.ts` / `delete-test-user.ts` instead — fully synthetic, disposable `users/{uid}` docs (no real Firebase Auth signup needed) driven via the app's existing dev-auth-bypass (`NEXT_PUBLIC_DEV_SKIP_AUTH=true NEXT_PUBLIC_DEV_USER_ID=<uid>`), deleted recursively when done.
+
+## Pictures (assets → learning items)
+
+Text-free illustrations, built from small steps that any content type can combine (`backend/src/pictures/`):
+
+1. **Brief.** A text model decides what to draw. `PicturesService.draftBrief(subject, note?)` drafts one (route `/pictures/brief`, `/pictures/brief-ku` or `/pictures/brief-free`); `note` is an editor instruction that wins over the prompt's guidance. A brief can also come from elsewhere: scenarios already carry one (`setting.visualPrompt`), and an edited brief can be passed in directly.
+2. **Render.** `PictureRenderer.render(brief, { style })` produces a checked image file: up to 3 attempts, re-trying while the text check finds writing. It knows nothing about KUs or Firestore. Styles (`prompts/picture.prompts.ts`): `card` (1:1, cream paper, optional Fude/Suzuri cast) and `scene` (16:9, soft full background).
+3. **Store and attach.** A global `pictures` doc records the subject, brief, file, attempts and review status. Its `subject` is one of:
+   - `ku-usage`: one usage of a Vocab word. These are the picture cards. Docs without a `subject` are this kind (`subjectOf()`).
+   - `ku`: a whole KU of any type, or a Concept, e.g. a diagram.
+   - `none`: a free-standing asset.
+
+   `PATCH /pictures/:id {subject}` re-attaches or detaches a picture. New subject kinds extend the union, plus a brief branch.
+4. **Review.** The status is `approved`, `needs-review`, `rejected` or `unpicturable`. Uploaded pictures (`origin: 'uploaded'`) are authoritative and are never redrawn or auto-replaced.
+
+**Callers:**
+- **The admin page:** `/admin/pictures`, a step-by-step "New picture" panel plus "Redraw with note" and "Re-attach".
+- **The HTTP API:** `POST /pictures/briefs`, `POST /pictures`, `POST /pictures/:id/redraw`, `POST /pictures/:id/check`, `PATCH /pictures/:id`, `POST /pictures/upload`.
+- **The CLI:** `backend/scripts/pictures.ts`, which calls the same service in-process.
+- **Batch generation:** `generateForKu` composes the same steps for every usage of a word.
+- **Scenarios:** `ScenariosService.startScenePicture` renders `setting.visualPrompt` in the `scene` style and stores it on the user's scenario doc.
+
+Learner-facing reads only return approved pictures. Picture-choice distractors only use `ku-usage` pictures.

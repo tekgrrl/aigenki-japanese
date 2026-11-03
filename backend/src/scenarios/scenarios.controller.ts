@@ -9,8 +9,10 @@ import {
   HttpStatus,
   ParseIntPipe,
   BadRequestException,
-  UseGuards
+  UseGuards,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ScenariosService } from './scenarios.service';
 import { GenerateScenarioDto, ImportScenarioDto, ChatTurnDto, ResetSessionDto } from '../types/scenario';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -79,6 +81,27 @@ export class ScenariosController {
   @Get(':id/ku-status')
   async getKuStatus(@UserId() uid: string, @Param('id') id: string) {
     return this.scenariosService.getKuStatus(uid, id);
+  }
+
+  /** Draw the scenario's setting in the background (explicit only: it costs an image call). */
+  @Post(':id/picture')
+  async drawScene(@UserId() uid: string, @Param('id') id: string) {
+    return this.scenariosService.startScenePicture(uid, id);
+  }
+
+  @Get(':id/picture/status')
+  async sceneStatus(@UserId() uid: string, @Param('id') id: string) {
+    return this.scenariosService.getSceneStatus(uid, id);
+  }
+
+  /** The scene image (authenticated: fetched via apiFetch, shown as a blob URL). */
+  @Get(':id/picture')
+  async scenePicture(@UserId() uid: string, @Param('id') id: string, @Res() res: Response) {
+    const file = await this.scenariosService.scenePicturePath(uid, id);
+    if (!file) throw new HttpException('No scene picture', HttpStatus.NOT_FOUND);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(file);
   }
 
   @Get(':id')
