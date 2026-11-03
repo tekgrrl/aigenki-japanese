@@ -202,12 +202,15 @@ export class ReviewProgressService {
     const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
     if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
 
-    // A component kanji enrolled only through this word, and no longer used by the rebuilt
-    // sequence or any other word, would otherwise sit in the learning queue with no facets.
+    // A component kanji enrolled through this word (its UKU's source) that has no facets
+    // left after the rebuild would otherwise sit in the learning queue. Kanji enrolled any
+    // other way (directly, a flag, a scenario, another word) are left alone.
     await Promise.all(
       Array.from(countByKuId.keys())
         .filter(target => target !== kuId)
         .map(async target => {
+          const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, target);
+          if (kanjiUku?.source?.type !== 'lesson' || kanjiUku.source.id !== kuId) return;
           const [byTarget, bySequence] = await Promise.all([
             this.facetsColRef(uid).where('kuId', '==', target).limit(1).get(),
             this.facetsColRef(uid).where('source.id', '==', target).limit(1).get(),
