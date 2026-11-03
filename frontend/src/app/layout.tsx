@@ -5,7 +5,20 @@ import Header from "@/components/Header"; // Import the new Header
 import { AuthProvider } from "@/providers/AuthProvider";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
-const inter = Inter({ subsets: ["latin"] });
+// Inter has no Japanese glyphs. Name Japanese system fonts as the fallback so kana/kanji
+// never fall back to a Chinese CJK font (which centres 、 and 。 in their cell).
+const inter = Inter({
+  subsets: ["latin"],
+  fallback: [
+    "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN",
+    "Noto Sans CJK JP",
+    "Noto Sans JP",
+    "Yu Gothic",
+    "Meiryo",
+    "sans-serif",
+  ],
+});
 
 export const metadata: Metadata = {
   title: "AIGENKI - Personal Knowledge Graph",

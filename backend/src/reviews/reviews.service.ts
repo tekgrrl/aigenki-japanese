@@ -151,6 +151,8 @@ export class ReviewsService {
                 // Vocab word's), so kuId alone silently pointed advancement checks
                 // at the wrong (sequence-less) KU. See issue #244.
                 kuId: facetData.source?.id ?? facetData.kuId,
+                // The KU the facet tests; differs from kuId for Kanji-Component-* facets.
+                targetKuId: facetData.kuId,
                 facetType: facetData.facetType,
                 prevConsecutiveFailures,
                 newConsecutiveFailures,
@@ -167,6 +169,10 @@ export class ReviewsService {
             void (async () => {
                 try {
                     await this.learningProgressService.recomputeAndCache(uid, txResult.kuId);
+                    // A Kanji-Component facet also counts toward the component kanji's own status.
+                    if (txResult.targetKuId && txResult.targetKuId !== txResult.kuId) {
+                        await this.learningProgressService.recomputeAndCache(uid, txResult.targetKuId);
+                    }
                 } catch (e) {
                     this.logger.error(`recomputeAndCache failed uid=${uid} kuId=${txResult.kuId}`, e);
                 }

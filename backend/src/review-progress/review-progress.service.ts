@@ -202,6 +202,23 @@ export class ReviewProgressService {
     const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
     if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
 
+    // A component kanji enrolled through this word (its UKU's source) that has no facets
+    // left after the rebuild would otherwise sit in the learning queue. Kanji enrolled any
+    // other way (directly, a flag, a scenario, another word) are left alone.
+    await Promise.all(
+      Array.from(countByKuId.keys())
+        .filter(target => target !== kuId)
+        .map(async target => {
+          const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, target);
+          if (kanjiUku?.source?.type !== 'lesson' || kanjiUku.source.id !== kuId) return;
+          const [byTarget, bySequence] = await Promise.all([
+            this.facetsColRef(uid).where('kuId', '==', target).limit(1).get(),
+            this.facetsColRef(uid).where('source.id', '==', target).limit(1).get(),
+          ]);
+          if (byTarget.empty && bySequence.empty) await this.userKnowledgeUnitsService.remove(uid, target);
+        }),
+    );
+
     this.logger.log(
       `resetSequence uid=${uid} kuId=${kuId}: deleted ${docs.size} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
     );
@@ -519,8 +536,11 @@ export class ReviewProgressService {
     if (count === 0) return 0;
 
     await batch.commit();
+    // The word counts every facet in its sequence, including Kanji-Component-* ones that
+    // target a component kanji's KU (which counts them too); same rule as UKU status.
+    const increments = new Map(facetCountByKuId).set(kuId, count);
     await Promise.all(
-      Array.from(facetCountByKuId.entries()).map(([targetKuId, n]) =>
+      Array.from(increments.entries()).map(([targetKuId, n]) =>
         this.userKnowledgeUnitsService.update(uid, targetKuId, {
           facet_count: FieldValue.increment(n),
         }),

@@ -74,6 +74,13 @@ export class UserKnowledgeUnitsService {
     return this._joinKUs(uid, snapshot);
   }
 
+  async remove(uid: string, kuId: string): Promise<void> {
+    const uku = await this.findByKuId(uid, kuId);
+    if (!uku) return;
+    await this.userKusRef(uid).doc(uku.id).delete();
+    this.logger.log(`Removed UKU ${uku.id} for uid=${uid} kuId=${kuId}`);
+  }
+
   async update(uid: string, kuId: string, data: Record<string, any>): Promise<void> {
     const uku = await this.findByKuId(uid, kuId);
     if (!uku) {
