@@ -221,8 +221,7 @@ export class ReviewProgressService {
    * When a review unlocks a stage (startAtSrsStage 0) on a word that's still known (see
    * isStillKnown), the new facets start at ALREADY_KNOWN_STAGE but are due straight away:
    * the word is known, its new facet just hasn't been tested yet.
-   */
-  /**
+   *
    * Guard clauses below are deliberately split into two tiers, not treated
    * uniformly:
    *  - "Normal flow" no-ops (terminal stage reached, not every facet ready
@@ -262,7 +261,9 @@ export class ReviewProgressService {
     }
     if (currentStageDef.unlockAtSrsStage === null) return; // terminal stage — normal, common, not logged
 
-    const stageFacets = await this.getFacetsAtStage(uid, kuId, uku.currentStage);
+    // One read serves both the readiness check and isStillKnown below.
+    const kuFacets = await this.getFacetsForKu(uid, kuId);
+    const stageFacets = kuFacets.filter(f => f.sequenceStage === uku.currentStage);
     if (stageFacets.length === 0) {
       this.logger.warn(`checkAndAdvanceStage: UKU says currentStage=${uku.currentStage} for kuId=${kuId} but zero facets exist at that stage — sequence is stuck with nothing left to review`);
       return;
@@ -299,7 +300,7 @@ export class ReviewProgressService {
 
     // Same per-user-dedup concern as initializeSequence: nextStage looked applicable
     // from lesson data alone but may still produce zero facets for this user.
-    const knownUnlock = startAtSrsStage === 0 && isStillKnown(await this.getFacetsForKu(uid, kuId));
+    const knownUnlock = startAtSrsStage === 0 && isStillKnown(kuFacets);
     const result = await this.createFacetsSkippingEmptyStages(
       uid, kuId, ku, lesson, sequence, nextStage,
       knownUnlock ? ALREADY_KNOWN_STAGE : startAtSrsStage,
@@ -379,7 +380,7 @@ export class ReviewProgressService {
   }
 
   /**
-   * Returns all facets belonging to a given sequence stage of a KU's lesson.
+   * Returns all facets in a KU's sequence, every stage.
    * Queries by source.id (the lesson/sequence lineage), not kuId — some facets
    * (e.g. Kanji-Component-*) target a different KU's content than the one whose
    * sequence they gate, so kuId alone can't identify stage membership.
@@ -389,6 +390,7 @@ export class ReviewProgressService {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() }) as ReviewFacet);
   }
 
+  /** The facets belonging to one sequence stage (see getFacetsForKu). */
   private async getFacetsAtStage(
     uid: string,
     kuId: string,
