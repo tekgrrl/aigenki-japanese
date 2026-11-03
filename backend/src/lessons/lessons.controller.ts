@@ -127,6 +127,13 @@ export class LessonsController {
     return this.lessonsService.labelVocabUsages(kuId);
   }
 
+  /** Lazy furigana for a Grammar lesson's examples (used by the Start Learning slideshow). */
+  @Post(':kuId/furigana')
+  async addFurigana(@Param('kuId') kuId: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    return this.lessonsService.addGrammarFurigana(kuId);
+  }
+
   /** Admin: relabel a Vocab lesson's example usages even if already labelled. */
   @Post(':kuId/relabel-usages')
   @UseGuards(AdminGuard)

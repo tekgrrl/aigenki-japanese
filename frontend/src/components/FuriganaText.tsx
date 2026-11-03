@@ -10,7 +10,8 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({ text, rtClassName = 
   // Regex to find Kanji[Reading] pattern
   // Capture group 1: Kanji range
   // Capture group 2: Kana range (Hiragana/Katakana)
-  const regex = /([\u4e00-\u9faf]+)\[([ぁ-んァ-ン]+)\]/g;
+  // (々 repeats the previous kanji, e.g. 人々; ー appears in some readings.)
+  const regex = /([\u4e00-\u9faf\u3005]+)\[([ぁ-んァ-ンー]+)\]/g;
 
   // split with capturing groups results in an array pattern:
   // [ "TextBefore", "Kanji", "Reading", "TextBetween", "Kanji", "Reading", "TextAfter" ]

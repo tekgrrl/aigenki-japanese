@@ -93,6 +93,7 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
   if (!res.ok) throw new Error("Failed to generate lesson");
   const lesson: Lesson = await res.json();
   if (lesson.type === "Vocab") await ensureUsageLabels(lesson as VocabLesson, item.kuId);
+  if (lesson.type === "Grammar") await ensureGrammarFurigana(lesson as GrammarLesson, item.kuId);
   return lesson;
 }
 
@@ -120,6 +121,26 @@ async function ensureUsageLabels(vl: VocabLesson, kuId: string) {
     }
   } catch (e) {
     console.warn(`[lesson-slides] usage labelling failed for ${vl.vocab}`, e);
+  }
+}
+
+/** Grammar examples were generated without readings: fill them in once (saved on the lesson). */
+async function ensureGrammarFurigana(gl: GrammarLesson, kuId: string) {
+  const examples = gl.examples ?? [];
+  if (examples.length === 0 || examples.every((e) => e.furigana)) return;
+  try {
+    // Own timeout, like usage labelling: never fail a lesson that has already loaded.
+    const res = await apiFetch(`/api/lessons/${kuId}/furigana`, {
+      method: "POST",
+      signal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
+    });
+    if (!res.ok) return;
+    const { furigana } = (await res.json()) as { furigana: (string | null)[] };
+    if (Array.isArray(furigana) && furigana.length === examples.length) {
+      gl.examples = examples.map((e, i) => ({ ...e, furigana: furigana[i] ?? e.furigana }));
+    }
+  } catch (e) {
+    console.warn(`[lesson-slides] furigana failed for ${gl.pattern}`, e);
   }
 }
 
@@ -481,7 +502,7 @@ function GrammarExampleSlide({ loaded, exampleIdx }: { loaded: LoadedItem; examp
           <span className="text-xs text-shodo-ink-faint italic">{ex.context}</span>
         )}
       </div>
-      <p className="text-3xl text-shodo-ink leading-relaxed">{ex.japanese}</p>
+      <p className="text-3xl text-shodo-ink leading-relaxed"><FuriganaText text={ex.furigana ?? ex.japanese} /></p>
       <p className="text-xl text-shodo-ink-light mt-2">{ex.english}</p>
     </div>
   );

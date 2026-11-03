@@ -268,6 +268,8 @@ export interface GrammarLesson {
     accepted_alternatives: string[];
     /** Standalone vocab words in this sentence worth flagging via "I don't know this". */
     learnableTerms?: { term: string; surfaceForm: string; reading: string; meaning: string }[];
+    /** `japanese` with furigana markup, display only (backfilled lazily by the backend). */
+    furigana?: string;
   }[];
 }
 

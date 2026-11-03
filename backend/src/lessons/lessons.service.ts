@@ -288,6 +288,50 @@ export class LessonsService {
     return { usages, saved: true };
   }
 
+  /**
+   * Lazy furigana for a Grammar lesson's examples (they were generated without readings).
+   * Each annotation must strip back to its sentence exactly, or that example stays plain.
+   * Idempotent: examples that already have `furigana` aren't re-annotated.
+   */
+  async addGrammarFurigana(kuId: string): Promise<{ furigana: (string | null)[]; saved: boolean }> {
+    const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
+    const doc = await lessonRef.get();
+    if (!doc.exists) throw new NotFoundException('Lesson not found');
+    const lesson = doc.data() as GrammarLesson;
+    if (lesson.type !== 'Grammar') throw new BadRequestException('Only Grammar lessons are annotated here');
+    const examples = lesson.examples ?? [];
+    const current = examples.map(e => e.furigana ?? null);
+    const missing = examples.map((e, i) => (e.furigana ? -1 : i)).filter(i => i >= 0);
+    if (missing.length === 0) return { furigana: current, saved: false };
+
+    let annotated: string[];
+    try {
+      annotated = await this.geminiService.addFurigana(missing.map(i => examples[i].japanese), kuId);
+    } catch (e) {
+      this.logger.error(`Furigana failed for Grammar lesson ${kuId}`, e);
+      return { furigana: current, saved: false };
+    }
+    const result = [...current];
+    missing.forEach((exIdx, k) => {
+      const ok = isValidFurigana(examples[exIdx].japanese, annotated[k]);
+      if (!ok) this.logger.warn(`Furigana rejected for ${kuId} example ${exIdx}: ${annotated[k]}`);
+      result[exIdx] = ok ? annotated[k] : null;
+    });
+
+    // Only write if the examples are still the ones annotated (a regenerate may have run).
+    const written = await this.db.runTransaction(async tx => {
+      const fresh = (await tx.get(lessonRef)).data() as GrammarLesson | undefined;
+      const freshEx = fresh?.examples ?? [];
+      if (!fresh || freshEx.length !== examples.length || freshEx.some((e, i) => e.japanese !== examples[i].japanese)) return false;
+      tx.update(lessonRef, {
+        examples: freshEx.map((e, i) => (result[i] && !e.furigana ? { ...e, furigana: result[i] } : e)),
+      });
+      return true;
+    });
+    if (!written) this.logger.warn(`Examples for Grammar lesson ${kuId} changed during furigana; not saved`);
+    return { furigana: result, saved: written };
+  }
+
   private async writeGlobalLesson(kuId: string, updates: Record<string, any>): Promise<void> {
     if (Object.keys(updates).length === 0) return;
 
@@ -612,4 +656,16 @@ export class LessonsService {
       this.logger.error(`Lesson validation failed for kuId=${kuId}`, err);
     }
   }
+}
+
+/**
+ * A furigana annotation is valid when removing its [reading]s gives back the sentence
+ * exactly, and every reading is hiragana directly after kanji (what FuriganaText renders).
+ */
+export function isValidFurigana(sentence: string, annotated: string | undefined): boolean {
+  if (typeof annotated !== 'string') return false;
+  if (annotated.replace(/\[[^\]]*\]/g, '') !== sentence) return false;
+  const brackets = annotated.match(/\[[^\]]*\]/g) ?? [];
+  const valid = annotated.match(/[\u4e00-\u9faf\u3005]\[[ぁ-ゖー]+\]/g) ?? [];
+  return brackets.length === valid.length;
 }
