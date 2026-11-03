@@ -25,16 +25,23 @@ export interface LoadedItem {
 }
 
 /**
- * Audio-first slides (#246): the word slide, then one slide per usage, each pairing the
- * usage's picture with that usage's example sentence (heard, not shown). A usage without
- * its own picture reuses the first one.
+ * Audio-first slides (#246): the word slide, then one slide per usage that has its own
+ * picture, pairing it with that usage's example sentence (heard, not shown). Usages
+ * without a picture are left out: the word is taught (and tested, by picture-choice) only
+ * through what's pictured, and another usage's picture would teach the wrong meaning.
+ * If no usage matches a picture (labels changed since it was drawn), one slide pairs the
+ * first picture with the first example.
  */
 function audioFirstSlides(loaded: LoadedItem): { picture: PictureRef; example?: NonNullable<VocabLesson["context_examples"]>[number] }[] {
   const vl = loaded.lesson as VocabLesson;
   const pics = loaded.pictures ?? [];
   const examples = vocabExampleSlides(vl);
   const key = (u?: string) => (u ?? "").trim().toLowerCase();
-  return examples.map((ex) => ({ picture: pics.find((p) => key(p.usage) === key(ex.usage)) ?? pics[0], example: ex }));
+  const matched = examples.flatMap((ex) => {
+    const picture = pics.find((p) => key(p.usage) === key(ex.usage));
+    return picture ? [{ picture, example: ex }] : [];
+  });
+  return matched.length > 0 ? matched : [{ picture: pics[0], example: examples[0] }];
 }
 
 export const isAudioFirst = (loaded: LoadedItem) => loaded.lesson.type === "Vocab" && (loaded.pictures?.length ?? 0) > 0;
