@@ -13,6 +13,7 @@ import { stripFurigana } from "@/lib/furigana";
 import { FuriganaText } from "@/components/FuriganaText";
 import SentenceAssemblyCard from "@/components/review/SentenceAssemblyCard";
 import SentenceClozeCard from "@/components/review/SentenceClozeCard";
+import PictureChoiceCard from "@/components/review/PictureChoiceCard";
 import InputModeBadge from "@/components/review/InputModeBadge";
 import FacetDebugPanel from "@/components/review/FacetDebugPanel";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
@@ -25,6 +26,10 @@ import { useQuestionScout, type ScoutedQuestion } from "@/hooks/useQuestionScout
 import { Mic } from "lucide-react";
 
 type AnswerState = "unanswered" | "evaluating" | "correct" | "incorrect";
+
+/** Facet types rendered by their own card component instead of the generic question/answer card. */
+const CUSTOM_CARDS = new Set(["sentence-assembly", "sentence-cloze", "picture-choice"]);
+const isCustomCard = (facetType: string) => CUSTOM_CARDS.has(facetType);
 
 export default function ReviewPage() {
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
@@ -920,8 +925,24 @@ export default function ReviewPage() {
         />
       )}
 
+      {/* --- Picture choice (audio-first vocab) --- */}
+      {currentItem.facet.facetType === "picture-choice" && (
+        <div className="bg-gray-800 shadow-2xl rounded-lg p-8">
+          <PictureChoiceCard
+            key={currentItem.facet.id}
+            kuId={currentItem.facet.kuId}
+            reading={currentItem.facet.data?.reading || currentItem.facet.data?.content}
+            meaning={currentItem.facet.data?.definitions?.[0]}
+            pictures={currentItem.facet.data?.pictures ?? []}
+            onSpeak={fetchAndPlayAudio}
+            onResult={handleUpdateSrs}
+            onAdvance={advanceToNext}
+          />
+        </div>
+      )}
+
       {/* --- Review Card --- */}
-      {currentItem.facet.facetType !== "sentence-assembly" && currentItem.facet.facetType !== "sentence-cloze" && (
+      {!isCustomCard(currentItem.facet.facetType) && (
       <div className="bg-gray-800 shadow-2xl rounded-lg p-8">
         {/* Question Area */}
         <div className="text-center mb-8 min-h-[160px] flex flex-col justify-center">
@@ -1083,7 +1104,7 @@ export default function ReviewPage() {
       )}
 
       {/* --- Answer Feedback Section --- */}
-      {currentItem.facet.facetType !== "sentence-assembly" && currentItem.facet.facetType !== "sentence-cloze" && answerState !== "unanswered" && answerState !== "evaluating" && (
+      {!isCustomCard(currentItem.facet.facetType) && answerState !== "unanswered" && answerState !== "evaluating" && (
         <div
           className={`mt-8 p-6 rounded-lg ${
             answerState === "correct"

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import * as fs from 'fs';
 import * as path from 'path';
-import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, LESSONS_COLLECTION, PICTURES_COLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, LESSONS_COLLECTION, PICTURES_COLLECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { GeminiService } from '../gemini/gemini.service';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { VocabLesson } from '../types';
@@ -412,6 +412,29 @@ export class PicturesService {
         ? { ...p, staleUsage: true }
         : p,
     );
+  }
+
+  /**
+   * Distractors for the four-picture choice card: one approved picture from each of `n`
+   * other words, preferring words the user has enrolled (familiar pictures make the card
+   * test the sound, not novelty), topped up at random from the rest.
+   */
+  async choices(uid: string, kuId: string, n = 3): Promise<{ id: string; file: string; kuId: string }[]> {
+    const [approved, enrolled] = await Promise.all([
+      this.col().where('status', '==', 'approved').get(),
+      this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).select('kuId').get(),
+    ]);
+    const mine = new Set(enrolled.docs.map(d => (d.data().kuId as string) ?? d.id));
+    const byKu = new Map<string, { id: string; file: string; kuId: string }[]>();
+    for (const d of approved.docs) {
+      const k = d.data().kuId as string;
+      if (k === kuId || !d.data().file) continue;
+      if (!byKu.has(k)) byKu.set(k, []);
+      byKu.get(k)!.push({ id: d.id, file: d.data().file, kuId: k });
+    }
+    const shuffle = <T>(a: T[]) => a.map(x => [Math.random(), x] as const).sort((x, y) => x[0] - y[0]).map(x => x[1]);
+    const ordered = [...shuffle([...byKu.keys()].filter(k => mine.has(k))), ...shuffle([...byKu.keys()].filter(k => !mine.has(k)))];
+    return ordered.slice(0, n).map(k => shuffle(byKu.get(k)!)[0]);
   }
 
   private async hasActiveUpload(kuId: string, usage: string): Promise<boolean> {

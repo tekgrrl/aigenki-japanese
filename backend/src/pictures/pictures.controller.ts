@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { UserId } from '../auth/user-id.decorator';
 import { MAX_UPLOAD_BYTES, PicturesService, PictureStatus, UploadedImage } from './pictures.service';
 
 const STATUSES: PictureStatus[] = ['approved', 'needs-review', 'rejected', 'unpicturable'];
@@ -17,6 +18,14 @@ export class PicturesController {
   async forKu(@Query('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
     return this.picturesService.list({ kuId, status: 'approved' });
+  }
+
+  /** Distractor pictures for the four-picture choice card (other words, user's own first). */
+  @Get('choices')
+  @UseGuards(FirebaseAuthGuard)
+  async choices(@UserId() uid: string, @Query('kuId') kuId: string, @Query('n') n?: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    return this.picturesService.choices(uid, kuId, Math.min(Math.max(Number(n) || 3, 1), 8));
   }
 
   /** All pictures with optional filters, plus the current generation job (admin review grid). */

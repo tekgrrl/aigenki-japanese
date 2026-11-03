@@ -8,6 +8,7 @@ import { PicturesService, usageSources } from './pictures.service';
 
 type Data = Record<string, any>;
 let autoId = 0;
+let currentDb: FakeDb; // for subcollections (users/{uid}/user-kus)
 
 class FakeDocRef {
   constructor(private readonly store: Map<string, Data>, readonly id: string) {}
@@ -25,6 +26,9 @@ class FakeDocRef {
   }
   async delete() {
     this.store.delete(this.id);
+  }
+  collection(name: string) {
+    return currentDb.collection(`sub/${this.id}/${name}`);
   }
 }
 
@@ -111,6 +115,7 @@ describe('PicturesService', () => {
   beforeEach(() => {
     autoId = 0;
     db = new FakeDb();
+    currentDb = db;
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pictures-spec-'));
     gemini = {
       generatePictureBrief: jest.fn().mockResolvedValue(okBrief),
@@ -476,6 +481,30 @@ describe('PicturesService', () => {
     it('can reject any picture', async () => {
       existingPicture('p1', 'time', 'approved');
       expect((await service.setStatus('p1', 'rejected')).status).toBe('rejected');
+    });
+  });
+
+  describe('choices (distractors for the four-picture card)', () => {
+    const approved = (id: string, kuId: string, status = 'approved') =>
+      db.collection('pictures').doc(id).set({ kuId, usage: 'u', status, file: `${id}-1.png`, attempts: [], createdAt: ts });
+
+    it('one approved picture per other word, never the word itself or unapproved ones', async () => {
+      approved('self', KU);
+      approved('a1', 'kuA');
+      approved('a2', 'kuA');
+      approved('b1', 'kuB');
+      approved('r1', 'kuR', 'rejected');
+      const picks = await service.choices('user1', KU, 3);
+      expect(picks.map(p => p.kuId).sort()).toEqual(['kuA', 'kuB']);
+    });
+
+    it('prefers words the user has enrolled', async () => {
+      for (const k of ['k1', 'k2', 'k3', 'k4', 'k5', 'mine']) approved(`p-${k}`, k);
+      db.collection('users').doc('user1').collection('user-kus').doc('x').set({ kuId: 'mine' });
+      for (let i = 0; i < 10; i++) {
+        const picks = await service.choices('user1', KU, 1);
+        expect(picks[0].kuId).toBe('mine');
+      }
     });
   });
 

@@ -11,9 +11,22 @@ import {
   fetchLessonWithRetry,
   useLessonAudio,
   TYPE_COLORS,
+  isAudioFirst,
 } from "@/components/learn/LessonSlides";
+import PictureChoiceCard from "@/components/review/PictureChoiceCard";
+import { fetchApprovedPictures, shuffle } from "@/lib/pictures";
+import type { VocabLesson } from "@/types";
 
-type Phase = "loading" | "slideshow" | "complete";
+type Phase = "loading" | "slideshow" | "check" | "complete";
+
+/** Day-one reinforcement: each audio-first word twice, interleaved, no back-to-back repeats. */
+function buildCheckRounds(items: LoadedItem[]): LoadedItem[] {
+  if (items.length === 0) return [];
+  const first = shuffle(items);
+  let second = shuffle(items);
+  if (items.length > 1 && second[0].item.kuId === first[first.length - 1].item.kuId) second = [...second.slice(1), second[0]];
+  return [...first, ...second];
+}
 
 async function enrollItem(item: QueueItem, alreadyKnown = false): Promise<void> {
   await apiFetch("/api/reviews/initialize-sequence", {
@@ -36,6 +49,10 @@ export default function LessonSessionPage() {
   const [currentItemIdx, setCurrentItemIdx] = useState(0);
   const [currentSlideIdx, setCurrentSlideIdx] = useState(0);
   const [enrolling, setEnrolling] = useState(false);
+  const [checkRounds, setCheckRounds] = useState<LoadedItem[]>([]);
+  const [checkIdx, setCheckIdx] = useState(0);
+  // Audio-first words finished normally this session (not "already know this").
+  const learnedAudioFirst = useRef<LoadedItem[]>([]);
 
   const { audioRef, playAudio } = useLessonAudio();
   const enrollmentPromises = useRef<Promise<void>[]>([]);
@@ -53,11 +70,16 @@ export default function LessonSessionPage() {
         if (queue.length === 0) { setQueueEmpty(true); return; }
         setTotalCount(queue.length);
 
+        // Audio-first experiment: Vocab with approved pictures is taught by picture + sound.
+        const me = await apiFetch("/api/users/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const audioFirst = me?.preferences?.audioFirstExperiment === true;
+
         const results: LoadedItem[] = [];
         for (const item of queue) {
           try {
             const lesson = await fetchLessonWithRetry(item);
-            results.push({ item, lesson });
+            const pictures = audioFirst && item.type === "Vocab" ? await fetchApprovedPictures(item.kuId) : [];
+            results.push({ item, lesson, ...(pictures.length ? { pictures } : {}) });
           } catch (e) {
             console.error(`[session] skipping ${item.content} after retry:`, e);
           }
@@ -82,6 +104,7 @@ export default function LessonSessionPage() {
   const finishItem = useCallback(async (alreadyKnown: boolean) => {
     const loaded = loadedItems[currentItemIdx];
     triggerEnrollment(loaded.item, alreadyKnown);
+    if (!alreadyKnown && isAudioFirst(loaded)) learnedAudioFirst.current.push(loaded);
     const isLastItem = currentItemIdx >= loadedItems.length - 1;
 
     if (!isLastItem) {
@@ -89,9 +112,13 @@ export default function LessonSessionPage() {
       setCurrentSlideIdx(0);
       return;
     }
-    // Finished all items — switch screens immediately, save in background
+    // Finished all items — switch screens immediately, save in background. Audio-first
+    // words get a quick picture check first (practice: nothing is recorded).
     setEnrolling(true);
-    setPhase("complete");
+    const rounds = buildCheckRounds(learnedAudioFirst.current);
+    setCheckRounds(rounds);
+    setCheckIdx(0);
+    setPhase(rounds.length > 0 ? "check" : "complete");
     await Promise.allSettled(enrollmentPromises.current);
     window.dispatchEvent(new CustomEvent("refreshStats"));
     setEnrolling(false);
@@ -267,6 +294,37 @@ export default function LessonSessionPage() {
             {isLastSlide && isLastItem ? "Finish" : isLastSlide ? "Next Item →" : "Next →"}
           </button>
         </div>
+      </main>
+    );
+  }
+
+  // ─── Quick check (audio-first words) ──────────────────────────────────────
+  if (phase === "check") {
+    const round = checkRounds[checkIdx];
+    const vl = round.lesson as VocabLesson;
+    return (
+      <main className="container mx-auto max-w-2xl p-8">
+        {/* biome-ignore lint/a11y/useMediaCaption: hidden TTS playback element, nothing to caption */}
+        <audio ref={audioRef} />
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-xl font-bold text-shodo-ink">Quick check</h1>
+          <span className="text-sm text-shodo-ink-faint">
+            {checkIdx + 1} of {checkRounds.length}
+          </span>
+        </div>
+        <PictureChoiceCard
+          key={checkIdx}
+          kuId={round.item.kuId}
+          reading={vl.reading}
+          meaning={(vl.definitions ?? [])[0] ?? vl.definition}
+          pictures={round.pictures ?? []}
+          onSpeak={playAudio}
+          tone="paper"
+          onAdvance={() => {
+            if (checkIdx + 1 < checkRounds.length) setCheckIdx((i) => i + 1);
+            else setPhase("complete");
+          }}
+        />
       </main>
     );
   }

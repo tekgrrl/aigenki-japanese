@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common'
 import { CollectionReference, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
+  PICTURES_COLLECTION,
   REVIEW_FACETS_COLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, SRS_INTERVALS } from '../lib/constants';
@@ -13,6 +14,7 @@ import {
   GrammarLesson,
   KanjiLesson,
   KnowledgeUnit,
+  SequenceVariant,
   KuFacetSequence,
   Lesson,
   ReviewFacet,
@@ -74,7 +76,8 @@ export class ReviewProgressService {
       return { stage: 0, facetsCreated: 0 };
     }
 
-    const sequence = FACET_SEQUENCES.find(s => s.kuType === ku.type);
+    const variant = await this.chooseVariant(uid, ku);
+    const sequence = this.sequenceFor(ku.type, variant);
     if (!sequence) {
       this.logger.warn(`initializeSequence: no sequence defined for kuType=${ku.type}`);
       return { stage: 0, facetsCreated: 0 };
@@ -99,11 +102,14 @@ export class ReviewProgressService {
       return { stage: 0, facetsCreated: 0 };
     }
 
-    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: result.stage.stage });
+    await this.userKnowledgeUnitsService.update(uid, kuId, {
+      currentStage: result.stage.stage,
+      ...(variant ? { sequenceVariant: variant } : {}),
+    });
     await this.learningProgressService.recomputeAndCache(uid, kuId);
 
     this.logger.log(
-      `Initialized sequence for uid=${uid} kuId=${kuId}: stage=${result.stage.stage} facets=${result.facetsCreated} startAtSrsStage=${startAtSrsStage}`,
+      `Initialized sequence for uid=${uid} kuId=${kuId}: stage=${result.stage.stage} facets=${result.facetsCreated} startAtSrsStage=${startAtSrsStage}${variant ? ` variant=${variant}` : ''}`,
     );
 
     // If the caller front-loaded the SRS stage far enough to already satisfy this
@@ -216,7 +222,7 @@ export class ReviewProgressService {
       return;
     }
 
-    const sequence = FACET_SEQUENCES.find(s => s.kuType === ku.type);
+    const sequence = this.sequenceFor(ku.type, uku.sequenceVariant);
     if (!sequence) {
       this.logger.warn(`checkAndAdvanceStage: no FACET_SEQUENCES entry for kuType=${ku.type} (kuId=${kuId})`);
       return;
@@ -357,6 +363,32 @@ export class ReviewProgressService {
   }
 
   /** Creates all facets for a stage and increments UKU facet_count. */
+  /** The sequence for a KU type and variant (absent variant = the default sequence). */
+  private sequenceFor(kuType: string, variant?: SequenceVariant) {
+    return FACET_SEQUENCES.find(s => s.kuType === kuType && s.variant === variant);
+  }
+
+  /**
+   * Audio-first experiment: a Vocab word enrolled by a user with the flag on follows the
+   * audio-first sequence, if it has at least one approved picture. Otherwise the default.
+   */
+  private async chooseVariant(uid: string, ku: KnowledgeUnit): Promise<SequenceVariant | undefined> {
+    if (ku.type !== 'Vocab') return undefined;
+    const user = await this.db.collection('users').doc(uid).get();
+    if (user.data()?.preferences?.audioFirstExperiment !== true) return undefined;
+    return (await this.approvedPictures(ku.id)).length > 0 ? 'audio-first' : undefined;
+  }
+
+  private async approvedPictures(kuId: string): Promise<{ id: string; file: string; usage: string }[]> {
+    const snap = await this.db.collection(PICTURES_COLLECTION)
+      .where('kuId', '==', kuId)
+      .where('status', '==', 'approved')
+      .get();
+    return snap.docs
+      .filter(d => d.data().file)
+      .map(d => ({ id: d.id, file: d.data().file as string, usage: d.data().usage as string }));
+  }
+
   private async createFacetsForStage(
     uid: string,
     kuId: string,
@@ -374,8 +406,15 @@ export class ReviewProgressService {
     const facetCountByKuId = new Map<string, number>();
 
     for (const entry of stageDef.facets) {
-      const dataItems = this.buildFacetData(entry, lesson);
+      let dataItems = this.buildFacetData(entry, lesson);
       if (dataItems.length === 0) continue;
+
+      // Picture cards carry the word's approved pictures (one per usage; the card rotates).
+      if (entry.type === 'picture-choice') {
+        const pictures = await this.approvedPictures(kuId);
+        if (pictures.length === 0) continue;
+        dataItems = dataItems.map(d => ({ ...d, pictures }));
+      }
 
       // Kanji-component facets belong to the character's own Kanji KU, not the
       // parent's — ensure/create that per-character stub so "Review Lesson" and

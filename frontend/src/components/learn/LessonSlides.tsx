@@ -7,6 +7,8 @@ import { apiFetch } from "@/lib/api-client";
 import { normalizeFormation } from "@/lib/grammar-lesson";
 import { FuriganaText } from "@/components/FuriganaText";
 import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
+import { pictureUrl, type PictureRef } from "@/lib/pictures";
+import { stripFurigana } from "@/lib/furigana";
 
 export interface QueueItem {
   kuId: string;
@@ -17,10 +19,29 @@ export interface QueueItem {
 export interface LoadedItem {
   item: QueueItem;
   lesson: Lesson;
+  /** Audio-first experiment: approved pictures. When present, the word is taught by
+   *  picture and sound only (no kanji or kana) — see audioFirstSlides. */
+  pictures?: PictureRef[];
 }
+
+/**
+ * Audio-first slides (#246): the word slide, then one slide per usage, each pairing the
+ * usage's picture with that usage's example sentence (heard, not shown). A usage without
+ * its own picture reuses the first one.
+ */
+function audioFirstSlides(loaded: LoadedItem): { picture: PictureRef; example?: NonNullable<VocabLesson["context_examples"]>[number] }[] {
+  const vl = loaded.lesson as VocabLesson;
+  const pics = loaded.pictures ?? [];
+  const examples = vocabExampleSlides(vl);
+  const key = (u?: string) => (u ?? "").trim().toLowerCase();
+  return examples.map((ex) => ({ picture: pics.find((p) => key(p.usage) === key(ex.usage)) ?? pics[0], example: ex }));
+}
+
+export const isAudioFirst = (loaded: LoadedItem) => loaded.lesson.type === "Vocab" && (loaded.pictures?.length ?? 0) > 0;
 
 export function slideCount(loaded: LoadedItem): number {
   const { item, lesson } = loaded;
+  if (isAudioFirst(loaded)) return 1 + audioFirstSlides(loaded).length;
   if (item.type === "Vocab" && lesson.type === "Vocab") {
     const vl = lesson as VocabLesson;
     const hasKanji = !vl.kanaOnly && (vl.component_kanji?.length ?? 0) > 0;
@@ -140,6 +161,77 @@ export function useLessonAudio() {
 }
 
 // ─── Slide renderers ────────────────────────────────────────────────────────
+
+function PlayButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-shodo-ink text-shodo-paper font-semibold active:scale-95 transition-transform"
+    >
+      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M4.018 14L14.41 9 4.018 4v10z" />
+      </svg>
+      {label}
+    </button>
+  );
+}
+
+function PictureFrame({ picture }: { picture: PictureRef }) {
+  return (
+    // biome-ignore lint/performance/noImgElement: backend-served card images
+    <img
+      src={pictureUrl(picture)}
+      alt=""
+      className="w-full max-w-sm aspect-square object-cover rounded-xl border border-shodo-ink/10 bg-[#f9f7f2] shadow-sm"
+    />
+  );
+}
+
+/** Audio-first: the word as picture + sound, with the English meaning as a small caption. */
+function PictureWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (text: string) => void }) {
+  const vl = loaded.lesson as VocabLesson;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: play once when the slide opens
+  useEffect(() => { onAudio(vl.reading); }, []);
+  return (
+    <div className="w-full flex flex-col items-center gap-5 text-center">
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">New word · listen</span>
+      <PictureFrame picture={(loaded.pictures ?? [])[0]} />
+      <PlayButton label="Play the word" onClick={() => onAudio(vl.reading)} />
+      <p className="text-sm text-shodo-ink-light">{(vl.definitions ?? [])[0] ?? vl.definition}</p>
+    </div>
+  );
+}
+
+/** Audio-first: a usage's picture with its example sentence, heard (not shown), plus the translation. */
+function PictureExampleSlide({
+  picture,
+  example,
+  showUsage,
+  onAudio,
+}: {
+  picture: PictureRef;
+  example?: NonNullable<VocabLesson["context_examples"]>[number];
+  showUsage: boolean;
+  onAudio: (text: string) => void;
+}) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: play once when the slide opens
+  useEffect(() => { if (example) onAudio(stripFurigana(example.sentence)); }, []);
+  return (
+    <div className="w-full flex flex-col items-center gap-5 text-center">
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">
+        In a sentence{showUsage && example?.usage ? <span className="normal-case tracking-normal font-medium"> · {example.usage}</span> : null}
+      </span>
+      <PictureFrame picture={picture} />
+      {example && (
+        <>
+          <PlayButton label="Play the sentence" onClick={() => onAudio(stripFurigana(example.sentence))} />
+          <p className="text-sm text-shodo-ink-light">{stripFurigana(example.translation)}</p>
+        </>
+      )}
+    </div>
+  );
+}
 
 function VocabWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (text: string) => void }) {
   const vl = loaded.lesson as VocabLesson;
@@ -414,6 +506,12 @@ function GrammarNotesSlide({ loaded }: { loaded: LoadedItem }) {
 
 export function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text: string) => void) {
   const { item, lesson } = loaded;
+  if (isAudioFirst(loaded)) {
+    if (slideIdx === 0) return <PictureWordSlide loaded={loaded} onAudio={onAudio} />;
+    const slides = audioFirstSlides(loaded);
+    const s = slides[slideIdx - 1];
+    if (s) return <PictureExampleSlide key={slideIdx} picture={s.picture} example={s.example} showUsage={slides.length > 1} onAudio={onAudio} />;
+  }
   if (item.type === "Vocab" && lesson.type === "Vocab") {
     const vl = lesson as VocabLesson;
     const hasKanji = !vl.kanaOnly && (vl.component_kanji?.length ?? 0) > 0;

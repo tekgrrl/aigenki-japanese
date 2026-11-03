@@ -163,6 +163,8 @@ export interface UserRoot {
     jlptLevel?: 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
     /** Default user persona in roleplay scenarios (e.g. "Traveler", "Student"). */
     preferredUserRole?: string;
+    /** Experiment: new Vocab with approved pictures is learned audio-first (picture cards). */
+    audioFirstExperiment?: boolean;
   };
 }
 
@@ -437,6 +439,8 @@ export interface UserKnowledgeUnit {
   currentStage?: number;
   /** True if ku.data.jlptLevel > user.preferences.jlptLevel at enrollment time. Above-level items are excluded from ambient generation context. */
   aboveLevel?: boolean;
+  /** Which sequence this KU follows; absent = the default for its type. Fixed at enrollment. */
+  sequenceVariant?: SequenceVariant;
 }
 
 // ─── Facet sequence types ────────────────────────────────────────────────────
@@ -456,8 +460,13 @@ export interface FacetStageDefinition {
 
 export interface KuFacetSequence {
   kuType: string;
+  /** Alternative sequence for the same KU type (e.g. the audio-first experiment). Absent = the default. */
+  variant?: SequenceVariant;
   stages: FacetStageDefinition[];
 }
+
+/** Experimental audio-first Vocab: picture + sound, no kanji/kana (#246). */
+export type SequenceVariant = 'audio-first';
 
 export interface UserConcept {
   id: string;
@@ -484,7 +493,8 @@ export type FacetType =
   | "Kanji-Component-Reading" // e.g., "食" -> "ショク"
   | "audio"
   | "sentence-assembly"
-  | "sentence-cloze";
+  | "sentence-cloze"
+  | "picture-choice"; // hear the word, pick its picture from four (audio-first)
 
 export interface ReviewFacet {
   id: string;
