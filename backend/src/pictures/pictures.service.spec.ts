@@ -636,6 +636,26 @@ describe('PicturesService', () => {
       expect(pictures().find(p => p.id === 'p1')?.note).toBe('show a clock');
     });
 
+    it('a plain redraw keeps the saved note (and steers the brief with it)', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'needs-review');
+      await db.collection('pictures').doc('p1').update({ note: 'show a clock' });
+      await service.redraw('p1', {});
+      await waitFor(() => service.getJob().redrawing.length === 0);
+      expect(gemini.generatePictureBrief).toHaveBeenCalledWith(expect.objectContaining({ usage: 'time', note: 'show a clock' }), KU);
+      expect(pictures().find(p => p.id === 'p1')?.note).toBe('show a clock');
+    });
+
+    it('the learner list narrowed to usage pictures leaves out whole-KU ones', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'approved'); // old doc, no subject = usage picture
+      db.collection('pictures').doc('p2').set({ kuId: KU, usage: '', subject: { kind: 'ku', kuId: KU }, status: 'approved', file: 'p2.png', createdAt: ts });
+      const all = await service.list({ kuId: KU, status: 'approved' });
+      const usage = await service.list({ kuId: KU, status: 'approved', kind: 'ku-usage' });
+      expect(all.map(p => p.id).sort()).toEqual(['p1', 'p2']);
+      expect(usage.map(p => p.id)).toEqual(['p1']);
+    });
+
     it('detaches a picture and re-attaches it to a usage', async () => {
       seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
       existingPicture('p1', 'time', 'approved');
