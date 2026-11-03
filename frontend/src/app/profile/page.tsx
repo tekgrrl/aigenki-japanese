@@ -20,6 +20,7 @@ export default function ProfilePage() {
   const [theme, setTheme] = useState<ThemeChoice>("system");
   const [jlptLevel, setJlptLevel] = useState<string>("");
   const [preferredUserRole, setPreferredUserRole] = useState<string>("");
+  const [audioFirst, setAudioFirst] = useState(false);
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -40,6 +41,7 @@ export default function ProfilePage() {
         }
         if (userData.preferences?.jlptLevel) setJlptLevel(userData.preferences.jlptLevel);
         if (userData.preferences?.preferredUserRole) setPreferredUserRole(userData.preferences.preferredUserRole);
+        setAudioFirst(userData.preferences?.audioFirstExperiment === true);
         if (Array.isArray(rolesData.userRoles)) setUserRoles(rolesData.userRoles);
       })
       .catch(() => {});
@@ -69,6 +71,12 @@ export default function ProfilePage() {
     applyFurigana(newVal);
     await patchPreferences({ showFurigana: newVal });
   }, [showFurigana, patchPreferences]);
+
+  const handleToggleAudioFirst = useCallback(async () => {
+    const next = !audioFirst;
+    setAudioFirst(next);
+    await patchPreferences({ audioFirstExperiment: next });
+  }, [audioFirst, patchPreferences]);
 
   const handleJlptLevel = useCallback(async (val: string) => {
     setJlptLevel(val);
@@ -131,6 +139,33 @@ export default function ProfilePage() {
                 />
               </button>
             </div>
+          </div>
+
+          {/* Audio-first experiment (#246) */}
+          <div className="flex items-center justify-between px-5 py-4">
+            <div>
+              <p className="text-sm font-medium text-shodo-ink">Audio-first vocab (experimental)</p>
+              <p className="text-xs text-shodo-ink/50 mt-0.5">
+                New words that have pictures are learned by picture and sound, with no kanji or kana.
+                Words you&apos;re already learning aren&apos;t affected.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleAudioFirst}
+              role="switch"
+              aria-checked={audioFirst}
+              aria-label="Audio-first vocab (experimental)"
+              className={`relative ml-4 shrink-0 w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-shodo-accent focus:ring-offset-2 ${
+                audioFirst ? "bg-shodo-ink" : "bg-shodo-ink/20"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-shodo-paper shadow-sm transition-all duration-200 ${
+                  audioFirst ? "left-5" : "left-0.5"
+                }`}
+              />
+            </button>
           </div>
 
           {/* Appearance (per device — stored in this browser, not on the account) */}

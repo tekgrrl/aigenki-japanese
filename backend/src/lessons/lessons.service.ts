@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
@@ -429,10 +429,24 @@ export class LessonsService {
         .get(),
     ]);
 
-    const vocabKanjiItems = vocabKanjiSnap.docs
+    // Audio-first experiment: Vocab at the user's level that has approved pictures comes
+    // first, so the experiment's words actually reach the learner. Fetched directly — the
+    // corpus query above only samples the first 200 at the level.
+    let picturedDocs: FirebaseFirestore.DocumentSnapshot[] = [];
+    if ((userDoc.data() as UserRoot | undefined)?.preferences?.audioFirstExperiment === true) {
+      const pics = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
+      const ids = [...new Set(pics.docs.map(d => d.data().kuId as string))].filter(id => !seenKuIds.has(id));
+      if (ids.length) {
+        const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
+        picturedDocs = (await this.db.getAll(...ids.map(id => kuCol.doc(id))))
+          .filter(d => d.exists && d.data()?.type === 'Vocab' && d.data()?.data?.jlptLevel === jlptLevel);
+      }
+    }
+    const pictured = new Set(picturedDocs.map(d => d.id));
+    const vocabKanjiItems = [...picturedDocs, ...vocabKanjiSnap.docs.filter(d => !pictured.has(d.id))]
       .filter(d => !seenKuIds.has(d.id))
       .slice(0, 7)
-      .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+      .map(d => ({ kuId: d.id, content: d.data()?.content as string, type: d.data()?.type as string }));
 
     const grammarCorpusItems = grammarCorpusSnap.docs
       .filter(d => !seenKuIds.has(d.id))

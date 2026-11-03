@@ -54,6 +54,20 @@ export const FACET_SEQUENCES: KuFacetSequence[] = [
     ],
   },
   {
+    // Experiment (#246): audio-first Vocab for users with preferences.audioFirstExperiment,
+    // when the word has approved pictures. No kanji or kana stages. Picture → say-the-word
+    // (STT) is added as stage 2 in a later PR; until then this stage is terminal.
+    kuType: 'Vocab',
+    variant: 'audio-first',
+    stages: [
+      {
+        stage: 1,
+        facets: [{ type: 'picture-choice', source: 'primary' }],
+        unlockAtSrsStage: null,
+      },
+    ],
+  },
+  {
     kuType: 'Kanji',
     stages: [
       {

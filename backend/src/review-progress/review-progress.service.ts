@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common'
 import { CollectionReference, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
+  PICTURES_COLLECTION,
   REVIEW_FACETS_COLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, SRS_INTERVALS } from '../lib/constants';
@@ -13,6 +14,7 @@ import {
   GrammarLesson,
   KanjiLesson,
   KnowledgeUnit,
+  SequenceVariant,
   KuFacetSequence,
   Lesson,
   ReviewFacet,
@@ -22,6 +24,9 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
+
+/** A picture card needs the word plus three distractor words, or it can't record a result. */
+const MIN_PICTURED_WORDS = 4;
 
 @Injectable()
 export class ReviewProgressService {
@@ -45,11 +50,15 @@ export class ReviewProgressService {
   /**
    * Called when a user completes a lesson. Creates the first applicable stage's
    * facets and records currentStage on the UKU.
+   *
+   * `resetFrom` (resetSequence only): the variant the word had before the reset, which
+   * the reset keeps when it can, so the experiment flag never converts words in progress.
    */
   async initializeSequence(
     uid: string,
     kuId: string,
     startAtSrsStage = 0,
+    resetFrom?: { variant?: SequenceVariant },
   ): Promise<{ stage: number; facetsCreated: number }> {
     // Idempotent: if this KU's sequence was already initialized (e.g. a retried
     // enrollment call, or the item briefly reappearing in the learning queue),
@@ -74,7 +83,8 @@ export class ReviewProgressService {
       return { stage: 0, facetsCreated: 0 };
     }
 
-    const sequence = FACET_SEQUENCES.find(s => s.kuType === ku.type);
+    const variant = await this.chooseVariant(uid, ku, resetFrom);
+    const sequence = this.sequenceFor(ku.type, variant);
     if (!sequence) {
       this.logger.warn(`initializeSequence: no sequence defined for kuType=${ku.type}`);
       return { stage: 0, facetsCreated: 0 };
@@ -99,11 +109,16 @@ export class ReviewProgressService {
       return { stage: 0, facetsCreated: 0 };
     }
 
-    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: result.stage.stage });
+    await this.userKnowledgeUnitsService.update(uid, kuId, {
+      currentStage: result.stage.stage,
+      // Always written: a reset re-chooses the variant, and a stale one would point
+      // checkAndAdvanceStage at a sequence the facets weren't built from.
+      sequenceVariant: variant ?? FieldValue.delete(),
+    });
     await this.learningProgressService.recomputeAndCache(uid, kuId);
 
     this.logger.log(
-      `Initialized sequence for uid=${uid} kuId=${kuId}: stage=${result.stage.stage} facets=${result.facetsCreated} startAtSrsStage=${startAtSrsStage}`,
+      `Initialized sequence for uid=${uid} kuId=${kuId}: stage=${result.stage.stage} facets=${result.facetsCreated} startAtSrsStage=${startAtSrsStage}${variant ? ` variant=${variant}` : ''}`,
     );
 
     // If the caller front-loaded the SRS stage far enough to already satisfy this
@@ -168,9 +183,10 @@ export class ReviewProgressService {
           await this.learningProgressService.recomputeAndCache(uid, target);
         }),
     );
+    const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
 
-    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId);
+    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
     if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
 
     this.logger.log(
@@ -216,7 +232,7 @@ export class ReviewProgressService {
       return;
     }
 
-    const sequence = FACET_SEQUENCES.find(s => s.kuType === ku.type);
+    const sequence = this.sequenceFor(ku.type, uku.sequenceVariant);
     if (!sequence) {
       this.logger.warn(`checkAndAdvanceStage: no FACET_SEQUENCES entry for kuType=${ku.type} (kuId=${kuId})`);
       return;
@@ -356,6 +372,51 @@ export class ReviewProgressService {
       .filter(f => f.sequenceStage === stage);
   }
 
+  /** The sequence for a KU type and variant (absent variant = the default sequence). */
+  private sequenceFor(kuType: string, variant?: SequenceVariant) {
+    return FACET_SEQUENCES.find(s => s.kuType === kuType && s.variant === variant);
+  }
+
+  /**
+   * Audio-first experiment: a Vocab word enrolled by a user with the flag on follows the
+   * audio-first sequence, if it has an approved picture and enough other words are pictured
+   * for a full four-picture card. Otherwise the default.
+   *
+   * On a reset, the flag isn't consulted: the word stays audio-first only if it already was
+   * (and still qualifies), and a default word stays default.
+   */
+  private async chooseVariant(
+    uid: string,
+    ku: KnowledgeUnit,
+    resetFrom?: { variant?: SequenceVariant },
+  ): Promise<SequenceVariant | undefined> {
+    if (ku.type !== 'Vocab') return undefined;
+    if (resetFrom) {
+      if (resetFrom.variant !== 'audio-first') return undefined;
+    } else {
+      const user = await this.db.collection('users').doc(uid).get();
+      if (user.data()?.preferences?.audioFirstExperiment !== true) return undefined;
+    }
+    if ((await this.approvedPictures(ku.id)).length === 0) return undefined;
+    return (await this.picturedWordCount()) >= MIN_PICTURED_WORDS ? 'audio-first' : undefined;
+  }
+
+  /** Distinct words with an approved picture: the pool picture-card distractors come from. */
+  private async picturedWordCount(): Promise<number> {
+    const snap = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
+    return new Set(snap.docs.map(d => d.data().kuId).filter(Boolean)).size;
+  }
+
+  private async approvedPictures(kuId: string): Promise<{ id: string; file: string; usage: string }[]> {
+    const snap = await this.db.collection(PICTURES_COLLECTION)
+      .where('kuId', '==', kuId)
+      .where('status', '==', 'approved')
+      .get();
+    return snap.docs
+      .filter(d => d.data().file)
+      .map(d => ({ id: d.id, file: d.data().file as string, usage: d.data().usage as string }));
+  }
+
   /** Creates all facets for a stage and increments UKU facet_count. */
   private async createFacetsForStage(
     uid: string,
@@ -374,8 +435,15 @@ export class ReviewProgressService {
     const facetCountByKuId = new Map<string, number>();
 
     for (const entry of stageDef.facets) {
-      const dataItems = this.buildFacetData(entry, lesson);
+      let dataItems = this.buildFacetData(entry, lesson);
       if (dataItems.length === 0) continue;
+
+      // Picture cards carry the word's approved pictures (one per usage; the card rotates).
+      if (entry.type === 'picture-choice') {
+        const pictures = await this.approvedPictures(kuId);
+        if (pictures.length === 0) continue;
+        dataItems = dataItems.map(d => ({ ...d, pictures }));
+      }
 
       // Kanji-component facets belong to the character's own Kanji KU, not the
       // parent's — ensure/create that per-character stub so "Review Lesson" and
