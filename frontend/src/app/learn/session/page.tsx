@@ -36,6 +36,34 @@ async function enrollItem(item: QueueItem, alreadyKnown = false): Promise<void> 
   });
 }
 
+// ─── Saved place ─────────────────────────────────────────────────────────────
+
+/**
+ * Where the learner is in an unfinished session, so leaving the page (Profile & Settings,
+ * a refresh, any link) and coming back resumes it instead of starting over. Per tab
+ * (sessionStorage), cleared once the session's slides are finished.
+ */
+interface SavedSession {
+  items: QueueItem[];
+  currentKuId: string;
+  slideIdx: number;
+  finished: { kuId: string; alreadyKnown: boolean }[];
+  savedAt: number;
+}
+const SAVED_KEY = "learnSession:v1";
+const SAVED_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+function loadSaved(): SavedSession | null {
+  try {
+    const raw = sessionStorage.getItem(SAVED_KEY);
+    const saved = raw ? (JSON.parse(raw) as SavedSession) : null;
+    if (!saved?.items?.length || Date.now() - saved.savedAt > SAVED_MAX_AGE_MS) return null;
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function LessonSessionPage() {
@@ -65,9 +93,16 @@ export default function LessonSessionPage() {
     fetchRef.current = true;
     (async () => {
       try {
-        const queueRes = await apiFetch("/api/lessons/queue");
-        if (!queueRes.ok) throw new Error("Failed to fetch queue");
-        const queue: QueueItem[] = await queueRes.json();
+        // Resume an unfinished session (same items, same place) rather than a fresh queue.
+        const saved = loadSaved();
+        let queue: QueueItem[];
+        if (saved) {
+          queue = saved.items;
+        } else {
+          const queueRes = await apiFetch("/api/lessons/queue");
+          if (!queueRes.ok) throw new Error("Failed to fetch queue");
+          queue = await queueRes.json();
+        }
         if (queue.length === 0) { setQueueEmpty(true); return; }
         setTotalCount(queue.length);
 
@@ -87,6 +122,17 @@ export default function LessonSessionPage() {
           setLoadedCount(c => c + 1);
         }
         if (results.length === 0) { setLoadError(true); return; }
+        if (saved) {
+          for (const f of saved.finished) {
+            const loaded = results.find((r) => r.item.kuId === f.kuId);
+            if (loaded) finished.current.set(f.kuId, { loaded, alreadyKnown: f.alreadyKnown });
+          }
+          const idx = results.findIndex((r) => r.item.kuId === saved.currentKuId);
+          if (idx >= 0) {
+            setCurrentItemIdx(idx);
+            setCurrentSlideIdx(Math.min(saved.slideIdx, slideCount(results[idx]) - 1));
+          }
+        }
         setLoadedItems(results);
         setPhase("slideshow");
       } catch (e) {
@@ -98,6 +144,22 @@ export default function LessonSessionPage() {
 
   // Shared by both "finished the slides normally" and "I already know this" —
   // both end the current item and move on, differing only in the SRS starting point.
+  // Keep the saved place current while in the slides; drop it once they're done.
+  useEffect(() => {
+    if (phase === "slideshow" && loadedItems[currentItemIdx]) {
+      const saved: SavedSession = {
+        items: loadedItems.map((l) => l.item),
+        currentKuId: loadedItems[currentItemIdx].item.kuId,
+        slideIdx: currentSlideIdx,
+        finished: [...finished.current.entries()].map(([kuId, f]) => ({ kuId, alreadyKnown: f.alreadyKnown })),
+        savedAt: Date.now(),
+      };
+      try { sessionStorage.setItem(SAVED_KEY, JSON.stringify(saved)); } catch { /* storage full or disabled */ }
+    } else if (phase === "check" || phase === "complete") {
+      try { sessionStorage.removeItem(SAVED_KEY); } catch { /* ignore */ }
+    }
+  }, [phase, currentItemIdx, currentSlideIdx, loadedItems]);
+
   const finishItem = useCallback(async (alreadyKnown: boolean) => {
     const loaded = loadedItems[currentItemIdx];
     finished.current.set(loaded.item.kuId, { loaded, alreadyKnown });
