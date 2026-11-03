@@ -209,7 +209,11 @@ export class KnowledgeUnitsService {
         const snapshot = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
             .where('data.kanji', 'array-contains', kanjiChar)
             .get();
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as unknown as KnowledgeUnit);
+        // Type check in memory (an equality filter would need a composite index): a KU whose
+        // type changed away from Vocab may still carry data.kanji.
+        return snapshot.docs
+            .filter(doc => doc.data().type === 'Vocab')
+            .map(doc => ({ id: doc.id, ...doc.data() }) as unknown as KnowledgeUnit);
     }
 
     async ensureKanjiStub(char: string, metadata: any): Promise<string> {

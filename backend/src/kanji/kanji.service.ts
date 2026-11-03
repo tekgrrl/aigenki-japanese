@@ -41,11 +41,11 @@ export class KanjiService {
 
         const enrolled = new Set<string>();
         const ids = words.map(w => w.id);
-        for (let i = 0; i < ids.length; i += 30) {
-            const snap = await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
-                .where('kuId', 'in', ids.slice(i, i + 30)).select('kuId').get();
-            snap.docs.forEach(d => enrolled.add(d.data().kuId));
-        }
+        const chunks = Array.from({ length: Math.ceil(ids.length / 30) }, (_, i) => ids.slice(i * 30, i * 30 + 30));
+        const snaps = await Promise.all(chunks.map(chunk =>
+            this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
+                .where('kuId', 'in', chunk).select('kuId').get()));
+        snaps.forEach(snap => snap.docs.forEach(d => enrolled.add(d.data().kuId)));
 
         const level = (w: KnowledgeUnit) => {
             const m = /N(\d)/.exec(String((w.data as { jlptLevel?: string }).jlptLevel ?? ''));
