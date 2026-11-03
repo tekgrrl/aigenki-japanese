@@ -198,6 +198,7 @@ export default function DailyCheckInDialog({ plan, learnCount, onClose }: Props)
             </div>
             <Link
               href="/learn/session"
+              onClick={onClose}
               className="mt-auto pt-3 rounded-lg bg-shodo-ink px-3 py-2 text-sm font-medium text-shodo-paper hover:bg-shodo-ink/80 transition-colors text-center w-full"
             >
               Start Learning

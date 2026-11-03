@@ -65,7 +65,11 @@ export class DailyPlanService {
 
     if (userData?.lastDailyPlanDate === today && planDoc.exists) {
       this.logger.log(`Daily plan already generated for uid=${uid} date=${today}`);
-      return { isNewDay: false, plan: planDoc.data() as DailyPlan };
+      // The rest of the plan is a once-a-day snapshot, but the due count must be live:
+      // lessons finished (or reviews done) since the plan was made change it.
+      const cached = planDoc.data() as DailyPlan;
+      const reviewsDue = await this.countDue(uid);
+      return { isNewDay: false, plan: { ...cached, reviewsDue, suggestNewContent: reviewsDue < cached.threshold } };
     }
 
     this.logger.log(`Generating new daily plan for uid=${uid} date=${today}`);
@@ -79,14 +83,15 @@ export class DailyPlanService {
     return { isNewDay: true, plan };
   }
 
+  private async countDue(uid: string): Promise<number> {
+    const snap = await this.facetsBaseQuery(uid).where('nextReviewAt', '<=', Timestamp.now()).count().get();
+    return snap.data().count;
+  }
+
   private async generatePlan(uid: string, userData: UserRoot | undefined, today: string): Promise<DailyPlan> {
     const threshold: number = userData?.tutorContext?.preferences?.dailyMaxTotal ?? 20;
 
-    const reviewsDueSnap = await this.facetsBaseQuery(uid)
-      .where('nextReviewAt', '<=', Timestamp.now())
-      .count()
-      .get();
-    const reviewsDue: number = reviewsDueSnap.data().count;
+    const reviewsDue = await this.countDue(uid);
 
     const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
     const recentPromotions: PromotedEntry[] = ((userData?.stats?.recentlyPromoted ?? []) as PromotedEntry[])

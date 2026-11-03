@@ -51,12 +51,12 @@ export default function LessonSessionPage() {
   const [enrolling, setEnrolling] = useState(false);
   const [checkRounds, setCheckRounds] = useState<LoadedItem[]>([]);
   const [checkIdx, setCheckIdx] = useState(0);
-  // Audio-first words finished normally this session (not "already know this").
-  const learnedAudioFirst = useRef<LoadedItem[]>([]);
-  const finishedKuIds = useRef(new Set<string>());
+  // Items finished this session, by kuId (latest choice wins if Back revisits one).
+  // Nothing is enrolled until the whole session is finished: an abandoned session
+  // leaves no reviews behind.
+  const finished = useRef(new Map<string, { loaded: LoadedItem; alreadyKnown: boolean }>());
 
   const { audioRef, playAudio } = useLessonAudio();
-  const enrollmentPromises = useRef<Promise<void>[]>([]);
   const fetchRef = useRef(false);
 
   // Load queue and generate all lessons upfront
@@ -96,20 +96,11 @@ export default function LessonSessionPage() {
     })();
   }, []);
 
-  const triggerEnrollment = useCallback((item: QueueItem, alreadyKnown = false) => {
-    enrollmentPromises.current.push(enrollItem(item, alreadyKnown));
-  }, []);
-
   // Shared by both "finished the slides normally" and "I already know this" —
   // both end the current item and move on, differing only in the SRS starting point.
   const finishItem = useCallback(async (alreadyKnown: boolean) => {
     const loaded = loadedItems[currentItemIdx];
-    // Back then Next re-finishes an item: enroll and queue its check rounds only once.
-    if (!finishedKuIds.current.has(loaded.item.kuId)) {
-      finishedKuIds.current.add(loaded.item.kuId);
-      triggerEnrollment(loaded.item, alreadyKnown);
-      if (!alreadyKnown && isAudioFirst(loaded)) learnedAudioFirst.current.push(loaded);
-    }
+    finished.current.set(loaded.item.kuId, { loaded, alreadyKnown });
     const isLastItem = currentItemIdx >= loadedItems.length - 1;
 
     if (!isLastItem) {
@@ -117,17 +108,26 @@ export default function LessonSessionPage() {
       setCurrentSlideIdx(0);
       return;
     }
-    // Finished all items — switch screens immediately, save in background. Audio-first
-    // words get a quick picture check first (practice: nothing is recorded).
+    // Finished all items — enroll them all now (in the background) and switch screens.
+    // Audio-first words learned normally get a quick picture check first (practice:
+    // nothing is recorded).
+    const entries = [...finished.current.values()];
     setEnrolling(true);
-    const rounds = buildCheckRounds(learnedAudioFirst.current);
+    const rounds = buildCheckRounds(
+      entries.filter((e) => !e.alreadyKnown && isAudioFirst(e.loaded)).map((e) => e.loaded),
+    );
     setCheckRounds(rounds);
     setCheckIdx(0);
     setPhase(rounds.length > 0 ? "check" : "complete");
-    await Promise.allSettled(enrollmentPromises.current);
+    // One at a time: words sharing a kanji would race the per-user component-facet dedup.
+    for (const e of entries) {
+      await enrollItem(e.loaded.item, e.alreadyKnown).catch((err) =>
+        console.error(`[session] enrollment failed for ${e.loaded.item.content}:`, err),
+      );
+    }
     window.dispatchEvent(new CustomEvent("refreshStats"));
     setEnrolling(false);
-  }, [currentItemIdx, loadedItems, triggerEnrollment]);
+  }, [currentItemIdx, loadedItems]);
 
   const advance = useCallback(() => {
     const loaded = loadedItems[currentItemIdx];

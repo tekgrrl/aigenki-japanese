@@ -28,17 +28,16 @@ export class GoogleTtsService implements ITtsProvider {
         this.client = new TextToSpeechClient({ projectId });
     }
 
-    /** Default of the Chirp3-HD tier (see `synthesize`) — Google's most natural-sounding ja-JP voices. Confirmed to support SSML `<break>` on synchronous requests via `client.listVoices` + a live test call. Overridable per-request via `opts.voiceName`. */
-    private static readonly CHIRP3_HD_JA_VOICE = 'ja-JP-Chirp3-HD-Enceladus';
+    /** The app's voice (all `/audio/speak` callers and the pronunciation tool's default): Chirp3-HD, Google's most natural-sounding ja-JP tier. Confirmed to support SSML `<break>` on synchronous requests via `client.listVoices` + a live test call. Overridable per-request via `opts.voiceName`. */
+    private static readonly CHIRP3_HD_JA_VOICE = 'ja-JP-Chirp3-HD-Orus';
     private static readonly FALLBACK_JA_VOICE = 'ja-JP-Neural2-B';
 
     /**
-     * Additive alongside `generateAudio` — used only by the new pronunciation-
-     * practice tool, never by the 3 existing `/audio/speak` callers. Accepts
-     * either plain text or pre-built SSML (never both — discriminated union),
-     * and falls back once to the existing Neural2 voice if the preferred
-     * Chirp3-HD voice fails for any reason, so a bad voice name or a transient
-     * error doesn't hard-fail the whole feature.
+     * Used by app audio (via `generateAudio`) and the pronunciation-practice tool.
+     * Accepts either plain text or pre-built SSML (never both — discriminated union),
+     * and falls back once to the Neural2 voice if the preferred Chirp3-HD voice
+     * fails for any reason, so a bad voice name or a transient error doesn't
+     * hard-fail playback.
      */
     async synthesize(
         input: { text: string } | { ssml: string },
@@ -68,24 +67,17 @@ export class GoogleTtsService implements ITtsProvider {
         }
     }
 
+    /**
+     * App audio (`/audio/speak`): the default Chirp3-HD voice, falling back once to Neural2.
+     * Text without closing punctuation gets a 。: given a bare kana word (e.g. a reading like
+     * こうきょうりょうきん), Chirp3-HD sometimes inserts a ~0.7s phrase break mid-word, which
+     * the full stop prevents (measured: 4 of 11 bare-kana renders paused, 0 of 6 with 。).
+     */
     async generateAudio(text: string): Promise<Buffer> {
-        const request = {
-            input: { text },
-            // Select the language and SSML voice gender (optional)
-            voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-            // select the type of audio encoding
-            audioConfig: { audioEncoding: 'MP3' as const },
-        };
-
+        const trimmed = text.trim();
+        const input = /[。．.！!？?…」』）)]$/.test(trimmed) ? trimmed : `${trimmed}。`;
         try {
-            const [response] = await this.client.synthesizeSpeech(request);
-
-            if (!response.audioContent) {
-                throw new Error('No audio content received from Google TTS');
-            }
-
-            // reliable way to get the buffer from Uint8Array | string | null | undefined
-            return Buffer.from(response.audioContent);
+            return (await this.synthesize({ text: input })).audio;
         } catch (error) {
             this.logger.error(`Failed to generate audio for text: "${text.substring(0, 20)}..."`, error);
             throw error;
