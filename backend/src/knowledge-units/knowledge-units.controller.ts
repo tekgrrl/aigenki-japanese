@@ -91,6 +91,13 @@ export class KnowledgeUnitsController {
         return this.knowledgeUnitsService.cascadeDelete(uid, id);
     }
 
+    @Post('migrate/vocab-kanji')
+    @UseGuards(AdminGuard)
+    async backfillVocabKanji() {
+        this.logger.log('backfillVocabKanji called');
+        return this.knowledgeUnitsService.backfillVocabKanji();
+    }
+
     @Post('migrate/grammar-jlpt-level')
     @UseGuards(AdminGuard)
     async migrateGrammarJlptLevel() {

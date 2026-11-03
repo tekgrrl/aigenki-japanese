@@ -20,6 +20,7 @@ import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportCont
 import ReviewActionButtons from "@/components/review/ReviewActionButtons";
 import VocabLessonView from "@/components/lessons/VocabLessonView";
 import KanjiLessonView from "@/components/lessons/KanjiLessonView";
+import KanjiWordsLine from "@/components/review/KanjiWordsLine";
 import GrammarLessonView from "@/components/lessons/GrammarLessonView";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useQuestionScout, type ScoutedQuestion } from "@/hooks/useQuestionScout";
@@ -978,6 +979,16 @@ export default function ReviewPage() {
               >
                 {questionText || "[Question not loaded]"}
               </p>
+
+              {(currentItem.facet.facetType === "Kanji-Component-Meaning" ||
+                currentItem.facet.facetType === "Kanji-Component-Reading") &&
+                currentItem.facet.data?.content && (
+                  <KanjiWordsLine
+                    key={currentItem.facet.id}
+                    kanji={currentItem.facet.data.content}
+                    fromKuId={currentItem.facet.source?.id}
+                  />
+                )}
 
               {currentItem.facet.facetType === "audio" && (
                 <div className="mt-6 flex justify-center gap-3">

@@ -16,6 +16,7 @@ import { KnowledgeUnitType } from '@/types';
 import { NotFoundException } from '@nestjs/common';
 import { Query } from '@google-cloud/firestore';
 import { GrammarNote } from '@/types/scenario';
+import { kanjiIn } from '@/lib/kanji-chars';
 
 @Injectable()
 export class KnowledgeUnitsService {
@@ -204,21 +205,11 @@ export class KnowledgeUnitsService {
     }
 
     async findByKanjiComponent(kanjiChar: string): Promise<KnowledgeUnit[]> {
+        // Indexed lookup on Vocab KUs' data.kanji (only Vocab carries it) — reads just the matches.
         const snapshot = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
-            .where('type', '==', 'Vocab')
+            .where('data.kanji', 'array-contains', kanjiChar)
             .get();
-
-        const matches: KnowledgeUnit[] = [];
-
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            if (data.content && data.content.includes(kanjiChar)) {
-                // Rehydrate logic...
-                matches.push({ id: doc.id, ...data } as unknown as KnowledgeUnit);
-            }
-        });
-
-        return matches;
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as unknown as KnowledgeUnit);
     }
 
     async ensureKanjiStub(char: string, metadata: any): Promise<string> {
@@ -258,6 +249,7 @@ export class KnowledgeUnitsService {
             data: {
                 reading: hint?.reading ?? '',
                 definition: hint?.definition ?? '',
+                kanji: kanjiIn(content),
                 ...(hint?.jlptLevel ? { jlptLevel: hint.jlptLevel } : {}),
             },
             status: 'learning',
@@ -276,9 +268,17 @@ export class KnowledgeUnitsService {
             throw new NotFoundException(`Knowledge Unit ${id} not found`);
         }
 
+        const existing = doc.data()!;
+        // Keep a Vocab KU's data.kanji in step with its content, including when the whole
+        // data object is replaced (the admin editor).
+        if (existing.type === 'Vocab' && (updates.content !== undefined || (updates.data && typeof updates.data === 'object'))) {
+            const kanji = kanjiIn(updates.content ?? existing.content ?? '');
+            if (updates.data && typeof updates.data === 'object') updates = { ...updates, data: { ...updates.data, kanji } };
+            else updates = { ...updates, 'data.kanji': kanji };
+        }
+
         await ref.update(updates);
 
-        const existing = doc.data()!;
         this.upsertSearchCacheEntry({
             id,
             ...existing,
@@ -300,7 +300,7 @@ export class KnowledgeUnitsService {
         const newKuData = {
             ...body,
             relatedUnits: body.relatedUnits || [],
-            data: body.data || {},
+            data: body.type === 'Vocab' ? { ...(body.data || {}), kanji: kanjiIn(body.content) } : (body.data || {}),
             createdAt: Timestamp.now(),
             status: "learning",
         };
@@ -347,6 +347,18 @@ export class KnowledgeUnitsService {
             toUpdate.push({
                 ref: this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(item.id),
                 data: payload,
+            });
+        }
+
+        // Items changing content: keep Vocab KUs' data.kanji in step (merge patches data).
+        const contentChanges = toUpdate.filter(u => typeof u.data.content === 'string');
+        if (contentChanges.length > 0) {
+            const docs = await this.db.getAll(...contentChanges.map(u => u.ref));
+            docs.forEach((d, i) => {
+                const type = contentChanges[i].data.type ?? d.data()?.type;
+                if (type !== 'Vocab') return;
+                const u = contentChanges[i];
+                u.data = { ...u.data, data: { ...(u.data.data ?? {}), kanji: kanjiIn(u.data.content) } };
             });
         }
 
@@ -411,7 +423,7 @@ export class KnowledgeUnitsService {
                 data: {
                     content: item.content,
                     type: item.type,
-                    data: item.data || {},
+                    data: item.type === 'Vocab' ? { ...(item.data || {}), kanji: kanjiIn(item.content) } : (item.data || {}),
                     relatedUnits: item.relatedUnits || [],
                     status: 'learning',
                     createdAt: Timestamp.now(),
@@ -528,6 +540,36 @@ export class KnowledgeUnitsService {
 
         this.logger.log(`Cascade deleted KU ${kuId} for user ${uid}: ${JSON.stringify(deleted)}`);
         return { deleted };
+    }
+
+    /** Admin backfill: set data.kanji on every Vocab KU from its content. Safe to rerun. */
+    async backfillVocabKanji(): Promise<{ updated: number; unchanged: number }> {
+        const snap = await this.db
+            .collection(KNOWLEDGE_UNITS_COLLECTION)
+            .where('type', '==', 'Vocab')
+            .select('content', 'data.kanji')
+            .get();
+
+        const toUpdate = snap.docs
+            .map(doc => ({ doc, kanji: kanjiIn(doc.data().content ?? '') }))
+            .filter(({ doc, kanji }) => {
+                const stored = doc.data().data?.kanji;
+                return !Array.isArray(stored) || stored.join('') !== kanji.join('');
+            });
+
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+            const batch = this.db.batch();
+            for (const { doc, kanji } of toUpdate.slice(i, i + BATCH_SIZE)) {
+                batch.update(doc.ref, { 'data.kanji': kanji });
+            }
+            await batch.commit();
+        }
+
+        this.invalidateSearchCache();
+        const result = { updated: toUpdate.length, unchanged: snap.size - toUpdate.length };
+        this.logger.log(`backfillVocabKanji: ${JSON.stringify(result)}`);
+        return result;
     }
 
     async migrateGrammarJlptLevel(): Promise<{ migrated: number; skipped: number }> {

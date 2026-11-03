@@ -1,4 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Firestore } from 'firebase-admin/firestore';
+import { FIRESTORE_CONNECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { ConfigService } from '@nestjs/config';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { KanjiLesson, KnowledgeUnit } from '@/types'; // Adjust path to your shared types  
@@ -14,8 +16,50 @@ export class KanjiService {
         private configService: ConfigService,
         private knowledgeUnitsService: KnowledgeUnitsService,
         private geminiService: GeminiService,
+        @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     ) {
         this.rapidApiKey = this.configService.get<string>('RAPIDAPI_KEY') || '';
+    }
+
+    /**
+     * Up to `limit` words that use a kanji, shown on its reviews so the learner can see why
+     * it's there: the word that introduced it (fromKuId) first, then the user's other
+     * enrolled words, then other words (lowest JLPT level first).
+     */
+    async getWordsUsing(
+        uid: string,
+        kanjiChar: string,
+        fromKuId?: string,
+        limit = 3,
+    ): Promise<{ kuId: string; content: string; meaning: string }[]> {
+        // Stub KUs (created by a flag/scenario, no lesson yet) have no definition: skip them.
+        const meaningOf = (w: KnowledgeUnit) =>
+            String((w.data as { definition?: string }).definition ?? '').split(/[;,]/)[0].trim();
+        const words = (await this.knowledgeUnitsService.findByKanjiComponent(kanjiChar))
+            .filter(w => w.content !== kanjiChar && meaningOf(w) !== '');
+        if (words.length === 0) return [];
+
+        const enrolled = new Set<string>();
+        const ids = words.map(w => w.id);
+        for (let i = 0; i < ids.length; i += 30) {
+            const snap = await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
+                .where('kuId', 'in', ids.slice(i, i + 30)).select('kuId').get();
+            snap.docs.forEach(d => enrolled.add(d.data().kuId));
+        }
+
+        const level = (w: KnowledgeUnit) => {
+            const m = /N(\d)/.exec(String((w.data as { jlptLevel?: string }).jlptLevel ?? ''));
+            return m ? -Number(m[1]) : 0; // N5 (-5) sorts before N1 (-1); unlevelled last
+        };
+        const rank = (w: KnowledgeUnit) => (w.id === fromKuId ? 0 : enrolled.has(w.id) ? 1 : 2);
+        return words
+            .sort((a, b) => rank(a) - rank(b) || level(a) - level(b) || a.content.length - b.content.length)
+            .slice(0, limit)
+            .map(w => ({
+                kuId: w.id,
+                content: w.content,
+                meaning: meaningOf(w), // first sense only: "cold; common cold" → "cold"
+            }));
     }
 
     async getKanjiDetails(uid: string, kanjiChar: string, kuId?: string): Promise<KanjiLesson> {

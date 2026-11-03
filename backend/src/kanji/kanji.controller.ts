@@ -8,6 +8,16 @@ import { UserId } from '../auth/user-id.decorator';
 export class KanjiController {
     constructor(private readonly kanjiService: KanjiService) { }
 
+    @Get('words')
+    async getWords(
+        @UserId() uid: string,
+        @Query('char') char: string,
+        @Query('from') from?: string,
+    ) {
+        if (!char) throw new BadRequestException('Kanji character (char) is required');
+        return this.kanjiService.getWordsUsing(uid, char, from);
+    }
+
     @Get('details')
     async getDetails(
         @UserId() uid: string,

@@ -26,6 +26,7 @@ erDiagram
         string data_reading      "Vocab only"
         string data_definition   "Vocab only"
         string data_conjugationType "Vocab only"
+        array  data_kanji        "Vocab only: distinct kanji in content (array-contains lookup)"
         number data_wanikaniLevel "Vocab/Kanji"
         string data_meaning  "Kanji only"
     }
@@ -70,7 +71,6 @@ erDiagram
         timestamp createdAt
     }
 
-    Question {
     Picture {
         string id PK
         string kuId          "FK → KnowledgeUnit.id OR Concept.id; null for free-standing"
@@ -84,6 +84,7 @@ erDiagram
         array  attempts      "text-check results"
     }
 
+    Question {
         string id PK
         string kuId             "FK → KnowledgeUnit.id OR Concept.id (POLYMORPHIC)"
         string sourceCollection "knowledge-units | concepts | scenarios — optional, absent on old docs"
@@ -202,8 +203,8 @@ erDiagram
     Scenario ||--o{ UserGrammarLesson : "introduces grammar via scenario"
 
     Question ||--o{ UserQuestionState : "per-user state"
-    ReviewFacet o|--o| Question : "currentQuestionId"
     KnowledgeUnit ||--o{ Picture : "pictured by (usage or whole KU)"
+    ReviewFacet o|--o| Question : "currentQuestionId"
 
     UserRoot ||--o{ UserKnowledgeUnit : "owns"
     UserRoot ||--o{ ReviewFacet : "owns"
