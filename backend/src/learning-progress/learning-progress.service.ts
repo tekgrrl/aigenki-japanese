@@ -28,11 +28,22 @@ export class LearningProgressService {
         return uid === ADMIN_USER_ID ? col.where('userId', '==', uid) : col;
     }
 
+    /**
+     * Every facet that counts toward a KU's status: those targeting it (kuId) and those in
+     * its own sequence (source.id). They differ for Kanji-Component-* facets, which target
+     * the component kanji's KU while belonging to the word's sequence, so a word whose
+     * first stage is only kanji components would otherwise look like it has no facets.
+     */
     private async getFacetsForKu(uid: string, kuId: string): Promise<ReviewFacet[]> {
-        const snapshot = await this.facetsBaseQuery(uid)
-            .where('kuId', '==', kuId)
-            .get();
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ReviewFacet));
+        const [byTarget, bySequence] = await Promise.all([
+            this.facetsBaseQuery(uid).where('kuId', '==', kuId).get(),
+            this.facetsBaseQuery(uid).where('source.id', '==', kuId).get(),
+        ]);
+        const byId = new Map<string, ReviewFacet>();
+        for (const doc of [...byTarget.docs, ...bySequence.docs]) {
+            byId.set(doc.id, { id: doc.id, ...doc.data() } as ReviewFacet);
+        }
+        return [...byId.values()];
     }
 
     /**
