@@ -5,7 +5,7 @@ import {
   PICTURES_COLLECTION,
   REVIEW_FACETS_COLLECTION,
 } from '../firebase/firebase.module';
-import { ADMIN_USER_ID, SRS_INTERVALS } from '../lib/constants';
+import { ADMIN_USER_ID, ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
 import { isUsefulAssembly } from '../lib/assembly-quality';
 import {
@@ -27,6 +27,19 @@ import { LearningProgressService } from '../learning-progress/learning-progress.
 
 /** A picture card needs the word plus three distractor words, or it can't record a result. */
 const MIN_PICTURED_WORDS = 4;
+
+/**
+ * A word enrolled as "already known" whose every answer so far has been right. History
+ * records the stage after each answer, so a known word's facets first record
+ * ALREADY_KNOWN_STAGE + 1 (a learned word's first record 0 or 1). One miss anywhere and
+ * the word follows the full SRS from then on. Facets not yet answered are ignored.
+ */
+export function isStillKnown(facets: Pick<ReviewFacet, 'history'>[]): boolean {
+  const answered = facets.filter(f => (f.history?.length ?? 0) > 0);
+  return answered.length > 0 && answered.every(f =>
+    f.history![0].stage > ALREADY_KNOWN_STAGE && f.history!.every(h => h.result === 'pass'),
+  );
+}
 
 @Injectable()
 export class ReviewProgressService {
@@ -204,6 +217,10 @@ export class ReviewProgressService {
    * front-loaded enrollment (see initializeSequence) — it's carried through
    * and re-checked recursively so the cascade keeps unlocking every stage the
    * elevated SRS stage satisfies, rather than stopping after one hop.
+   *
+   * When a review unlocks a stage (startAtSrsStage 0) on a word that's still known (see
+   * isStillKnown), the new facets start at ALREADY_KNOWN_STAGE but are due straight away:
+   * the word is known, its new facet just hasn't been tested yet.
    */
   /**
    * Guard clauses below are deliberately split into two tiers, not treated
@@ -282,7 +299,12 @@ export class ReviewProgressService {
 
     // Same per-user-dedup concern as initializeSequence: nextStage looked applicable
     // from lesson data alone but may still produce zero facets for this user.
-    const result = await this.createFacetsSkippingEmptyStages(uid, kuId, ku, lesson, sequence, nextStage, startAtSrsStage);
+    const knownUnlock = startAtSrsStage === 0 && isStillKnown(await this.getFacetsForKu(uid, kuId));
+    const result = await this.createFacetsSkippingEmptyStages(
+      uid, kuId, ku, lesson, sequence, nextStage,
+      knownUnlock ? ALREADY_KNOWN_STAGE : startAtSrsStage,
+      knownUnlock,
+    );
     if (!result) {
       this.logger.warn(`checkAndAdvanceStage: every remaining stage fully deduped for kuId=${kuId} (uid=${uid}), no facets created`);
       return;
@@ -310,10 +332,11 @@ export class ReviewProgressService {
     sequence: KuFacetSequence,
     stageDef: FacetStageDefinition,
     startAtSrsStage: number,
+    dueNow = false,
   ): Promise<{ stage: FacetStageDefinition; facetsCreated: number } | null> {
     let candidate: FacetStageDefinition | null = stageDef;
     while (candidate) {
-      const facetsCreated = await this.createFacetsForStage(uid, kuId, ku, lesson, candidate, startAtSrsStage);
+      const facetsCreated = await this.createFacetsForStage(uid, kuId, ku, lesson, candidate, startAtSrsStage, dueNow);
       if (facetsCreated > 0) return { stage: candidate, facetsCreated };
       this.logger.log(`Stage ${candidate.stage} produced no facets for kuId=${kuId} (fully deduped), trying next stage`);
       candidate = this.findNextApplicableStage(sequence, lesson, candidate.stage);
@@ -361,15 +384,17 @@ export class ReviewProgressService {
    * (e.g. Kanji-Component-*) target a different KU's content than the one whose
    * sequence they gate, so kuId alone can't identify stage membership.
    */
+  private async getFacetsForKu(uid: string, kuId: string): Promise<ReviewFacet[]> {
+    const snapshot = await this.facetsColRef(uid).where('source.id', '==', kuId).get();
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }) as ReviewFacet);
+  }
+
   private async getFacetsAtStage(
     uid: string,
     kuId: string,
     stage: number,
   ): Promise<ReviewFacet[]> {
-    const snapshot = await this.facetsColRef(uid).where('source.id', '==', kuId).get();
-    return snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }) as ReviewFacet)
-      .filter(f => f.sequenceStage === stage);
+    return (await this.getFacetsForKu(uid, kuId)).filter(f => f.sequenceStage === stage);
   }
 
   /** The sequence for a KU type and variant (absent variant = the default sequence). */
@@ -425,10 +450,12 @@ export class ReviewProgressService {
     lesson: Lesson,
     stageDef: FacetStageDefinition,
     startAtSrsStage = 0,
+    /** Queue the facets now even though they start above 0 (a known word's newly unlocked stage). */
+    dueNow = false,
   ): Promise<number> {
     const batch = this.db.batch();
     const now = Timestamp.now();
-    const nextReviewAt = startAtSrsStage > 0
+    const nextReviewAt = startAtSrsStage > 0 && !dueNow
       ? Timestamp.fromMillis(Date.now() + SRS_INTERVALS[startAtSrsStage] * 60 * 60 * 1000)
       : now;
     let count = 0;
