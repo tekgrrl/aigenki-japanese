@@ -22,7 +22,7 @@ const VOICES = [
   "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
 ].map((name) => ({ label: name, id: `ja-JP-Chirp3-HD-${name}` }));
 
-const DEFAULT_VOICE = "ja-JP-Chirp3-HD-Enceladus";
+const DEFAULT_VOICE = "ja-JP-Chirp3-HD-Orus";
 const VOICE_STORAGE_KEY = "pronounceVoice";
 
 export default function PronouncePage() {
