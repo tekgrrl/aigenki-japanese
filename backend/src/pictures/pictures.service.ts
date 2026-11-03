@@ -314,7 +314,7 @@ export class PicturesService {
       this.redrawing.delete(id);
       throw e;
     }
-    this.produce(this.col().doc(id), ctx, { brief: opts.brief, note: opts.note ?? undefined, style: pic.style }, id)
+    this.produce(this.col().doc(id), ctx, { brief: opts.brief, note: opts.note ?? pic.note, style: pic.style }, id) // a plain redraw keeps the saved note
       .catch(e => this.logger.error(`Redraw of picture ${id} failed: ${e?.message}`))
       .finally(() => this.redrawing.delete(id));
     return { id, redrawing: true };

@@ -66,6 +66,7 @@ export default function ScenePicture({
           const res = await apiFetch(
             `/api/scenarios/${scenarioId}/picture/status`,
           );
+          if (!res.ok) throw new Error(`Status check failed (${res.status})`);
           const status = (await res.json()) as {
             drawing: boolean;
             error?: string;
