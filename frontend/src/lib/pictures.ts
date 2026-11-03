@@ -10,10 +10,10 @@ export interface PictureRef {
 
 export const pictureUrl = (p: PictureRef) => `/api/pictures/${p.id}/image?v=${encodeURIComponent(p.file)}`;
 
-/** Approved pictures for a word (empty on any failure: pictures are optional). */
+/** Approved usage pictures for a word (empty on any failure: pictures are optional). Whole-KU pictures aren't audio-first cards. */
 export async function fetchApprovedPictures(kuId: string): Promise<PictureRef[]> {
   try {
-    const res = await apiFetch(`/api/pictures?kuId=${encodeURIComponent(kuId)}`);
+    const res = await apiFetch(`/api/pictures?kuId=${encodeURIComponent(kuId)}&kind=ku-usage`);
     if (!res.ok) return [];
     const pics = (await res.json()) as PictureRef[];
     return pics.filter((p) => p.file);

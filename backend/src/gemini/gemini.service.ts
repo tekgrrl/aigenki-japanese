@@ -16,6 +16,10 @@ import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompt
 import { buildFuriganaMessage } from '../prompts/grammar.prompts';
 import {
   PictureBrief,
+  PictureBriefInput,
+  PictureStyle,
+  PICTURE_STYLES,
+  buildFreePictureBriefMessage,
   PICTURE_BRIEF_SCHEMA,
   PICTURE_TEXT_CHECK_PROMPT,
   PICTURE_TEXT_CHECK_SCHEMA,
@@ -860,12 +864,17 @@ export class GeminiService implements OnModuleInit {
   }
 
   /** Step 1: decide what to draw (cast or not, background or not, the scene). */
-  async generatePictureBrief(
-    w: { word: string; reading: string; usage: string; definition: string; sentence: string; translation: string },
-    kuId: string,
-  ): Promise<PictureBrief> {
-    const userMessage = buildPictureBriefMessage(w);
-    return this.logged('/pictures/brief', this.modelName, { userMessage, content: w.word, kuId }, async () => {
+  async generatePictureBrief(w: PictureBriefInput, kuId: string, route = '/pictures/brief'): Promise<PictureBrief> {
+    return this.runPictureBrief(buildPictureBriefMessage(w), route, { content: w.word, kuId });
+  }
+
+  /** Step 1 for a free-standing picture: the editor's description is the subject. */
+  async generateFreePictureBrief(description: string): Promise<PictureBrief> {
+    return this.runPictureBrief(buildFreePictureBriefMessage(description), '/pictures/brief-free', { content: description.slice(0, 200) });
+  }
+
+  private async runPictureBrief(userMessage: string, route: string, meta: { content: string; kuId?: string }): Promise<PictureBrief> {
+    return this.logged(route, this.modelName, { userMessage, content: meta.content, kuId: meta.kuId ?? null }, async () => {
       const response = await this.client.models.generateContent({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
@@ -884,13 +893,14 @@ export class GeminiService implements OnModuleInit {
     brief: PictureBrief,
     references: { mimeType: string; data: string }[],
     kuId: string,
+    style: PictureStyle = 'card',
   ): Promise<{ data: Buffer; mimeType: string }> {
-    const prompt = buildPictureImagePrompt(brief);
+    const prompt = buildPictureImagePrompt(brief, style);
     const parts: any[] = [{ text: prompt }];
     if (brief.includeCast) parts.push(...references.map(r => ({ inlineData: r })));
 
     // Image bytes are never logged (they'd blow the Firestore doc limit) — only metadata.
-    return this.logged('/pictures/image', this.imageModelName, { userMessage: prompt, kuId }, async () => {
+    return this.logged('/pictures/image', this.imageModelName, { userMessage: prompt, kuId, style }, async () => {
       const delays = [0, 3000, 8000];
       let lastError: any;
       for (const delay of delays) {
@@ -899,7 +909,7 @@ export class GeminiService implements OnModuleInit {
           const response = await this.client.models.generateContent({
             model: this.imageModelName,
             contents: [{ role: 'user', parts }],
-            config: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '1:1' } },
+            config: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: PICTURE_STYLES[style].aspectRatio } },
           });
           const candidate = response.candidates?.[0];
           const image = candidate?.content?.parts?.find(p => p.inlineData?.data);

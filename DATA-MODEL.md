@@ -26,6 +26,7 @@ erDiagram
         string data_reading      "Vocab only"
         string data_definition   "Vocab only"
         string data_conjugationType "Vocab only"
+        array  data_kanji        "Vocab only: distinct kanji in content (array-contains lookup)"
         number data_wanikaniLevel "Vocab/Kanji"
         string data_meaning  "Kanji only"
     }
@@ -68,6 +69,19 @@ erDiagram
         string dismissNote   "set when dismissed"
         timestamp resolvedAt
         timestamp createdAt
+    }
+
+    Picture {
+        string id PK
+        string kuId          "FK → KnowledgeUnit.id OR Concept.id; null for free-standing"
+        object subject       "kind: ku-usage | ku | none, kuId, usage — absent on old docs = ku-usage"
+        string usage         "ku-usage only (matched by usageKey)"
+        string status        "approved | needs-review | rejected | unpicturable"
+        string origin        "generated | uploaded"
+        string style         "card | scene (absent = card)"
+        object brief         "picturable, includeCast, background, scene"
+        string file          "file name under PICTURES_DIR (local disk)"
+        array  attempts      "text-check results"
     }
 
     Question {
@@ -189,6 +203,7 @@ erDiagram
     Scenario ||--o{ UserGrammarLesson : "introduces grammar via scenario"
 
     Question ||--o{ UserQuestionState : "per-user state"
+    KnowledgeUnit ||--o{ Picture : "pictured by (usage or whole KU)"
     ReviewFacet o|--o| Question : "currentQuestionId"
 
     UserRoot ||--o{ UserKnowledgeUnit : "owns"

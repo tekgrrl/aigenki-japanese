@@ -122,6 +122,20 @@ export default function AdminKnowledgeUnitsPage() {
   }, [filterType, filterLevel, searchQuery, filtersHydrated]);
 
   const [editTarget, setEditTarget] = useState<KnowledgeUnit | null>(null);
+  const [backfill, setBackfill] = useState<{ running: boolean; message?: string }>({ running: false });
+
+  // One-off, rerunnable: sets data.kanji on every Vocab KU from its content.
+  const runKanjiBackfill = async () => {
+    setBackfill({ running: true });
+    try {
+      const res = await apiFetch("/api/knowledge-units/migrate/vocab-kanji", { method: "POST" });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const { updated, unchanged } = await res.json();
+      setBackfill({ running: false, message: `Updated ${updated}, unchanged ${unchanged}.` });
+    } catch (e) {
+      setBackfill({ running: false, message: (e as Error).message });
+    }
+  };
 
   const router = useRouter();
   const urlSearchParams = useSearchParams();
@@ -205,7 +219,18 @@ export default function AdminKnowledgeUnitsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-shodo-ink mb-6">Global Knowledge Units</h1>
+      <h1 className="text-2xl font-bold text-shodo-ink mb-2">Global Knowledge Units</h1>
+      <div className="flex items-center gap-3 mb-6">
+        <button
+          type="button"
+          onClick={runKanjiBackfill}
+          disabled={backfill.running}
+          className="rounded border border-shodo-ink/20 px-3 py-1 text-xs font-semibold text-shodo-ink disabled:opacity-40"
+        >
+          {backfill.running ? "Backfilling…" : "Backfill word kanji"}
+        </button>
+        {backfill.message && <span className="text-xs text-shodo-ink-light">{backfill.message}</span>}
+      </div>
 
       {/* Filters */}
       <div className="flex gap-3 items-center mb-4">

@@ -1,0 +1,94 @@
+/**
+ * Minimal in-memory Firestore for unit specs: collections, sub-collections, doc get/set/
+ * update (dotted paths), delete, add, getAll, batch, and where() with ==, in and
+ * array-contains on (possibly nested) fields. select()/limit() are accepted and ignored.
+ */
+type Data = Record<string, any>;
+type Op = '==' | 'in' | 'array-contains';
+
+const getPath = (d: Data, path: string) => path.split('.').reduce<any>((o, k) => (o == null ? undefined : o[k]), d);
+
+function setPath(d: Data, path: string, value: unknown): Data {
+  const [head, ...rest] = path.split('.');
+  if (rest.length === 0) return { ...d, [head]: value };
+  return { ...d, [head]: setPath(d[head] ?? {}, rest.join('.'), value) };
+}
+
+export class FakeFirestore {
+  private readonly stores = new Map<string, Map<string, Data>>();
+  private autoId = 0;
+
+  store(name: string): Map<string, Data> {
+    if (!this.stores.has(name)) this.stores.set(name, new Map());
+    return this.stores.get(name)!;
+  }
+  collection(name: string) {
+    return new FakeCollection(this, name);
+  }
+  nextId() {
+    return `auto${++this.autoId}`;
+  }
+  async getAll(...refs: FakeDocRef[]) {
+    return Promise.all(refs.map(r => r.get()));
+  }
+  batch() {
+    const ops: (() => Promise<void>)[] = [];
+    return {
+      set: (ref: FakeDocRef, data: Data, opts?: { merge?: boolean }) => { ops.push(() => ref.set(data, opts)); },
+      update: (ref: FakeDocRef, data: Data) => { ops.push(() => ref.update(data)); },
+      delete: (ref: FakeDocRef) => { ops.push(() => ref.delete()); },
+      commit: async () => { for (const op of ops) await op(); },
+    };
+  }
+}
+
+class FakeDocRef {
+  constructor(private readonly db: FakeFirestore, private readonly col: string, readonly id: string) {}
+  private get map() { return this.db.store(this.col); }
+  async get(): Promise<any> {
+    const d = this.map.get(this.id);
+    return { id: this.id, exists: !!d, data: () => (d ? structuredClone(d) : undefined), ref: this };
+  }
+  async set(data: Data, opts?: { merge?: boolean }) {
+    const cur = this.map.get(this.id);
+    this.map.set(this.id, opts?.merge && cur ? deepMerge(cur, data) : structuredClone(data));
+  }
+  async update(data: Data) {
+    let cur = this.map.get(this.id);
+    if (!cur) throw new Error(`update of missing doc ${this.col}/${this.id}`);
+    for (const [k, v] of Object.entries(data)) cur = setPath(cur, k, v);
+    this.map.set(this.id, cur);
+  }
+  async delete() { this.map.delete(this.id); }
+  collection(name: string) { return new FakeCollection(this.db, `${this.col}/${this.id}/${name}`); }
+}
+
+function deepMerge(a: Data, b: Data): Data {
+  const out: Data = { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    out[k] = v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object' ? deepMerge(a[k], v) : v;
+  }
+  return out;
+}
+
+class FakeQuery {
+  constructor(protected readonly db: FakeFirestore, protected readonly col: string, private readonly filters: [string, Op, any][] = []) {}
+  where(field: string, op: Op, value: any) { return new FakeQuery(this.db, this.col, [...this.filters, [field, op, value]]); }
+  select(..._f: string[]) { return this; }
+  limit(_n: number) { return this; }
+  async get(): Promise<any> {
+    const match = (d: Data) => this.filters.every(([f, op, v]) => {
+      const x = getPath(d, f);
+      return op === '==' ? x === v : op === 'in' ? (v as any[]).includes(x) : Array.isArray(x) && x.includes(v);
+    });
+    const docs = [...this.db.store(this.col).entries()]
+      .filter(([, d]) => match(d))
+      .map(([id, d]) => ({ id, exists: true, data: () => structuredClone(d), ref: new FakeDocRef(this.db, this.col, id) }));
+    return { empty: docs.length === 0, size: docs.length, docs, forEach: (fn: (d: any) => void) => docs.forEach(fn) };
+  }
+}
+
+class FakeCollection extends FakeQuery {
+  doc(id?: string) { return new FakeDocRef(this.db, this.col, id ?? this.db.nextId()); }
+  async add(data: Data) { const ref = this.doc(); await ref.set(data); return ref; }
+}

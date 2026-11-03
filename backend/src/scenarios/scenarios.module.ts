@@ -7,6 +7,7 @@ import { LessonsModule } from '../lessons/lessons.module';
 import { UserModule } from '../users/user.module';
 import { AuthModule } from '../auth/auth.module';
 import { GrammarSectionsModule } from '../grammar-sections/grammar-sections.module';
+import { PicturesModule } from '../pictures/pictures.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { GrammarSectionsModule } from '../grammar-sections/grammar-sections.modu
     UserModule,
     AuthModule,
     GrammarSectionsModule,
+    PicturesModule,
   ],
   controllers: [ScenariosController],
   providers: [ScenariosService],

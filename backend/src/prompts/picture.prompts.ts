@@ -25,21 +25,27 @@ export const PICTURE_BRIEF_SCHEMA = {
   required: ['picturable', 'includeCast', 'background', 'scene'],
 };
 
-export function buildPictureBriefMessage(w: {
+/** Input to the brief step. `note` is an admin instruction that takes precedence. */
+export interface PictureBriefInput {
   word: string;
   reading: string;
   usage: string;
   definition: string;
   sentence: string;
   translation: string;
-}): string {
+  note?: string;
+}
+
+export function buildPictureBriefMessage(w: PictureBriefInput): string {
+  const reading = w.reading && w.reading !== w.word ? ` (${w.reading})` : '';
+  const meaning = w.usage && w.usage !== w.definition ? `${w.usage} — ${w.definition}` : w.definition || w.usage;
+  const example = w.sentence ? `\nExample sentence: ${w.sentence} — ${w.translation}` : '';
   return `You are designing a single illustration that helps a learner remember a Japanese
 word by its meaning, without any text. The picture will be shown alongside spoken
-audio of the word and an example sentence.
+audio of the word${w.sentence ? ' and an example sentence' : ''}.
 
-Word: ${w.word} (${w.reading})
-Meaning / usage to depict: ${w.usage} — ${w.definition}
-Example sentence: ${w.sentence} — ${w.translation}
+Word: ${w.word}${reading}
+Meaning / usage to depict: ${meaning}${example}
 
 Decide:
 - picturable: false ONLY for particles, grammatical endings and pure function words.
@@ -68,6 +74,37 @@ Decide:
 - Make the scene point to THIS word, not a more concrete neighbour (e.g. for
   "practice", show repetition and effort, not a performance).
 
+${noteBlock(w.note)}
+Return JSON only:
+{"picturable": bool, "includeCast": bool, "background": "none" | string,
+ "scene": string}`;
+}
+
+function noteBlock(note?: string): string {
+  return note?.trim()
+    ? `\nEDITOR'S NOTE (follow it; where it conflicts with the guidance above, the note wins):\n${note.trim()}\n`
+    : '';
+}
+
+/**
+ * Brief for a free-standing picture (not tied to any word): the editor's description
+ * is the subject. Same rules and output as a word brief.
+ */
+export function buildFreePictureBriefMessage(description: string): string {
+  return `You are designing a single text-free illustration for a Japanese learning app,
+from an editor's description.
+
+Description: ${description.trim()}
+
+Decide:
+- picturable: true unless the description cannot be drawn without text.
+- includeCast: true only if the description involves Fude (a young woman) or Suzuri
+  (a little inkstone mascot), or needs a person and nobody else is specified.
+- background: "none" unless the description needs a setting; then at most two simple
+  elements.
+- Avoid objects that normally carry writing or logos.
+- scene: one or two sentences describing exactly what is shown.
+
 Return JSON only:
 {"picturable": bool, "includeCast": bool, "background": "none" | string,
  "scene": string}`;
@@ -86,7 +123,20 @@ appears at most once, and the brush shape exists only as Fude's topknot: no loos
 brushes or extra brush tips.
 `;
 
-export function buildPictureImagePrompt(brief: PictureBrief): string {
+/**
+ * Named render presets. `card`: the square picture card (cream paper, optional cast).
+ * `scene`: a wide establishing scene (e.g. a scenario's setting), with a soft full
+ * background. Both are text-free.
+ */
+export type PictureStyle = 'card' | 'scene';
+export const PICTURE_STYLES: Record<PictureStyle, { aspectRatio: string }> = {
+  card: { aspectRatio: '1:1' },
+  scene: { aspectRatio: '16:9' },
+};
+export const isPictureStyle = (s: unknown): s is PictureStyle => s === 'card' || s === 'scene';
+
+export function buildPictureImagePrompt(brief: PictureBrief, style: PictureStyle = 'card'): string {
+  if (style === 'scene') return buildSceneImagePrompt(brief);
   const bg = brief.background && brief.background.trim().toLowerCase() !== 'none'
     ? `, with only: ${brief.background}, kept simple, minimal and desaturated`
     : '';
@@ -108,6 +158,27 @@ SCENE: ${brief.scene}
 ABSOLUTELY NO TEXT OF ANY KIND: no letters, words, kana, kanji, numbers, labels,
 signs, captions, logos or symbols. Any paper, book, screen, scroll or sign must be
 blank. Clocks have hands but no numerals. Calendars, if shown, have blank squares.`;
+}
+
+function buildSceneImagePrompt(brief: PictureBrief): string {
+  const bg = brief.background && brief.background.trim().toLowerCase() !== 'none' ? brief.background : 'a simple, uncluttered setting';
+  return `A single wide illustration (16:9). No panels, no border.
+
+STYLE: soft watercolour with clean, fine ink linework; gentle, warm, slightly muted
+palette; friendly chibi-manga proportions; simple shapes; soft shadows.
+
+SETTING: ${bg}. A soft, desaturated watercolour background that fades gently towards
+cream paper (#F9F7F2) at the edges. Keep it calm and uncluttered: a few clear,
+recognisable elements, not a busy, detailed room.
+
+COMPOSITION: an establishing view of the scene, with any people at a comfortable
+middle distance and the important elements easy to read at a glance.
+${brief.includeCast ? CAST_BLOCK : ''}
+SCENE: ${brief.scene}
+
+ABSOLUTELY NO TEXT OF ANY KIND: no letters, words, kana, kanji, numbers, labels,
+signs, captions, logos or symbols. Signs, menus, price tags, screens, noren and
+posters must be blank or plain colour. Clocks have hands but no numerals.`;
 }
 
 export const PICTURE_TEXT_CHECK_PROMPT =

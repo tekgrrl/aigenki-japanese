@@ -85,6 +85,8 @@ export interface Scenario {
     goal: string;
     timeOfDay: string;
     visualPrompt: string;
+    /** The rendered scene, when one has been drawn (served by GET /scenarios/:id/picture). */
+    picture?: { file: string; status: "approved" | "needs-review" };
   };
 
   dialogue: ScenarioDialogueLine[];

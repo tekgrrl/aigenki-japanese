@@ -3,8 +3,10 @@ import {
   Logger,
   Inject,
   InternalServerErrorException,
-  NotFoundException
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
+import * as fs from 'fs';
 import { Firestore, CollectionReference, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { Scenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioEvaluation, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt } from '../types/scenario';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
@@ -21,6 +23,8 @@ import { GrammarMatch } from '../types/scenario';
 import { GrammarSectionsService } from '../grammar-sections/grammar-sections.service';
 
 import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
+import { PictureRenderer } from '../pictures/picture-renderer';
+import { PictureBrief } from '../prompts/picture.prompts';
 
 const VOCAB_READY_MIN_STAGE = 1;
 
@@ -37,7 +41,12 @@ export class ScenariosService {
     private readonly userService: UserService,
     private readonly validationService: ValidationService,
     private readonly grammarSectionsService: GrammarSectionsService,
+    private readonly pictureRenderer: PictureRenderer,
   ) {}
+
+  /** Scene drawings in progress ("uid/scenarioId"), and the last failure per scenario. */
+  private readonly drawingScenes = new Set<string>();
+  private readonly sceneErrors = new Map<string, string>();
 
   private scenariosColRef(uid: string): CollectionReference {
     if (uid === ADMIN_USER_ID) {
@@ -205,6 +214,61 @@ export class ScenariosService {
 
   getTemplates(): ScenarioTemplate[] {
     return SCENARIO_TEMPLATES;
+  }
+
+  /**
+   * Draw the scenario's setting (from its existing visualPrompt brief: no extra text call)
+   * in the background. Only ever on request: it costs an image call. Poll getSceneStatus.
+   */
+  async startScenePicture(uid: string, id: string): Promise<{ drawing: true }> {
+    const key = `${uid}/${id}`;
+    if (this.drawingScenes.has(key)) throw new BadRequestException('This scene is already being drawn');
+    this.drawingScenes.add(key); // claim before any await
+    let scenario: Scenario | null;
+    try {
+      scenario = await this.getScenario(uid, id);
+      if (!scenario) throw new NotFoundException('Scenario not found');
+      if (!scenario.setting?.visualPrompt?.trim()) throw new BadRequestException('This scenario has no scene description to draw');
+    } catch (e) {
+      this.drawingScenes.delete(key);
+      throw e;
+    }
+    this.sceneErrors.delete(key);
+    const s = scenario.setting;
+    const brief: PictureBrief = {
+      picturable: true,
+      includeCast: false,
+      background: [s.location, s.timeOfDay].filter(Boolean).join(', ') || 'none',
+      scene: s.visualPrompt,
+    };
+    const subdir = `scenarios/${uid}`;
+    this.pictureRenderer
+      .render(brief, { style: 'scene', prefix: id, subdir, logId: id })
+      .then(async result => {
+        await this.scenariosColRef(uid).doc(id).update({
+          'setting.picture': { file: result.file, status: result.status, attempts: result.attempts, createdAt: Timestamp.now() },
+        });
+        this.pictureRenderer.removeByPrefix(id, result.file, subdir);
+        this.logger.log(`Scene for scenario ${id}: ${result.status} after ${result.attempts.length} attempt(s)`);
+      })
+      .catch(e => {
+        this.sceneErrors.set(key, e?.message ?? 'Drawing failed');
+        this.logger.error(`Scene for scenario ${id} failed: ${e?.message}`);
+      })
+      .finally(() => this.drawingScenes.delete(key));
+    return { drawing: true };
+  }
+
+  getSceneStatus(uid: string, id: string): { drawing: boolean; error?: string } {
+    const key = `${uid}/${id}`;
+    return { drawing: this.drawingScenes.has(key), ...(this.sceneErrors.has(key) ? { error: this.sceneErrors.get(key) } : {}) };
+  }
+
+  /** Absolute path of the scenario's scene image (the caller's own scenario only), or null. */
+  async scenePicturePath(uid: string, id: string): Promise<string | null> {
+    const file = (await this.getScenario(uid, id))?.setting?.picture?.file;
+    const p = file ? this.pictureRenderer.resolve(file) : null;
+    return p && fs.existsSync(p) ? p : null;
   }
 
   async getScenario(uid: string, id: string): Promise<Scenario | null> {

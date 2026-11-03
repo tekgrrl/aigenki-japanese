@@ -100,6 +100,8 @@ export interface Scenario {
         goal: string;
         timeOfDay: string;
         visualPrompt: string;
+        /** The rendered scene (from visualPrompt), when the user has drawn one. */
+        picture?: ScenarioPicture;
     };
 
     dialogue: ScenarioDialogueLine[];
@@ -215,4 +217,11 @@ export class ResetSessionDto {
     @IsBoolean()
     @IsOptional()
     archive: boolean = false;
+}
+/** A scenario's rendered setting image. The file lives under PICTURES_DIR/scenarios/{uid}/. */
+export interface ScenarioPicture {
+    file: string;
+    status: 'approved' | 'needs-review';
+    attempts: { hasText: boolean; where: string }[];
+    createdAt: Timestamp;
 }

@@ -336,6 +336,8 @@ export interface VocabKnowledgeUnit extends KnowledgeUnitBase {
     jlptLevel?: string | null;
     wanikaniLevel?: number | null;
     corpusNotes?: string;
+    /** Distinct kanji in content, in order (lib/kanji-chars kanjiIn) — "words using 食" is one array-contains query. */
+    kanji?: string[];
     [key: string]: any;
   };
 }
