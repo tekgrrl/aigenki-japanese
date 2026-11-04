@@ -18,7 +18,8 @@ function setup() {
     remove: jest.fn(async (_uid: string, kuId: string) => ukus.delete(kuId)),
   };
   const learningProgress = { recomputeAndCache: jest.fn() };
-  const service = new ReviewProgressService(db as any, knowledgeUnits as any, {} as any, userKus as any, learningProgress as any);
+  const stats = { removeFromTutorVocab: jest.fn() };
+  const service = new ReviewProgressService(db as any, knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, stats as any);
 
   const facets = db.collection('users').doc(UID).collection('review-facets');
   const seed = async () => {
@@ -31,7 +32,7 @@ function setup() {
       await db.collection('pictures').doc(`pic${i}`).set({ kuId, status: 'approved', file: `${kuId}.png`, usage: 'u' });
     }
   };
-  return { db, service, ukus, facets, seed };
+  return { db, service, ukus, facets, seed, stats };
 }
 
 describe('audioFirstStatus', () => {
@@ -39,6 +40,13 @@ describe('audioFirstStatus', () => {
     const { service, seed } = setup();
     await seed();
     expect(await service.audioFirstStatus(UID, WORD)).toEqual({ eligible: true, facetCount: 2 });
+  });
+
+  it('counts exactly the facets the switch deletes, including ones matched only by kuId', async () => {
+    const { service, seed, facets } = setup();
+    await seed();
+    await facets.doc('legacy').set({ kuId: WORD, facetType: 'Content-to-Reading' }); // no source
+    expect((await service.audioFirstStatus(UID, WORD)).facetCount).toBe(3);
   });
 
   it.each([
@@ -61,11 +69,12 @@ describe('audioFirstStatus', () => {
 
 describe('returnToLessonsAsAudioFirst', () => {
   it('deletes the facets, resets the word to stage 0 with no variant, and drops its orphaned kanji', async () => {
-    const { service, seed, ukus, db } = setup();
+    const { service, seed, ukus, db, stats } = setup();
     await seed();
     expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 2 });
     expect(db.store(`users/${UID}/review-facets`).size).toBe(0);
-    expect(ukus.get(WORD)).toMatchObject({ currentStage: 0, facet_count: 0 });
+    expect(ukus.get(WORD)).toMatchObject({ status: 'learning', currentStage: 0, facet_count: 0 });
+    expect(stats.removeFromTutorVocab).toHaveBeenCalledWith(UID, '川');
     expect(ukus.get(WORD)).toHaveProperty('sequenceVariant'); // FieldValue.delete() sentinel, applied by Firestore
     expect(ukus.has(KANJI)).toBe(false);
   });

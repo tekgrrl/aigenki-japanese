@@ -25,6 +25,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
+import { StatsService } from '../stats/stats.service';
 
 /** A picture card needs the word plus three distractor words, or it can't record a result. */
 const MIN_PICTURED_WORDS = 4;
@@ -52,6 +53,7 @@ export class ReviewProgressService {
     private readonly lessonsService: LessonsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
     private readonly learningProgressService: LearningProgressService,
+    private readonly statsService: StatsService,
   ) {}
 
   private facetsColRef(uid: string): CollectionReference {
@@ -200,20 +202,34 @@ export class ReviewProgressService {
     const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     if (!uku) return no('Not enrolled: it will be taught audio-first when it comes up in lessons');
     if (uku.sequenceVariant === 'audio-first') return no('Already audio-first');
-    const facetCount = (await this.getFacetsForKu(uid, kuId)).length;
+    const facetCount = (await this.sequenceFacetDocs(uid, kuId)).size; // exactly what the switch deletes
     if (facetCount === 0) return no('Already waiting in your lessons');
-    const user = await this.db.collection('users').doc(uid).get();
-    if (user.data()?.preferences?.audioFirstExperiment !== true) return no('The audio-first experiment is off in your profile', facetCount);
+    const blocker = await this.audioFirstBlocker(uid, kuId, { checkFlag: true });
+    if (blocker) return no(blocker, facetCount);
+    return { eligible: true, facetCount };
+  }
+
+  /**
+   * Why a Vocab word can't be audio-first right now, or null if it can. The one source of
+   * truth for chooseVariant (enrollment) and audioFirstStatus (the admin switch), so a word
+   * the switch accepts is always enrolled audio-first. `checkFlag: false` is the reset path,
+   * which keeps an existing audio-first word's variant whatever the flag says.
+   */
+  private async audioFirstBlocker(uid: string, kuId: string, { checkFlag }: { checkFlag: boolean }): Promise<string | null> {
+    if (checkFlag) {
+      const user = await this.db.collection('users').doc(uid).get();
+      if (user.data()?.preferences?.audioFirstExperiment !== true) return 'The audio-first experiment is off in your profile';
+    }
     if ((await this.approvedPictures(kuId)).length === 0) {
       // Whole-KU pictures aren't shown to learners yet (no card, slide or distractor uses them).
       const wholeKu = await this.db.collection(PICTURES_COLLECTION)
         .where('kuId', '==', kuId).where('status', '==', 'approved').where('subject.kind', '==', 'ku').limit(1).get();
-      return no(wholeKu.empty
+      return wholeKu.empty
         ? 'No approved usage picture'
-        : 'Only a whole-KU picture, which isn\'t used yet: re-attach it as a usage of the word', facetCount);
+        : 'Only a whole-KU picture, which isn\'t used yet: re-attach it as a usage of the word';
     }
-    if ((await this.picturedWordCount()) < MIN_PICTURED_WORDS) return no(`Fewer than ${MIN_PICTURED_WORDS} pictured words for distractors`, facetCount);
-    return { eligible: true, facetCount };
+    if ((await this.picturedWordCount()) < MIN_PICTURED_WORDS) return `Fewer than ${MIN_PICTURED_WORDS} pictured words for distractors`;
+    return null;
   }
 
   /**
@@ -227,12 +243,18 @@ export class ReviewProgressService {
 
     const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
     await this.userKnowledgeUnitsService.update(uid, kuId, {
+      status: 'learning', // waiting for its lesson again (recompute below agrees: no facets)
       currentStage: 0,
       facet_count: 0,
       sequenceVariant: FieldValue.delete(),
     });
     await this.removeOrphanedComponentKanji(uid, kuId, countByKuId.keys());
     await this.learningProgressService.recomputeAndCache(uid, kuId);
+    // Audio-first words are kept out of the tutor context (recomputeAndCache never adds
+    // them), but this one may have been added while it was standard: Gemini would keep
+    // writing it in kanji. Drop it from both lists.
+    const ku = await this.knowledgeUnitsService.findOneById(kuId);
+    if (ku?.content) await this.statsService.removeFromTutorVocab(uid, ku.content);
 
     this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, back in lessons`);
     return { facetsDeleted };
@@ -246,12 +268,7 @@ export class ReviewProgressService {
     uid: string,
     kuId: string,
   ): Promise<{ facetsDeleted: number; countByKuId: Map<string, number> }> {
-    const [bySource, byKu] = await Promise.all([
-      this.facetsColRef(uid).where('source.id', '==', kuId).get(),
-      this.facetsColRef(uid).where('kuId', '==', kuId).get(),
-    ]);
-    const docs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
-    [...bySource.docs, ...byKu.docs].forEach(d => docs.set(d.id, d));
+    const docs = await this.sequenceFacetDocs(uid, kuId);
 
     const countByKuId = new Map<string, number>();
     const batch = this.db.batch();
@@ -271,6 +288,17 @@ export class ReviewProgressService {
         }),
     );
     return { facetsDeleted: docs.size, countByKuId };
+  }
+
+  /** Every facet in a word's sequence (by source.id) or targeting it (by kuId), de-duplicated. */
+  private async sequenceFacetDocs(uid: string, kuId: string): Promise<Map<string, FirebaseFirestore.QueryDocumentSnapshot>> {
+    const [bySource, byKu] = await Promise.all([
+      this.facetsColRef(uid).where('source.id', '==', kuId).get(),
+      this.facetsColRef(uid).where('kuId', '==', kuId).get(),
+    ]);
+    const docs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    [...bySource.docs, ...byKu.docs].forEach(d => docs.set(d.id, d));
+    return docs;
   }
 
   /**
@@ -504,14 +532,8 @@ export class ReviewProgressService {
     resetFrom?: { variant?: SequenceVariant },
   ): Promise<SequenceVariant | undefined> {
     if (ku.type !== 'Vocab') return undefined;
-    if (resetFrom) {
-      if (resetFrom.variant !== 'audio-first') return undefined;
-    } else {
-      const user = await this.db.collection('users').doc(uid).get();
-      if (user.data()?.preferences?.audioFirstExperiment !== true) return undefined;
-    }
-    if ((await this.approvedPictures(ku.id)).length === 0) return undefined;
-    return (await this.picturedWordCount()) >= MIN_PICTURED_WORDS ? 'audio-first' : undefined;
+    if (resetFrom && resetFrom.variant !== 'audio-first') return undefined;
+    return (await this.audioFirstBlocker(uid, ku.id, { checkFlag: !resetFrom })) ? undefined : 'audio-first';
   }
 
   /** Distinct words with an approved picture: the pool picture-card distractors come from. */

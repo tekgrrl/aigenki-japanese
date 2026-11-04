@@ -399,6 +399,12 @@ export class StatsService {
         await this.removeTutorVocabFacetType(uid, 'frontierVocab', content);
     }
 
+    /** Drops a word from both frontierVocab and leechVocab (every facet type). */
+    async removeFromTutorVocab(uid: string, content: string): Promise<void> {
+        await this.removeTutorVocabFacetType(uid, 'frontierVocab', content);
+        await this.removeTutorVocabFacetType(uid, 'leechVocab', content);
+    }
+
     async addToLeechVocab(uid: string, content: string, facetType: FacetType): Promise<void> {
         await this.mergeTutorVocabEntry(uid, 'leechVocab', content, [facetType]);
     }
