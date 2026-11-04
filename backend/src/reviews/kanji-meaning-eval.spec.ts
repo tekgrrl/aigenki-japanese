@@ -23,6 +23,14 @@ describe('evaluateAnswer: Kanji-Component-Meaning accepts Kanji Alive meanings',
     expect(gemini.evaluateAnswer.mock.calls[0][2]).toEqual(['meeting', 'meet', 'society']);
   });
 
+  it('never looks Kanji Alive up when the facet\'s own answers match (川: "river")', async () => {
+    const { service, kanji, gemini } = makeService(['river']);
+    const out = await service.evaluateAnswer('u', 'river', ['river'], '川', '川', '', 'k', 'Kanji-Component-Meaning');
+    expect(out.result).toBe('pass');
+    expect(kanji.getKanjiAliveMeanings).not.toHaveBeenCalled();
+    expect(gemini.evaluateAnswer).not.toHaveBeenCalled();
+  });
+
   it('leaves other facet types alone', async () => {
     const { service, kanji } = makeService(['meet']);
     const out = await service.evaluateAnswer('u', 'meet', ['meeting'], '会う', '会う', '', 'k', 'Content-to-Definition');

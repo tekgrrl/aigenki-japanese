@@ -305,19 +305,21 @@ export class ReviewsService {
         facetType?: FacetType,
         facetId?: string,
     ) {
-        // The facet's meanings are the gloss of the word that introduced the kanji; the Kanji
-        // lesson shows Kanji Alive's. Accept either (local check and AI prompt alike).
-        if (facetType === 'Kanji-Component-Meaning' && topic) {
-            const kanjiAlive = await this.kanjiService.getKanjiAliveMeanings(topic);
-            expectedAnswers = Array.from(new Set([...expectedAnswers, ...kanjiAlive]));
-        }
-
         // 1. Local Check — strip trailing Japanese/ASCII punctuation before comparing
         const stripTrailing = (s: string) => s.replace(/[。、！？,.!?\s]+$/u, '').trim();
         const normalize = (s: string) => stripTrailing(s.toLowerCase());
-        const isLocalMatch = expectedAnswers.some(
-            (ans) => normalize(ans) === normalize(userAnswer),
-        );
+        const matchesLocally = (answers: string[]) =>
+            answers.some((ans) => normalize(ans) === normalize(userAnswer));
+        let isLocalMatch = matchesLocally(expectedAnswers);
+
+        // The facet's meanings are the gloss of the word that introduced the kanji; the Kanji
+        // lesson shows Kanji Alive's. Accept either — but only look Kanji Alive up when the
+        // facet's own answers didn't match, so a correct answer never waits on the network.
+        if (!isLocalMatch && facetType === 'Kanji-Component-Meaning' && topic) {
+            const kanjiAlive = await this.kanjiService.getKanjiAliveMeanings(topic);
+            expectedAnswers = Array.from(new Set([...expectedAnswers, ...kanjiAlive]));
+            isLocalMatch = matchesLocally(expectedAnswers);
+        }
 
         if (isLocalMatch) {
             this.logger.log(`Local match passed for topic: ${topic}`);

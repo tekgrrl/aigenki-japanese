@@ -6,6 +6,9 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { KanjiLesson, KnowledgeUnit } from '@/types'; // Adjust path to your shared types  
 import { GeminiService } from '../gemini/gemini.service';
 
+/** Answer checking waits on this lookup only when the facet's own answers didn't match; keep it short. */
+const KANJI_ALIVE_EVAL_TIMEOUT_MS = 3000;
+
 @Injectable()
 export class KanjiService {
     private readonly logger = new Logger(KanjiService.name);
@@ -139,7 +142,7 @@ export class KanjiService {
         const cached = this.kanjiAliveMeanings.get(kanji);
         if (cached) return cached;
         try {
-            const data = await this.fetchKanjiAliveData(kanji);
+            const data = await this.fetchKanjiAliveData(kanji, KANJI_ALIVE_EVAL_TIMEOUT_MS);
             const english: string = data?.kanji?.meaning?.english ?? '';
             const meanings = english.split(',').map(s => s.trim()).filter(Boolean);
             this.kanjiAliveMeanings.set(kanji, meanings);
@@ -150,7 +153,8 @@ export class KanjiService {
         }
     }
 
-    private async fetchKanjiAliveData(kanji: string) {
+    /** `timeoutMs` caps the whole request; omitted, the runtime defaults apply (10s connect timeout). */
+    private async fetchKanjiAliveData(kanji: string, timeoutMs?: number) {
         if (!this.rapidApiKey) {
             throw new Error('RAPIDAPI_KEY is not defined');
         }
@@ -165,6 +169,7 @@ export class KanjiService {
                     'X-RapidAPI-Key': this.rapidApiKey,
                     'X-RapidAPI-Host': this.rapidApiHost,
                 },
+                ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
             });
 
             if (!response.ok) {
