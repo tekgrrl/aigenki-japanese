@@ -48,6 +48,14 @@ describe('getQueue: Start Learning services the waiting queue first', () => {
     expect(q[0].kuId).toBe('v11');
   });
 
+  it('a long run of deleted KUs does not hide newer waiting words', async () => {
+    const { service, uku, ku } = setup();
+    for (let i = 0; i < 60; i++) await uku(`gone${i}`, 'learning', i);
+    await ku('v1', 'Vocab', '川');
+    await uku('v1', 'learning', 100);
+    expect((await service.getQueue(UID)).map(i => i.kuId)).toEqual(['v1']);
+  });
+
   it('skips a waiting UKU whose KU was deleted', async () => {
     const { service, uku, ku } = setup();
     await ku('v1', 'Vocab', '川');

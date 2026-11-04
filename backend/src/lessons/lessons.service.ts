@@ -601,16 +601,20 @@ export class LessonsService {
     const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
     const candidates = ukuSnap.docs.map(d => d.data())
       .filter(u => u.kuId && !started.has(u.kuId as string))
-      .sort((a, b) => millis(a.createdAt) - millis(b.createdAt))
-      .slice(0, WAITING_PER_SESSION * 3); // headroom for deleted KUs without reading every one
-    if (candidates.length === 0) return [];
+      .sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
 
+    // Read in chunks until enough live KUs are found: a run of UKUs whose KU was deleted
+    // must not hide newer waiting words.
     const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
-    const kuDocs = await this.db.getAll(...candidates.map(u => kuCol.doc(u.kuId as string)));
-    return kuDocs
-      .filter(d => d.exists)
-      .slice(0, WAITING_PER_SESSION)
-      .map(d => ({ kuId: d.id, content: d.data()!.content as string, type: d.data()!.type as string }));
+    const found: { kuId: string; content: string; type: string }[] = [];
+    for (let i = 0; i < candidates.length && found.length < WAITING_PER_SESSION; i += 50) {
+      const chunk = candidates.slice(i, i + 50);
+      const kuDocs = await this.db.getAll(...chunk.map(u => kuCol.doc(u.kuId as string)));
+      for (const d of kuDocs) {
+        if (d.exists) found.push({ kuId: d.id, content: d.data()!.content as string, type: d.data()!.type as string });
+      }
+    }
+    return found.slice(0, WAITING_PER_SESSION);
   }
 
   async processBatch(uid: string, vocabValues: { id: string; content: string }[]) {
