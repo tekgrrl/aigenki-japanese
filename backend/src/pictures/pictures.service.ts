@@ -495,13 +495,16 @@ export class PicturesService {
       return this.usageContext(kuId, lesson as VocabLesson, source);
     }
 
-    // 'ku': a whole KU of any type, or a Concept (they live in their own collection).
+    // 'ku': a whole word, grammar point or Concept (Concepts live in their own collection).
+    // Never a Kanji: AIGENKI doesn't teach kanji through pictures, and a word like 川
+    // shares its content with its Kanji KU, so a content lookup can land on the wrong one.
     let ku = kuDoc.exists ? (kuDoc.data() as Record<string, any>) : null;
     if (!ku) {
       const conceptDoc = await this.db.collection(CONCEPTS_COLLECTION).doc(kuId).get();
       if (conceptDoc.exists) ku = { type: 'Concept', ...conceptDoc.data() };
     }
     if (!ku) throw new NotFoundException(`KU ${kuId} not found`);
+    if (ku.type === 'Kanji') throw new BadRequestException(`KU ${kuId} is a Kanji; pictures attach to words, grammar or concepts`);
     const meaning = kuMeaning(ku, lesson);
     const word = ku.type === 'Vocab' ? (lesson?.vocab ?? ku.content) : ku.content;
     const reading = ku.type === 'Vocab' ? (lesson?.reading ?? ku.data?.reading ?? '') : (ku.data?.reading ?? '');

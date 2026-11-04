@@ -15,7 +15,7 @@ export interface PictureBrief {
 
 export const SUBJECT_LABEL: Record<SubjectKind, string> = {
   "ku-usage": "A usage of a word",
-  ku: "A whole KU (any type)",
+  ku: "A whole KU (not Kanji; not shown to learners yet)",
   none: "Free-standing (no KU yet)",
 };
 
@@ -34,9 +34,12 @@ export async function resolveKuId(
   if (!anyType) params.set("type", "Vocab");
   const res = await apiFetch(`/api/knowledge-units/search?${params}`);
   const hits = res.ok
-    ? ((await res.json()) as { id: string; content: string }[])
+    ? ((await res.json()) as { id: string; content: string; type: string }[])
     : [];
-  const match = hits.find((k) => k.content === q || k.id === q);
+  // Pictures never attach to a Kanji, and words like 川 share content with their Kanji KU.
+  const match = hits.find(
+    (k) => k.type !== "Kanji" && (k.content === q || k.id === q),
+  );
   if (match) return match.id;
   return /^(wk-\d+|[A-Za-z0-9]{20})$/.test(q) ? q : null;
 }
