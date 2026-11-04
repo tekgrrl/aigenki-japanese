@@ -399,6 +399,19 @@ export class StatsService {
         await this.removeTutorVocabFacetType(uid, 'frontierVocab', content);
     }
 
+    /** Drops a word from both frontierVocab and leechVocab (every facet type). */
+    async removeFromTutorVocab(uid: string, content: string): Promise<void> {
+        const userRef = this.db.collection('users').doc(uid);
+        await this.db.runTransaction(async (transaction) => {
+            const ctx = (await transaction.get(userRef)).data()?.tutorContext ?? {};
+            const without = (entries: TutorVocabEntry[] = []) => entries.filter(e => e.content !== content);
+            transaction.update(userRef, {
+                'tutorContext.frontierVocab': without(ctx.frontierVocab),
+                'tutorContext.leechVocab': without(ctx.leechVocab),
+            });
+        });
+    }
+
     async addToLeechVocab(uid: string, content: string, facetType: FacetType): Promise<void> {
         await this.mergeTutorVocabEntry(uid, 'leechVocab', content, [facetType]);
     }

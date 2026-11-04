@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common'
 import { CollectionReference, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
+  KNOWLEDGE_UNITS_COLLECTION,
   PICTURES_COLLECTION,
   REVIEW_FACETS_COLLECTION,
+  USER_KUS_SUBCOLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
@@ -25,6 +27,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
+import { StatsService } from '../stats/stats.service';
 
 /** A picture card needs the word plus three distractor words, or it can't record a result. */
 const MIN_PICTURED_WORDS = 4;
@@ -52,6 +55,7 @@ export class ReviewProgressService {
     private readonly lessonsService: LessonsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
     private readonly learningProgressService: LearningProgressService,
+    private readonly statsService: StatsService,
   ) {}
 
   private facetsColRef(uid: string): CollectionReference {
@@ -173,12 +177,117 @@ export class ReviewProgressService {
     uid: string,
     kuId: string,
   ): Promise<{ facetsDeleted: number; stage: number; facetsCreated: number }> {
-    const [bySource, byKu] = await Promise.all([
-      this.facetsColRef(uid).where('source.id', '==', kuId).get(),
-      this.facetsColRef(uid).where('kuId', '==', kuId).get(),
-    ]);
-    const docs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
-    [...bySource.docs, ...byKu.docs].forEach(d => docs.set(d.id, d));
+    const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
+    const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
+    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
+
+    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
+    if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
+
+    await this.removeOrphanedComponentKanji(uid, kuId, countByKuId.keys());
+
+    this.logger.log(
+      `resetSequence uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
+    );
+    return { facetsDeleted, stage, facetsCreated };
+  }
+
+  /**
+   * Whether this user's enrolled word can be sent back to lessons to be relearned
+   * audio-first, and if not, why. Steps 5–7 are chooseVariant's own conditions, so an
+   * eligible word is guaranteed to be enrolled audio-first when the lesson is finished.
+   */
+  async audioFirstStatus(uid: string, kuId: string): Promise<{ eligible: boolean; reason?: string; facetCount: number }> {
+    const no = (reason: string, facetCount = 0) => ({ eligible: false, reason, facetCount });
+    const ku = await this.knowledgeUnitsService.findOneById(kuId);
+    if (ku?.type !== 'Vocab') return no('Only Vocab words can be audio-first');
+    const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
+    if (!uku) return no('Not enrolled: it will be taught audio-first when it comes up in lessons');
+    if (uku.sequenceVariant === 'audio-first') return no('Already audio-first');
+    const docs = await this.sequenceFacetDocs(uid, kuId);
+    const facetCount = docs.size - (await this.planKanjiRehoming(uid, kuId, docs)).size; // exactly what the switch deletes
+    const blocker = await this.audioFirstBlocker(uid, kuId, { checkFlag: true });
+    if (blocker) return no(blocker, facetCount);
+    if (docs.size === 0) return no('Already waiting in your lessons: it will be taught audio-first');
+    return { eligible: true, facetCount };
+  }
+
+  /**
+   * Why a Vocab word can't be audio-first right now, or null if it can. The one source of
+   * truth for chooseVariant (enrollment) and audioFirstStatus (the admin switch), so a word
+   * the switch accepts is always enrolled audio-first. `checkFlag: false` is the reset path,
+   * which keeps an existing audio-first word's variant whatever the flag says.
+   */
+  private async audioFirstBlocker(uid: string, kuId: string, { checkFlag }: { checkFlag: boolean }): Promise<string | null> {
+    if (checkFlag) {
+      const user = await this.db.collection('users').doc(uid).get();
+      if (user.data()?.preferences?.audioFirstExperiment !== true) return 'The audio-first experiment is off in your profile';
+    }
+    if ((await this.approvedPictures(kuId)).length === 0) {
+      // Whole-KU pictures aren't shown to learners yet (no card, slide or distractor uses them).
+      const wholeKu = await this.db.collection(PICTURES_COLLECTION)
+        .where('kuId', '==', kuId).where('status', '==', 'approved').where('subject.kind', '==', 'ku').limit(1).get();
+      return wholeKu.empty
+        ? 'No approved usage picture'
+        : 'Only a whole-KU picture, which isn\'t used yet: re-attach it as a usage of the word';
+    }
+    if ((await this.picturedWordCount()) < MIN_PICTURED_WORDS) return `Fewer than ${MIN_PICTURED_WORDS} pictured words for distractors`;
+    return null;
+  }
+
+  /**
+   * Admin tool: deletes the word's facets but keeps it enrolled at stage 0 with no variant,
+   * so it reappears in Start Learning ("enrolled but not started") and is relearned with
+   * audio-first slides, then enrolled audio-first by chooseVariant. SRS progress is lost.
+   */
+  async returnToLessonsAsAudioFirst(uid: string, kuId: string): Promise<{ facetsDeleted: number }> {
+    const status = await this.audioFirstStatus(uid, kuId);
+    if (!status.eligible) throw new BadRequestException(status.reason);
+
+    // Kanji-component facets this word introduced are shared: another enrolled word with the
+    // same kanji skipped making its own (per-user dedup). Hand those to that word instead of
+    // deleting them, so its kanji stays reviewed.
+    const rehome = await this.planKanjiRehoming(uid, kuId, await this.sequenceFacetDocs(uid, kuId));
+    for (const [facetId, { toKuId, kanjiKuId }] of rehome) {
+      await this.facetsColRef(uid).doc(facetId).update({ 'source.id': toKuId });
+      const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, kanjiKuId);
+      if (kanjiUku?.source?.type === 'lesson' && kanjiUku.source.id === kuId) {
+        await this.userKnowledgeUnitsService.update(uid, kanjiKuId, { source: { type: 'lesson', id: toKuId } });
+      }
+      await this.userKnowledgeUnitsService.update(uid, toKuId, { facet_count: FieldValue.increment(1) });
+    }
+    for (const toKuId of new Set([...rehome.values()].map(r => r.toKuId))) {
+      await this.learningProgressService.recomputeAndCache(uid, toKuId);
+    }
+
+    const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
+    await this.userKnowledgeUnitsService.update(uid, kuId, {
+      status: 'learning', // waiting for its lesson again (recompute below agrees: no facets)
+      currentStage: 0,
+      facet_count: 0,
+      sequenceVariant: FieldValue.delete(),
+    });
+    await this.removeOrphanedComponentKanji(uid, kuId, countByKuId.keys());
+    await this.learningProgressService.recomputeAndCache(uid, kuId);
+    // Audio-first words are kept out of the tutor context (recomputeAndCache never adds
+    // them), but this one may have been added while it was standard: Gemini would keep
+    // writing it in kanji. Drop it from both lists.
+    const ku = await this.knowledgeUnitsService.findOneById(kuId);
+    if (ku?.content) await this.statsService.removeFromTutorVocab(uid, ku.content);
+
+    this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, handed ${rehome.size} kanji facets to other words, back in lessons`);
+    return { facetsDeleted };
+  }
+
+  /**
+   * Deletes every facet in a word's sequence (by source.id) or targeting it (by kuId), and
+   * decrements/recomputes the other KUs those facets counted toward (component kanji).
+   */
+  private async deleteSequenceFacets(
+    uid: string,
+    kuId: string,
+  ): Promise<{ facetsDeleted: number; countByKuId: Map<string, number> }> {
+    const docs = await this.sequenceFacetDocs(uid, kuId);
 
     const countByKuId = new Map<string, number>();
     const batch = this.db.batch();
@@ -197,17 +306,59 @@ export class ReviewProgressService {
           await this.learningProgressService.recomputeAndCache(uid, target);
         }),
     );
-    const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
-    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
+    return { facetsDeleted: docs.size, countByKuId };
+  }
 
-    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
-    if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
+  /**
+   * For each kanji-component facet in this word's sequence, another enrolled default-sequence
+   * Vocab word containing the same kanji (oldest enrolment first) that should own it instead.
+   * Facets with no such word aren't in the map (they're deleted with the word's sequence).
+   */
+  private async planKanjiRehoming(
+    uid: string,
+    kuId: string,
+    docs: Map<string, FirebaseFirestore.QueryDocumentSnapshot>,
+  ): Promise<Map<string, { toKuId: string; kanjiKuId: string }>> {
+    const plan = new Map<string, { toKuId: string; kanjiKuId: string }>();
+    const kanjiFacets = [...docs.values()].filter(d => {
+      const f = d.data();
+      return String(f.facetType).startsWith('Kanji-Component') && f.kuId !== kuId && f.data?.content;
+    });
+    if (kanjiFacets.length === 0) return plan;
 
-    // A component kanji enrolled through this word (its UKU's source) that has no facets
-    // left after the rebuild would otherwise sit in the learning queue. Kanji enrolled any
-    // other way (directly, a flag, a scenario, another word) are left alone.
+    const ukus = (await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get()).docs.map(d => d.data());
+    const enrolled = new Map(ukus.filter(u => u.kuId && u.kuId !== kuId && u.sequenceVariant !== 'audio-first').map(u => [u.kuId as string, u]));
+    const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+    for (const d of kanjiFacets) {
+      const char = d.data().data.content as string;
+      const words = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).where('data.kanji', 'array-contains', char).get();
+      const owner = words.docs
+        .filter(w => w.data().type === 'Vocab' && enrolled.has(w.id))
+        .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt))[0];
+      if (owner) plan.set(d.id, { toKuId: owner.id, kanjiKuId: d.data().kuId as string });
+    }
+    return plan;
+  }
+
+  /** Every facet in a word's sequence (by source.id) or targeting it (by kuId), de-duplicated. */
+  private async sequenceFacetDocs(uid: string, kuId: string): Promise<Map<string, FirebaseFirestore.QueryDocumentSnapshot>> {
+    const [bySource, byKu] = await Promise.all([
+      this.facetsColRef(uid).where('source.id', '==', kuId).get(),
+      this.facetsColRef(uid).where('kuId', '==', kuId).get(),
+    ]);
+    const docs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    [...bySource.docs, ...byKu.docs].forEach(d => docs.set(d.id, d));
+    return docs;
+  }
+
+  /**
+   * A component kanji enrolled through this word (its UKU's source) that has no facets
+   * left would otherwise sit in the learning queue. Kanji enrolled any other way
+   * (directly, a flag, a scenario, another word) are left alone.
+   */
+  private async removeOrphanedComponentKanji(uid: string, kuId: string, targets: Iterable<string>): Promise<void> {
     await Promise.all(
-      Array.from(countByKuId.keys())
+      Array.from(targets)
         .filter(target => target !== kuId)
         .map(async target => {
           const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, target);
@@ -219,11 +370,6 @@ export class ReviewProgressService {
           if (byTarget.empty && bySequence.empty) await this.userKnowledgeUnitsService.remove(uid, target);
         }),
     );
-
-    this.logger.log(
-      `resetSequence uid=${uid} kuId=${kuId}: deleted ${docs.size} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
-    );
-    return { facetsDeleted: docs.size, stage, facetsCreated };
   }
 
   /**
@@ -436,14 +582,8 @@ export class ReviewProgressService {
     resetFrom?: { variant?: SequenceVariant },
   ): Promise<SequenceVariant | undefined> {
     if (ku.type !== 'Vocab') return undefined;
-    if (resetFrom) {
-      if (resetFrom.variant !== 'audio-first') return undefined;
-    } else {
-      const user = await this.db.collection('users').doc(uid).get();
-      if (user.data()?.preferences?.audioFirstExperiment !== true) return undefined;
-    }
-    if ((await this.approvedPictures(ku.id)).length === 0) return undefined;
-    return (await this.picturedWordCount()) >= MIN_PICTURED_WORDS ? 'audio-first' : undefined;
+    if (resetFrom && resetFrom.variant !== 'audio-first') return undefined;
+    return (await this.audioFirstBlocker(uid, ku.id, { checkFlag: !resetFrom })) ? undefined : 'audio-first';
   }
 
   /** Distinct words with an approved picture: the pool picture-card distractors come from. */

@@ -656,6 +656,15 @@ describe('PicturesService', () => {
       expect(usage.map(p => p.id)).toEqual(['p1']);
     });
 
+    it('never attaches a whole-KU picture to a Kanji (川 shares content with its Kanji KU)', async () => {
+      seed(vocabLesson([ex('river', 1)]));
+      existingPicture('p1', 'river', 'approved');
+      db.collection('knowledge-units').doc('k1').set({ type: 'Kanji', content: '川', data: { meaning: 'river' } });
+      await expect(service.attach('p1', { kind: 'ku', kuId: 'k1' })).rejects.toThrow(/is a Kanji/);
+      await expect(service.create({ subject: { kind: 'ku', kuId: 'k1' } })).rejects.toThrow(/is a Kanji/);
+      expect(pictures().find(p => p.id === 'p1')).toMatchObject({ kuId: KU, usage: 'river' });
+    });
+
     it('detaches a picture and re-attaches it to a usage', async () => {
       seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
       existingPicture('p1', 'time', 'approved');

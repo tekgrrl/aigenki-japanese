@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
@@ -47,6 +47,9 @@ export function splitComponentKanji<T extends { kanji?: string }>(
   for (const k of components) (k?.kanji && word.includes(k.kanji) ? kept : dropped).push(k);
   return { kept, dropped };
 }
+
+/** Start Learning serves at most this many waiting items per session; the rest come next time. */
+const WAITING_PER_SESSION = 10;
 
 @Injectable()
 export class LessonsService {
@@ -455,6 +458,12 @@ export class LessonsService {
 
 
   async getQueue(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
+    // Start Learning services the user's own queue first: everything already waiting
+    // (status 'learning' — the "Available lessons" count), and only that. New corpus
+    // items are added only when nothing is waiting.
+    const waiting = await this.getWaitingLessons(uid);
+    if (waiting.length > 0) return waiting;
+
     const userDoc = await this.db.collection('users').doc(uid).get();
     const jlptLevel = (userDoc.data() as UserRoot | undefined)?.preferences?.jlptLevel ?? 'N5';
 
@@ -563,6 +572,49 @@ export class LessonsService {
     ].slice(0, 7);
 
     return [...grammarItems, ...combinedVocabKanjiItems].slice(0, 10);
+  }
+
+  /**
+   * The user's KUs waiting for a lesson, oldest enrolment first, at most WAITING_PER_SESSION.
+   * Waiting = UKU status 'learning' AND no facets yet (by kuId or source.id, as in Path 2
+   * below). The status is a cache: a stale 'learning' on a word that already has facets
+   * (e.g. written before kanji-component facets counted toward their word) would otherwise
+   * be served every session, since enrollment skips a word that's already started.
+   * Deleted KUs are skipped.
+   */
+  private async getWaitingLessons(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
+    const ukuSnap = await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
+      .where('status', '==', 'learning')
+      .get();
+    if (ukuSnap.empty) return [];
+
+    const facetsCol = uid === ADMIN_USER_ID
+      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
+      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const started = new Set<string>();
+    (await facetsCol.select('kuId', 'source').get()).docs.forEach(d => {
+      const f = d.data();
+      if (f.kuId) started.add(f.kuId as string);
+      if (f.source?.id) started.add(f.source.id as string);
+    });
+
+    const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+    const candidates = ukuSnap.docs.map(d => d.data())
+      .filter(u => u.kuId && !started.has(u.kuId as string))
+      .sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
+
+    // Read in chunks until enough live KUs are found: a run of UKUs whose KU was deleted
+    // must not hide newer waiting words.
+    const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
+    const found: { kuId: string; content: string; type: string }[] = [];
+    for (let i = 0; i < candidates.length && found.length < WAITING_PER_SESSION; i += 50) {
+      const chunk = candidates.slice(i, i + 50);
+      const kuDocs = await this.db.getAll(...chunk.map(u => kuCol.doc(u.kuId as string)));
+      for (const d of kuDocs) {
+        if (d.exists) found.push({ kuId: d.id, content: d.data()!.content as string, type: d.data()!.type as string });
+      }
+    }
+    return found.slice(0, WAITING_PER_SESSION);
   }
 
   async processBatch(uid: string, vocabValues: { id: string; content: string }[]) {
