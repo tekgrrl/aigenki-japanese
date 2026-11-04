@@ -46,6 +46,20 @@ export class ReviewsController {
     return this.reviewProgressService.regenerateAndReset(uid, kuId);
   }
 
+  /** Admin tool: can this enrolled Vocab word be sent back to lessons to be relearned audio-first? */
+  @Get('audio-first/:kuId')
+  @UseGuards(AdminGuard)
+  async audioFirstStatus(@UserId() uid: string, @Param('kuId') kuId: string) {
+    return this.reviewProgressService.audioFirstStatus(uid, kuId);
+  }
+
+  /** Admin tool: delete the word's facets and return it to lessons, to be enrolled audio-first. SRS progress is lost. */
+  @Post('audio-first/:kuId')
+  @UseGuards(AdminGuard)
+  async returnToLessonsAsAudioFirst(@UserId() uid: string, @Param('kuId') kuId: string) {
+    return this.reviewProgressService.returnToLessonsAsAudioFirst(uid, kuId);
+  }
+
   @Put('facets/:id')
   async updateSrs(
     @UserId() uid: string,

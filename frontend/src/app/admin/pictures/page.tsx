@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import NewPicturePanel from "@/components/admin/pictures/NewPicturePanel";
 import PictureCardTools from "@/components/admin/pictures/PictureCardTools";
+import AudioFirstSwitch from "@/components/admin/AudioFirstSwitch";
 import { type PictureSubject, resolveKuId, SUBJECT_LABEL, type SubjectKind } from "@/components/admin/pictures/pictureApi";
 import { apiFetch } from "@/lib/api-client";
 
@@ -448,6 +449,9 @@ export default function PicturesAdminPage() {
                     load();
                   }}
                 />
+                {pic.status === "approved" && pic.kuId && (!pic.subject || pic.subject.kind === "ku-usage") && (
+                  <AudioFirstSwitch kuId={pic.kuId} />
+                )}
               </div>
             </div>
             );

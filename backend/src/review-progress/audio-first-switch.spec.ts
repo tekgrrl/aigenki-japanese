@@ -1,0 +1,80 @@
+import { BadRequestException } from '@nestjs/common';
+import { ReviewProgressService } from './review-progress.service';
+import { FakeFirestore } from '../testing/fake-firestore';
+
+const UID = 'u1';
+const WORD = 'word1';
+const KANJI = 'kanji1';
+
+/** ReviewProgressService over a fake Firestore, with in-memory KU and UKU stand-ins. */
+function setup() {
+  const db = new FakeFirestore();
+  const kus: Record<string, any> = { [WORD]: { id: WORD, type: 'Vocab', content: '川' }, [KANJI]: { id: KANJI, type: 'Kanji', content: '川' } };
+  const ukus = new Map<string, any>();
+  const knowledgeUnits = { findOneById: jest.fn(async (id: string) => kus[id] ?? null) };
+  const userKus = {
+    findByKuId: jest.fn(async (_uid: string, kuId: string) => ukus.get(kuId) ?? null),
+    update: jest.fn(async (_uid: string, kuId: string, data: any) => ukus.set(kuId, { ...ukus.get(kuId), ...data })),
+    remove: jest.fn(async (_uid: string, kuId: string) => ukus.delete(kuId)),
+  };
+  const learningProgress = { recomputeAndCache: jest.fn() };
+  const service = new ReviewProgressService(db as any, knowledgeUnits as any, {} as any, userKus as any, learningProgress as any);
+
+  const facets = db.collection('users').doc(UID).collection('review-facets');
+  const seed = async () => {
+    await db.collection('users').doc(UID).set({ preferences: { audioFirstExperiment: true } });
+    ukus.set(WORD, { kuId: WORD, currentStage: 2, facet_count: 3 });
+    ukus.set(KANJI, { kuId: KANJI, source: { type: 'lesson', id: WORD } });
+    await facets.doc('f1').set({ kuId: WORD, source: { id: WORD }, facetType: 'Content-to-Definition' });
+    await facets.doc('f2').set({ kuId: KANJI, source: { id: WORD }, facetType: 'Kanji-Component-Meaning' });
+    for (const [i, kuId] of [WORD, 'p2', 'p3', 'p4'].entries()) {
+      await db.collection('pictures').doc(`pic${i}`).set({ kuId, status: 'approved', file: `${kuId}.png`, usage: 'u' });
+    }
+  };
+  return { db, service, ukus, facets, seed };
+}
+
+describe('audioFirstStatus', () => {
+  it('is eligible for an enrolled standard word with an approved picture', async () => {
+    const { service, seed } = setup();
+    await seed();
+    expect(await service.audioFirstStatus(UID, WORD)).toEqual({ eligible: true, facetCount: 2 });
+  });
+
+  it.each([
+    ['not Vocab', async (s: ReturnType<typeof setup>) => s.service.audioFirstStatus(UID, KANJI), 'Only Vocab'],
+    ['not enrolled', async (s: ReturnType<typeof setup>) => { s.ukus.delete(WORD); return s.service.audioFirstStatus(UID, WORD); }, 'Not enrolled'],
+    ['already audio-first', async (s: ReturnType<typeof setup>) => { s.ukus.set(WORD, { kuId: WORD, sequenceVariant: 'audio-first' }); return s.service.audioFirstStatus(UID, WORD); }, 'Already audio-first'],
+    ['already waiting in lessons', async (s: ReturnType<typeof setup>) => { await s.facets.doc('f1').delete(); await s.facets.doc('f2').delete(); return s.service.audioFirstStatus(UID, WORD); }, 'Already waiting'],
+    ['experiment off', async (s: ReturnType<typeof setup>) => { await s.db.collection('users').doc(UID).set({ preferences: {} }); return s.service.audioFirstStatus(UID, WORD); }, 'experiment is off'],
+    ['no approved picture', async (s: ReturnType<typeof setup>) => { await s.db.collection('pictures').doc('pic0').update({ status: 'needs-review' }); return s.service.audioFirstStatus(UID, WORD); }, 'No approved usage picture'],
+    ['the only picture is whole-KU', async (s: ReturnType<typeof setup>) => { await s.db.collection('pictures').doc('pic0').update({ subject: { kind: 'ku', kuId: WORD }, usage: '' }); return s.service.audioFirstStatus(UID, WORD); }, 'Only a whole-KU picture'],
+    ['too few pictured words', async (s: ReturnType<typeof setup>) => { await s.db.collection('pictures').doc('pic3').delete(); return s.service.audioFirstStatus(UID, WORD); }, 'Fewer than 4'],
+  ])('is not eligible when %s', async (_name, run, reason) => {
+    const s = setup();
+    await s.seed();
+    const out = await run(s);
+    expect(out.eligible).toBe(false);
+    expect(out.reason).toContain(reason);
+  });
+});
+
+describe('returnToLessonsAsAudioFirst', () => {
+  it('deletes the facets, resets the word to stage 0 with no variant, and drops its orphaned kanji', async () => {
+    const { service, seed, ukus, db } = setup();
+    await seed();
+    expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 2 });
+    expect(db.store(`users/${UID}/review-facets`).size).toBe(0);
+    expect(ukus.get(WORD)).toMatchObject({ currentStage: 0, facet_count: 0 });
+    expect(ukus.get(WORD)).toHaveProperty('sequenceVariant'); // FieldValue.delete() sentinel, applied by Firestore
+    expect(ukus.has(KANJI)).toBe(false);
+  });
+
+  it('refuses an ineligible word without touching anything', async () => {
+    const { service, seed, db, ukus } = setup();
+    await seed();
+    ukus.set(WORD, { kuId: WORD, currentStage: 1, sequenceVariant: 'audio-first' });
+    await expect(service.returnToLessonsAsAudioFirst(UID, WORD)).rejects.toBeInstanceOf(BadRequestException);
+    expect(db.store(`users/${UID}/review-facets`).size).toBe(2);
+  });
+});

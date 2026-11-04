@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
 import { apiFetch } from "@/lib/api-client";
+import AudioFirstSwitch from "@/components/admin/AudioFirstSwitch";
 import { KnowledgeUnit } from "@/types";
 import {
   QueueItem,
@@ -143,6 +144,7 @@ export default function PreviewLessonPage() {
         </h1>
         <p className="text-xs text-shodo-ink-light font-mono">{ku.type} · {kuId}</p>
         {notice && <p className="text-xs text-shodo-persimmon mt-1">{notice}</p>}
+        {ku.type === "Vocab" && <div className="mt-1"><AudioFirstSwitch kuId={kuId} /></div>}
       </div>
       <div className="flex gap-2">
       {ku.type === "Vocab" && (

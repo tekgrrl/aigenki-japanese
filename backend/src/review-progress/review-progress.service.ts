@@ -173,6 +173,79 @@ export class ReviewProgressService {
     uid: string,
     kuId: string,
   ): Promise<{ facetsDeleted: number; stage: number; facetsCreated: number }> {
+    const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
+    const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
+    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
+
+    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
+    if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
+
+    await this.removeOrphanedComponentKanji(uid, kuId, countByKuId.keys());
+
+    this.logger.log(
+      `resetSequence uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
+    );
+    return { facetsDeleted, stage, facetsCreated };
+  }
+
+  /**
+   * Whether this user's enrolled word can be sent back to lessons to be relearned
+   * audio-first, and if not, why. Steps 5–7 are chooseVariant's own conditions, so an
+   * eligible word is guaranteed to be enrolled audio-first when the lesson is finished.
+   */
+  async audioFirstStatus(uid: string, kuId: string): Promise<{ eligible: boolean; reason?: string; facetCount: number }> {
+    const no = (reason: string, facetCount = 0) => ({ eligible: false, reason, facetCount });
+    const ku = await this.knowledgeUnitsService.findOneById(kuId);
+    if (ku?.type !== 'Vocab') return no('Only Vocab words can be audio-first');
+    const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
+    if (!uku) return no('Not enrolled: it will be taught audio-first when it comes up in lessons');
+    if (uku.sequenceVariant === 'audio-first') return no('Already audio-first');
+    const facetCount = (await this.getFacetsForKu(uid, kuId)).length;
+    if (facetCount === 0) return no('Already waiting in your lessons');
+    const user = await this.db.collection('users').doc(uid).get();
+    if (user.data()?.preferences?.audioFirstExperiment !== true) return no('The audio-first experiment is off in your profile', facetCount);
+    if ((await this.approvedPictures(kuId)).length === 0) {
+      // Whole-KU pictures aren't shown to learners yet (no card, slide or distractor uses them).
+      const wholeKu = await this.db.collection(PICTURES_COLLECTION)
+        .where('kuId', '==', kuId).where('status', '==', 'approved').where('subject.kind', '==', 'ku').limit(1).get();
+      return no(wholeKu.empty
+        ? 'No approved usage picture'
+        : 'Only a whole-KU picture, which isn\'t used yet: re-attach it as a usage of the word', facetCount);
+    }
+    if ((await this.picturedWordCount()) < MIN_PICTURED_WORDS) return no(`Fewer than ${MIN_PICTURED_WORDS} pictured words for distractors`, facetCount);
+    return { eligible: true, facetCount };
+  }
+
+  /**
+   * Admin tool: deletes the word's facets but keeps it enrolled at stage 0 with no variant,
+   * so it reappears in Start Learning ("enrolled but not started") and is relearned with
+   * audio-first slides, then enrolled audio-first by chooseVariant. SRS progress is lost.
+   */
+  async returnToLessonsAsAudioFirst(uid: string, kuId: string): Promise<{ facetsDeleted: number }> {
+    const status = await this.audioFirstStatus(uid, kuId);
+    if (!status.eligible) throw new BadRequestException(status.reason);
+
+    const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
+    await this.userKnowledgeUnitsService.update(uid, kuId, {
+      currentStage: 0,
+      facet_count: 0,
+      sequenceVariant: FieldValue.delete(),
+    });
+    await this.removeOrphanedComponentKanji(uid, kuId, countByKuId.keys());
+    await this.learningProgressService.recomputeAndCache(uid, kuId);
+
+    this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, back in lessons`);
+    return { facetsDeleted };
+  }
+
+  /**
+   * Deletes every facet in a word's sequence (by source.id) or targeting it (by kuId), and
+   * decrements/recomputes the other KUs those facets counted toward (component kanji).
+   */
+  private async deleteSequenceFacets(
+    uid: string,
+    kuId: string,
+  ): Promise<{ facetsDeleted: number; countByKuId: Map<string, number> }> {
     const [bySource, byKu] = await Promise.all([
       this.facetsColRef(uid).where('source.id', '==', kuId).get(),
       this.facetsColRef(uid).where('kuId', '==', kuId).get(),
@@ -197,17 +270,17 @@ export class ReviewProgressService {
           await this.learningProgressService.recomputeAndCache(uid, target);
         }),
     );
-    const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
-    await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
+    return { facetsDeleted: docs.size, countByKuId };
+  }
 
-    const { stage, facetsCreated } = await this.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
-    if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
-
-    // A component kanji enrolled through this word (its UKU's source) that has no facets
-    // left after the rebuild would otherwise sit in the learning queue. Kanji enrolled any
-    // other way (directly, a flag, a scenario, another word) are left alone.
+  /**
+   * A component kanji enrolled through this word (its UKU's source) that has no facets
+   * left would otherwise sit in the learning queue. Kanji enrolled any other way
+   * (directly, a flag, a scenario, another word) are left alone.
+   */
+  private async removeOrphanedComponentKanji(uid: string, kuId: string, targets: Iterable<string>): Promise<void> {
     await Promise.all(
-      Array.from(countByKuId.keys())
+      Array.from(targets)
         .filter(target => target !== kuId)
         .map(async target => {
           const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, target);
@@ -219,11 +292,6 @@ export class ReviewProgressService {
           if (byTarget.empty && bySequence.empty) await this.userKnowledgeUnitsService.remove(uid, target);
         }),
     );
-
-    this.logger.log(
-      `resetSequence uid=${uid} kuId=${kuId}: deleted ${docs.size} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
-    );
-    return { facetsDeleted: docs.size, stage, facetsCreated };
   }
 
   /**
