@@ -126,6 +126,30 @@ export class KanjiService {
         };
     }
 
+    /** Kanji Alive's English meanings per kanji; a kanji Kanji Alive doesn't know caches as []. */
+    private readonly kanjiAliveMeanings = new Map<string, string[]>();
+
+    /**
+     * Kanji Alive's English meanings for a kanji (e.g. 会 → ["meet", "society"]) — the
+     * meanings the Kanji lesson shows. Kanji-Component-Meaning facets carry the gloss of the
+     * word that introduced the kanji instead, so answer checking accepts both. Never throws
+     * and never falls back to Gemini: on failure the facet's own meanings still apply.
+     */
+    async getKanjiAliveMeanings(kanji: string): Promise<string[]> {
+        const cached = this.kanjiAliveMeanings.get(kanji);
+        if (cached) return cached;
+        try {
+            const data = await this.fetchKanjiAliveData(kanji);
+            const english: string = data?.kanji?.meaning?.english ?? '';
+            const meanings = english.split(',').map(s => s.trim()).filter(Boolean);
+            this.kanjiAliveMeanings.set(kanji, meanings);
+            return meanings;
+        } catch (error) {
+            this.logger.warn(`getKanjiAliveMeanings: no Kanji Alive meanings for ${kanji}: ${(error as Error)?.message}`);
+            return [];
+        }
+    }
+
     private async fetchKanjiAliveData(kanji: string) {
         if (!this.rapidApiKey) {
             throw new Error('RAPIDAPI_KEY is not defined');
