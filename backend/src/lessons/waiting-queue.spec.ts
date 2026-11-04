@@ -28,6 +28,26 @@ describe('getQueue: Start Learning services the waiting queue first', () => {
     expect(q.map(i => i.kuId)).toEqual(['g1', 'g2', 'v1', 'g3', 'g4']);
   });
 
+  it('ignores a stale learning status on a word that already has facets (by kuId or source.id)', async () => {
+    const { db, service, uku, ku } = setup();
+    for (const id of ['v1', 'v2', 'v3']) await ku(id, 'Vocab', id);
+    await uku('v1', 'learning', 1);
+    await uku('v2', 'learning', 2);
+    await uku('v3', 'learning', 3);
+    const facets = db.collection('users').doc(UID).collection('review-facets');
+    await facets.doc('f1').set({ kuId: 'k1', source: { id: 'v1' } }); // kanji-component facet of v1
+    await facets.doc('f2').set({ kuId: 'v2' });
+    expect((await service.getQueue(UID)).map(i => i.kuId)).toEqual(['v3']);
+  });
+
+  it('serves at most 10 waiting items, oldest first', async () => {
+    const { service, uku, ku } = setup();
+    for (let i = 0; i < 12; i++) { await ku(`v${i}`, 'Vocab', `v${i}`); await uku(`v${i}`, 'learning', 100 - i); }
+    const q = await service.getQueue(UID);
+    expect(q).toHaveLength(10);
+    expect(q[0].kuId).toBe('v11');
+  });
+
   it('skips a waiting UKU whose KU was deleted', async () => {
     const { service, uku, ku } = setup();
     await ku('v1', 'Vocab', '川');

@@ -48,6 +48,9 @@ export function splitComponentKanji<T extends { kanji?: string }>(
   return { kept, dropped };
 }
 
+/** Start Learning serves at most this many waiting items per session; the rest come next time. */
+const WAITING_PER_SESSION = 10;
+
 @Injectable()
 export class LessonsService {
   private readonly logger = new Logger(LessonsService.name);
@@ -571,19 +574,42 @@ export class LessonsService {
     return [...grammarItems, ...combinedVocabKanjiItems].slice(0, 10);
   }
 
-  /** The user's KUs waiting for a lesson (UKU status 'learning'), oldest enrolment first. Deleted KUs are skipped. */
+  /**
+   * The user's KUs waiting for a lesson, oldest enrolment first, at most WAITING_PER_SESSION.
+   * Waiting = UKU status 'learning' AND no facets yet (by kuId or source.id, as in Path 2
+   * below). The status is a cache: a stale 'learning' on a word that already has facets
+   * (e.g. written before kanji-component facets counted toward their word) would otherwise
+   * be served every session, since enrollment skips a word that's already started.
+   * Deleted KUs are skipped.
+   */
   private async getWaitingLessons(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
     const ukuSnap = await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
       .where('status', '==', 'learning')
       .get();
     if (ukuSnap.empty) return [];
+
+    const facetsCol = uid === ADMIN_USER_ID
+      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
+      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const started = new Set<string>();
+    (await facetsCol.select('kuId', 'source').get()).docs.forEach(d => {
+      const f = d.data();
+      if (f.kuId) started.add(f.kuId as string);
+      if (f.source?.id) started.add(f.source.id as string);
+    });
+
     const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
-    const ukus = ukuSnap.docs.map(d => d.data()).filter(u => u.kuId)
-      .sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
+    const candidates = ukuSnap.docs.map(d => d.data())
+      .filter(u => u.kuId && !started.has(u.kuId as string))
+      .sort((a, b) => millis(a.createdAt) - millis(b.createdAt))
+      .slice(0, WAITING_PER_SESSION * 3); // headroom for deleted KUs without reading every one
+    if (candidates.length === 0) return [];
+
     const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
-    const kuDocs = await this.db.getAll(...ukus.map(u => kuCol.doc(u.kuId as string)));
+    const kuDocs = await this.db.getAll(...candidates.map(u => kuCol.doc(u.kuId as string)));
     return kuDocs
       .filter(d => d.exists)
+      .slice(0, WAITING_PER_SESSION)
       .map(d => ({ kuId: d.id, content: d.data()!.content as string, type: d.data()!.type as string }));
   }
 
