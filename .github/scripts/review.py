@@ -68,6 +68,14 @@ def format_discussion(reviews, comments):
 
 discussion_context = format_discussion(existing_reviews, review_comments)
 
+# 1c. Agreed decisions the owner has already made (REVIEW-NOTES.md at the repo root,
+# from the checked-out PR). Kept out of findings so settled points aren't re-raised.
+try:
+    with open("REVIEW-NOTES.md", encoding="utf-8") as f:
+        review_notes = f.read().strip()
+except FileNotFoundError:
+    review_notes = "(none)"
+
 # 2. The Pragmatic Principal Prompt
 prompt = f"""You are a Pragmatic Principal Software Engineer reviewing a Pull Request.
 You care deeply about shipping reliable code, preventing security vulnerabilities, and maintaining clean architecture.
@@ -82,6 +90,9 @@ You are re-evaluating this PR from scratch against its current state — you may
 
 Prior review discussion on this PR:
 {discussion_context}
+
+Agreed decisions (from REVIEW-NOTES.md). These were settled deliberately with the owner: do not raise them as concerns unless this diff breaks their stated intent:
+{review_notes}
 
 You MUST respond in raw, valid JSON with no markdown wrapping. Use this exact schema:
 {{
