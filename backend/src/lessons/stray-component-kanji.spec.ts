@@ -1,4 +1,4 @@
-import { dropStrayComponentKanji } from './lessons.service';
+import { dropStrayComponentKanji, splitComponentKanji } from './lessons.service';
 import { Lesson, VocabLesson } from '../types';
 
 const kanji = (k: string) => ({ kanji: k, reading: '', meaning: '' });
@@ -33,5 +33,19 @@ describe('dropStrayComponentKanji', () => {
     expect(dropStrayComponentKanji(grammar)).toBe(grammar);
     const bare = { ...vocab('こう', []), component_kanji: undefined };
     expect(dropStrayComponentKanji(bare)).toBe(bare);
+  });
+});
+
+describe('splitComponentKanji', () => {
+  it('drops nothing when there is no word to check against', () => {
+    const components = [kanji('食')];
+    expect(splitComponentKanji(undefined, components)).toEqual({ kept: components, dropped: [] });
+    expect(splitComponentKanji('', components)).toEqual({ kept: components, dropped: [] });
+  });
+
+  it('reports the dropped entries (for the generation-time warning)', () => {
+    const { kept, dropped } = splitComponentKanji('今どき', [kanji('今'), kanji('時')]);
+    expect(kept.map(k => k.kanji)).toEqual(['今']);
+    expect(dropped.map(k => k.kanji)).toEqual(['時']);
   });
 });

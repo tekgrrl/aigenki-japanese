@@ -10,7 +10,8 @@ import { AiToolCall } from './providers/ai-provider.interface';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { getLevelSeed } from './level-seed.data';
-import { FacetType } from '../types';
+import { FacetType, Lesson } from '../types';
+import { dropStrayComponentKanji } from '../lessons/lessons.service';
 
 @Injectable()
 export class TutorToolExecutor {
@@ -167,7 +168,7 @@ export class TutorToolExecutor {
     if (!kuSnap.exists) return { error: `KnowledgeUnit ${kuId} not found` };
     return {
       ku: { id: kuId, ...kuSnap.data() },
-      lesson: lessonSnap.exists ? lessonSnap.data() : null,
+      lesson: lessonSnap.exists ? dropStrayComponentKanji(lessonSnap.data() as Lesson) : null,
     };
   }
 
