@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
@@ -455,6 +455,12 @@ export class LessonsService {
 
 
   async getQueue(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
+    // Start Learning services the user's own queue first: everything already waiting
+    // (status 'learning' — the "Available lessons" count), and only that. New corpus
+    // items are added only when nothing is waiting.
+    const waiting = await this.getWaitingLessons(uid);
+    if (waiting.length > 0) return waiting;
+
     const userDoc = await this.db.collection('users').doc(uid).get();
     const jlptLevel = (userDoc.data() as UserRoot | undefined)?.preferences?.jlptLevel ?? 'N5';
 
@@ -563,6 +569,22 @@ export class LessonsService {
     ].slice(0, 7);
 
     return [...grammarItems, ...combinedVocabKanjiItems].slice(0, 10);
+  }
+
+  /** The user's KUs waiting for a lesson (UKU status 'learning'), oldest enrolment first. Deleted KUs are skipped. */
+  private async getWaitingLessons(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
+    const ukuSnap = await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
+      .where('status', '==', 'learning')
+      .get();
+    if (ukuSnap.empty) return [];
+    const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+    const ukus = ukuSnap.docs.map(d => d.data()).filter(u => u.kuId)
+      .sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
+    const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
+    const kuDocs = await this.db.getAll(...ukus.map(u => kuCol.doc(u.kuId as string)));
+    return kuDocs
+      .filter(d => d.exists)
+      .map(d => ({ kuId: d.id, content: d.data()!.content as string, type: d.data()!.type as string }));
   }
 
   async processBatch(uid: string, vocabValues: { id: string; content: string }[]) {
