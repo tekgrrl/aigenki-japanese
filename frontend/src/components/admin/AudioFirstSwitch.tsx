@@ -26,7 +26,10 @@ export default function AudioFirstSwitch({ kuId }: { kuId: string }) {
     setMessage(null);
     try {
       const res = await apiFetch(`/api/reviews/audio-first/${kuId}`);
-      if (!res.ok) throw new Error(`Check failed (${res.status})`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `Check failed (${res.status})`);
+      }
       const s = (await res.json()) as Status;
       setStatus(s);
       if (s.eligible) setState("confirm");

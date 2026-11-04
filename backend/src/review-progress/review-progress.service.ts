@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common'
 import { CollectionReference, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
+  KNOWLEDGE_UNITS_COLLECTION,
   PICTURES_COLLECTION,
   REVIEW_FACETS_COLLECTION,
+  USER_KUS_SUBCOLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
@@ -202,10 +204,11 @@ export class ReviewProgressService {
     const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     if (!uku) return no('Not enrolled: it will be taught audio-first when it comes up in lessons');
     if (uku.sequenceVariant === 'audio-first') return no('Already audio-first');
-    const facetCount = (await this.sequenceFacetDocs(uid, kuId)).size; // exactly what the switch deletes
-    if (facetCount === 0) return no('Already waiting in your lessons');
+    const docs = await this.sequenceFacetDocs(uid, kuId);
+    const facetCount = docs.size - (await this.planKanjiRehoming(uid, kuId, docs)).size; // exactly what the switch deletes
     const blocker = await this.audioFirstBlocker(uid, kuId, { checkFlag: true });
     if (blocker) return no(blocker, facetCount);
+    if (docs.size === 0) return no('Already waiting in your lessons: it will be taught audio-first');
     return { eligible: true, facetCount };
   }
 
@@ -241,6 +244,22 @@ export class ReviewProgressService {
     const status = await this.audioFirstStatus(uid, kuId);
     if (!status.eligible) throw new BadRequestException(status.reason);
 
+    // Kanji-component facets this word introduced are shared: another enrolled word with the
+    // same kanji skipped making its own (per-user dedup). Hand those to that word instead of
+    // deleting them, so its kanji stays reviewed.
+    const rehome = await this.planKanjiRehoming(uid, kuId, await this.sequenceFacetDocs(uid, kuId));
+    for (const [facetId, { toKuId, kanjiKuId }] of rehome) {
+      await this.facetsColRef(uid).doc(facetId).update({ 'source.id': toKuId });
+      const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, kanjiKuId);
+      if (kanjiUku?.source?.type === 'lesson' && kanjiUku.source.id === kuId) {
+        await this.userKnowledgeUnitsService.update(uid, kanjiKuId, { source: { type: 'lesson', id: toKuId } });
+      }
+      await this.userKnowledgeUnitsService.update(uid, toKuId, { facet_count: FieldValue.increment(1) });
+    }
+    for (const toKuId of new Set([...rehome.values()].map(r => r.toKuId))) {
+      await this.learningProgressService.recomputeAndCache(uid, toKuId);
+    }
+
     const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
     await this.userKnowledgeUnitsService.update(uid, kuId, {
       status: 'learning', // waiting for its lesson again (recompute below agrees: no facets)
@@ -256,7 +275,7 @@ export class ReviewProgressService {
     const ku = await this.knowledgeUnitsService.findOneById(kuId);
     if (ku?.content) await this.statsService.removeFromTutorVocab(uid, ku.content);
 
-    this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, back in lessons`);
+    this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, handed ${rehome.size} kanji facets to other words, back in lessons`);
     return { facetsDeleted };
   }
 
@@ -288,6 +307,37 @@ export class ReviewProgressService {
         }),
     );
     return { facetsDeleted: docs.size, countByKuId };
+  }
+
+  /**
+   * For each kanji-component facet in this word's sequence, another enrolled default-sequence
+   * Vocab word containing the same kanji (oldest enrolment first) that should own it instead.
+   * Facets with no such word aren't in the map (they're deleted with the word's sequence).
+   */
+  private async planKanjiRehoming(
+    uid: string,
+    kuId: string,
+    docs: Map<string, FirebaseFirestore.QueryDocumentSnapshot>,
+  ): Promise<Map<string, { toKuId: string; kanjiKuId: string }>> {
+    const plan = new Map<string, { toKuId: string; kanjiKuId: string }>();
+    const kanjiFacets = [...docs.values()].filter(d => {
+      const f = d.data();
+      return String(f.facetType).startsWith('Kanji-Component') && f.kuId !== kuId && f.data?.content;
+    });
+    if (kanjiFacets.length === 0) return plan;
+
+    const ukus = (await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get()).docs.map(d => d.data());
+    const enrolled = new Map(ukus.filter(u => u.kuId && u.kuId !== kuId && u.sequenceVariant !== 'audio-first').map(u => [u.kuId as string, u]));
+    const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+    for (const d of kanjiFacets) {
+      const char = d.data().data.content as string;
+      const words = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).where('data.kanji', 'array-contains', char).get();
+      const owner = words.docs
+        .filter(w => w.data().type === 'Vocab' && enrolled.has(w.id))
+        .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt))[0];
+      if (owner) plan.set(d.id, { toKuId: owner.id, kanjiKuId: d.data().kuId as string });
+    }
+    return plan;
   }
 
   /** Every facet in a word's sequence (by source.id) or targeting it (by kuId), de-duplicated. */
