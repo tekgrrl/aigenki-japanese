@@ -11,6 +11,7 @@ import { ScenariosModule } from '../scenarios/scenarios.module';
 import { LearningProgressModule } from '../learning-progress/learning-progress.module';
 import { ReviewProgressModule } from '../review-progress/review-progress.module';
 import { AuthModule } from '../auth/auth.module';
+import { KanjiModule } from '../kanji/kanji.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { AuthModule } from '../auth/auth.module';
     LearningProgressModule,
     ReviewProgressModule,
     AuthModule,
+    KanjiModule,
   ],
   controllers: [ReviewsController],
   providers: [ReviewsService],

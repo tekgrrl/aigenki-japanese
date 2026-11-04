@@ -21,6 +21,7 @@ import { StatsService } from '../stats/stats.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
+import { KanjiService } from '../kanji/kanji.service';
 import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
 
@@ -53,6 +54,7 @@ export class ReviewsService {
         private readonly scenariosService: ScenariosService,
         private readonly learningProgressService: LearningProgressService,
         private readonly reviewProgressService: ReviewProgressService,
+        private readonly kanjiService: KanjiService,
     ) { }
 
     private facetsColRef(uid: string): CollectionReference {
@@ -303,6 +305,13 @@ export class ReviewsService {
         facetType?: FacetType,
         facetId?: string,
     ) {
+        // The facet's meanings are the gloss of the word that introduced the kanji; the Kanji
+        // lesson shows Kanji Alive's. Accept either (local check and AI prompt alike).
+        if (facetType === 'Kanji-Component-Meaning' && topic) {
+            const kanjiAlive = await this.kanjiService.getKanjiAliveMeanings(topic);
+            expectedAnswers = Array.from(new Set([...expectedAnswers, ...kanjiAlive]));
+        }
+
         // 1. Local Check — strip trailing Japanese/ASCII punctuation before comparing
         const stripTrailing = (s: string) => s.replace(/[。、！？,.!?\s]+$/u, '').trim();
         const normalize = (s: string) => stripTrailing(s.toLowerCase());

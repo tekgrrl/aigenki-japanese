@@ -20,6 +20,34 @@ function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   return { ...lesson, ...overrides } as Lesson;
 }
 
+/**
+ * Read-time twin of generateLesson's component_kanji safety net: a "component" kanji
+ * that isn't a character of the word itself (斯 on こう, 珈琲 on コーヒー) is wrong by
+ * definition. Lessons generated before that net existed still store them, and would
+ * otherwise get them taught as kanji-component facets and slides.
+ */
+export function dropStrayComponentKanji(lesson: Lesson): Lesson {
+  if (lesson.type !== 'Vocab' || !Array.isArray(lesson.component_kanji)) return lesson;
+  const { kept, dropped } = splitComponentKanji(lesson.vocab, lesson.component_kanji);
+  return dropped.length === 0 ? lesson : { ...lesson, component_kanji: kept };
+}
+
+/**
+ * Splits component kanji into those that are characters of `word` and those that
+ * aren't. With no word to check against, nothing is dropped — better to keep a stray
+ * than to strip every real component.
+ */
+export function splitComponentKanji<T extends { kanji?: string }>(
+  word: string | undefined,
+  components: T[],
+): { kept: T[]; dropped: T[] } {
+  if (!word) return { kept: components, dropped: [] };
+  const kept: T[] = [];
+  const dropped: T[] = [];
+  for (const k of components) (k?.kanji && word.includes(k.kanji) ? kept : dropped).push(k);
+  return { kept, dropped };
+}
+
 @Injectable()
 export class LessonsService {
   private readonly logger = new Logger(LessonsService.name);
@@ -70,7 +98,7 @@ export class LessonsService {
         delete data.userId;
       }
       const merged = overlayDoc.exists ? { ...data, ...overlayDoc.data() } : data;
-      return applyKuOverrides(merged as Lesson, ku);
+      return applyKuOverrides(dropStrayComponentKanji(merged as Lesson), ku);
     }
 
     this.logger.log(`No existing lesson for KU ${kuId}. Generating new lesson`);
@@ -160,14 +188,14 @@ export class LessonsService {
         const vocabText: string = (lessonJson as any).vocab ?? '';
         const componentKanji = (lessonJson as any).component_kanji;
         if (Array.isArray(componentKanji)) {
-          const filtered = componentKanji.filter((k: any) => k?.kanji && vocabText.includes(k.kanji));
-          if (filtered.length !== componentKanji.length) {
+          const { kept, dropped } = splitComponentKanji(vocabText, componentKanji);
+          if (dropped.length > 0) {
             this.logger.warn(
               `Dropping invalid component_kanji for "${vocabText}" (kuId=${kuId}): ` +
-              `${componentKanji.filter((k: any) => !filtered.includes(k)).map((k: any) => k?.kanji).join(', ')} not found in the word itself`,
+              `${dropped.map((k: any) => k?.kanji).join(', ')} not found in the word itself`,
             );
           }
-          (lessonJson as any).component_kanji = filtered;
+          (lessonJson as any).component_kanji = kept;
         }
 
         // Stronger enforcement than the heuristic above: kanaOnly is an explicit
@@ -385,10 +413,9 @@ export class LessonsService {
     if (!lessonDoc.exists) return null;
 
     const lesson = lessonDoc.data() as Lesson;
-    if (overlayDoc.exists) {
-      return { ...lesson, ...overlayDoc.data() } as Lesson;
-    }
-    return lesson;
+    return dropStrayComponentKanji(
+      overlayDoc.exists ? { ...lesson, ...overlayDoc.data() } as Lesson : lesson,
+    );
   }
 
   async createUserGrammarLesson(
