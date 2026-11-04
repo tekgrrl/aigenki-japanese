@@ -20,6 +20,19 @@ function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   return { ...lesson, ...overrides } as Lesson;
 }
 
+/**
+ * Read-time twin of generateLesson's component_kanji safety net: a "component" kanji
+ * that isn't a character of the word itself (斯 on こう, 珈琲 on コーヒー) is wrong by
+ * definition. Lessons generated before that net existed still store them, and would
+ * otherwise get them taught as kanji-component facets and slides.
+ */
+export function dropStrayComponentKanji(lesson: Lesson): Lesson {
+  if (lesson.type !== 'Vocab' || !Array.isArray(lesson.component_kanji)) return lesson;
+  const word = lesson.vocab ?? '';
+  const kept = lesson.component_kanji.filter(k => k?.kanji && word.includes(k.kanji));
+  return kept.length === lesson.component_kanji.length ? lesson : { ...lesson, component_kanji: kept };
+}
+
 @Injectable()
 export class LessonsService {
   private readonly logger = new Logger(LessonsService.name);
@@ -70,7 +83,7 @@ export class LessonsService {
         delete data.userId;
       }
       const merged = overlayDoc.exists ? { ...data, ...overlayDoc.data() } : data;
-      return applyKuOverrides(merged as Lesson, ku);
+      return applyKuOverrides(dropStrayComponentKanji(merged as Lesson), ku);
     }
 
     this.logger.log(`No existing lesson for KU ${kuId}. Generating new lesson`);
@@ -385,10 +398,9 @@ export class LessonsService {
     if (!lessonDoc.exists) return null;
 
     const lesson = lessonDoc.data() as Lesson;
-    if (overlayDoc.exists) {
-      return { ...lesson, ...overlayDoc.data() } as Lesson;
-    }
-    return lesson;
+    return dropStrayComponentKanji(
+      overlayDoc.exists ? { ...lesson, ...overlayDoc.data() } as Lesson : lesson,
+    );
   }
 
   async createUserGrammarLesson(
