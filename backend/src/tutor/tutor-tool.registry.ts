@@ -42,6 +42,17 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
     },
   },
   {
+    name: 'get_review_candidates',
+    description:
+      "Get the user's enrolled Vocab and Grammar that still need review (lowest SRS stage below 3), " +
+      'weakest first. A scenario must give the user something to review: feature at least one Vocab item ' +
+      "from these in the user's lines, as Key Vocabulary. Already-mastered items may be used alongside.",
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'get_allowed_grammar',
     description:
       'Get grammar patterns the user has been exposed to. Constrain generated content to these patterns unless the task explicitly requires otherwise.',

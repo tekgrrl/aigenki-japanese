@@ -11,7 +11,7 @@ import ScenePicture from "@/components/scenarios/ScenePicture";
 
 const API_BASE_URL = "http://localhost:3000/api";
 
-const ROLEPLAY_MIN_SRS_STAGE = 1; // at least one successful review per facet before role-playing
+const ROLEPLAY_MIN_SRS_STAGE = 3; // default until ku-status answers: every item at Familiar (stage 3) before role-playing
 
 function kuSrsBadge(srsStage: number | null | undefined): { text: string; className: string } | null {
   if (srsStage === undefined) return null; // no kuId, no badge
@@ -43,6 +43,10 @@ export default function ScenarioPage({
   // UI State
   const [showTranslations, setShowTranslations] = useState(false);
   const [kuStatus, setKuStatus] = useState<Record<string, { maxSrsStage: number | null; minSrsStage: number | null }>>({});
+  /** The backend's Role Play gate (Key Vocabulary and Key Grammar), and the stage it requires. */
+  const [roleplayReady, setRoleplayReady] = useState(false);
+  const [readyMinStage, setReadyMinStage] = useState(ROLEPLAY_MIN_SRS_STAGE);
+  const [keyGrammar, setKeyGrammar] = useState<{ kuId: string; content: string; title: string }[]>([]);
   const [kuStatusLoading, setKuStatusLoading] = useState(false);
 
   // Hint state
@@ -151,8 +155,16 @@ export default function ScenarioPage({
     if (scenario?.state !== 'drill' && scenario?.state !== 'simulate') return;
     setKuStatusLoading(true);
     apiFetch(`${API_BASE_URL}/scenarios/${id}/ku-status`)
-      .then(r => r.ok ? r.json() : {})
-      .then(data => { setKuStatus(data); setKuStatusLoading(false); })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.items) {
+          setKuStatus(data.items);
+          setRoleplayReady(data.ready === true);
+          if (typeof data.minStage === "number") setReadyMinStage(data.minStage);
+          if (Array.isArray(data.grammar)) setKeyGrammar(data.grammar);
+        }
+        setKuStatusLoading(false);
+      })
       .catch(() => setKuStatusLoading(false));
   }, [id, scenario?.state]);
 
@@ -344,9 +356,13 @@ export default function ScenarioPage({
     return <div className="p-10 text-center text-red-500">{error}</div>;
 
   // Readiness gate for drill → simulate transition
-  const linkedKUs = scenario.extractedKUs.filter(ku => ku.kuId);
-  const readyKUs = linkedKUs.filter(ku => (kuStatus[ku.kuId!]?.minSrsStage ?? -1) >= ROLEPLAY_MIN_SRS_STAGE);
-  const isReadyForRoleplay = !kuStatusLoading && linkedKUs.length > 0 && readyKUs.length === linkedKUs.length;
+  // Key Vocabulary and Key Grammar both gate the roleplay; the backend decides (ku-status `ready`).
+  const linkedKUs = [
+    ...scenario.extractedKUs.filter(ku => ku.kuId).map(ku => ({ kuId: ku.kuId! })),
+    ...(scenario.grammarMatches ?? []).filter(g => g.kuId).map(g => ({ kuId: g.kuId })),
+  ];
+  const readyKUs = linkedKUs.filter(ku => (kuStatus[ku.kuId]?.minSrsStage ?? -1) >= readyMinStage);
+  const isReadyForRoleplay = !kuStatusLoading && roleplayReady;
 
   // If viewing history, show a simplified report card for that attempt
   if (viewingHistory) {
@@ -903,6 +919,36 @@ export default function ScenarioPage({
         </section>
       )}
 
+      {/* Key Grammar: gates the roleplay alongside Key Vocabulary */}
+      {scenario.state !== "completed" && keyGrammar.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-xl font-bold text-slate-800 mb-6">
+            Key Grammar
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {keyGrammar.map((g) => {
+              const badge = kuSrsBadge(kuStatus[g.kuId]?.minSrsStage ?? null);
+              const example = scenario.grammarMatches?.find(m => m.kuId === g.kuId)?.exampleFromConversation;
+              return (
+                <div
+                  key={g.kuId}
+                  className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm relative overflow-hidden"
+                >
+                  {badge && (
+                    <div className={`absolute top-0 right-0 text-xs px-2 py-1 rounded-bl-lg font-semibold ${badge.className}`}>
+                      {badge.text}
+                    </div>
+                  )}
+                  <div className="text-xl font-bold text-slate-800">{g.content}</div>
+                  {g.title && <div className="text-sm text-slate-600 font-medium">{g.title}</div>}
+                  {example?.japanese && <div className="mt-2 text-sm text-slate-500">{example.japanese}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Action Footer */}
       {/* Only show if NOT completed, because Report Card has its own button */}
       {scenario.state !== "completed" && (
@@ -924,7 +970,7 @@ export default function ScenarioPage({
                       <span className="text-slate-400">Checking vocab progress...</span>
                     ) : (
                       <span className={readyKUs.length === linkedKUs.length ? "text-green-600 font-medium" : "text-slate-500"}>
-                        {readyKUs.length}/{linkedKUs.length} vocab reviewed
+                        {readyKUs.length}/{linkedKUs.length} words and grammar reviewed
                       </span>
                     )}
                   </div>
@@ -941,7 +987,7 @@ export default function ScenarioPage({
                       (scenario.state === "drill" && !isReadyForRoleplay) ||
                       (scenario.state === "simulate" && chatHistory.length === 0)
                     }
-                    title={scenario.state === "drill" && !isReadyForRoleplay ? `${readyKUs.length}/${linkedKUs.length} vocab items need at least one successful review first` : undefined}
+                    title={scenario.state === "drill" && !isReadyForRoleplay ? `${readyKUs.length}/${linkedKUs.length} words and grammar points at Familiar (SRS stage 3): all of them need to be there first` : undefined}
                     className={`px-8 py-3 rounded-lg font-bold transition-colors shadow-sm ${
                       scenario.state === "drill"
                         ? isReadyForRoleplay

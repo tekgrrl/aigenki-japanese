@@ -18,12 +18,16 @@ import { FacetType, ReviewFacet } from '@/types';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
-import { ScenariosService } from '../scenarios/scenarios.service';
+import { ScenariosService, VOCAB_READY_MIN_STAGE } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { KanjiService } from '../kanji/kanji.service';
+import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
 import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
+
+/** A Grammar KU whose facet reaches this SRS stage gets its scenario chain (the user's rule, 2026-11-04; tunable). */
+const SCENARIO_FLASH_STAGE = 3;
 
 /**
  * Resolves which Firestore collection a ReviewFacet's kuId points to.
@@ -55,6 +59,7 @@ export class ReviewsService {
         private readonly learningProgressService: LearningProgressService,
         private readonly reviewProgressService: ReviewProgressService,
         private readonly kanjiService: KanjiService,
+        private readonly scenarioFlashService: ScenarioFlashService,
     ) { }
 
     private facetsColRef(uid: string): CollectionReference {
@@ -193,7 +198,7 @@ export class ReviewsService {
         }
 
         // Check if a linked scenario's vocab is now all drill-ready
-        if (txResult.newStage >= 1 && txResult.kuId) {
+        if (txResult.newStage >= VOCAB_READY_MIN_STAGE && txResult.kuId) {
             void (async () => {
                 try {
                     const uku = await this.userKnowledgeUnitsService.findByKuId(uid, txResult.kuId);
@@ -238,7 +243,18 @@ export class ReviewsService {
                         // (one stage below the first level boundary), so a bulk-marked Vocab
                         // item's very first-ever review can cross a level immediately — surfacing
                         // "go practice this!" before any real spaced-repetition has happened.
-                        if (ku.type === 'Grammar' && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
+                        // A Grammar point promoted to SRS stage 3 or above starts its scenario chain
+                        // (Flash cards: Get to Drill → Graduate → Get to Simulate → Complete). Every
+                        // learner is promoted through stage 3, so this fires once per learner; later
+                        // promotions are cheap no-ops (start() dedupes on an existing chain and reuses
+                        // an existing scenario). The chain replaces the "Ready to practice" suggestion.
+                        const flashChain = ku.type === 'Grammar' && newStage >= SCENARIO_FLASH_STAGE && ku.data?.scenarioReady === true;
+                        if (flashChain) {
+                            void this.scenarioFlashService.start(uid, kuId).catch(e =>
+                                this.logger.error(`Failed to start scenario Flash chain uid=${uid} kuId=${kuId}`, e),
+                            );
+                        }
+                        if (ku.type === 'Grammar' && !flashChain && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
                             await this.statsService.recordScenarioOpportunity(uid, {
                                 kuId,
                                 content: ku.content,
@@ -527,6 +543,13 @@ export class ReviewsService {
     } // END generateReviewFacets
 
     async getDueReviews(uid: string) {
+        // Flash cards follow their scenario's state; bring them up to date first. Never
+        // let a sync problem block reviews.
+        try {
+            await this.scenarioFlashService.sync(uid);
+        } catch (e) {
+            this.logger.error(`Scenario Flash sync failed uid=${uid}`, e);
+        }
         const now = Timestamp.now();
 
         const snapshot = await this.facetsBaseQuery(uid)

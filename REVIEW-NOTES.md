@@ -35,3 +35,20 @@ if a change actually breaks the stated intent. New decisions get added here as t
   is stated rather than left to a side effect.
 - **Whole-KU pictures** (`subject.kind: 'ku'`) aren't shown to learners anywhere yet, and don't count
   for audio-first. That's intentional for now; the admin UI says so.
+
+## Scenarios and Flash cards
+- **The Role Play gate** (every Key Vocabulary and Key Grammar item at SRS stage 3 or above) applies to
+  **all** scenarios, not only those started from a Flash card chain.
+- A scenario that already has `vocabReady: true` stored **keeps it**, even if it wouldn't pass the
+  stricter stage-3 gate today. It isn't recomputed downwards.
+- A **seen Flash card** (scenario opened, or "Not now") is hidden for 8h (the first SRS interval), then
+  comes back if its step still isn't done. The scenario itself is never a must-do.
+- **A chain starts on promotion** to SRS stage 3 or above, not on every pass. Every learner is promoted
+  through stage 3, so a point flagged `scenarioReady` during curation always gets its chain. A point
+  flagged *after* a learner passed stage 3 waits for that learner's next promotion. That's accepted.
+- **A deleted scenario is regenerated** (a new Gemini run) the next time its grammar point is promoted.
+  That's accepted.
+- **Flash card cost on small numbers is accepted:** `sync()` handles cards one at a time before due
+  reviews are fetched; `start()` repeats a few reads on later promotions after a chain has finished;
+  the scenario page counts gate items itself (it may count a duplicated item twice; the backend's
+  `ready` decides the button).

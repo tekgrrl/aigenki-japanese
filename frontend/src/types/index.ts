@@ -417,6 +417,8 @@ export interface GrammarKnowledgeUnit extends KnowledgeUnitBase {
     corpusNotes?: string;
     jlptLevel?: string | null;
     classification?: GrammarClassification;
+    /** Hand-set in admin: this grammar point gets a scenario chain (Flash cards) when it reaches SRS stage 3. Absent = no scenario. */
+    scenarioReady?: boolean;
     exampleInContext: {
       japanese: string;
       english: string;
@@ -552,7 +554,8 @@ export type FacetType =
   | "audio"
   | "sentence-assembly"
   | "sentence-cloze"
-  | "picture-choice"; // hear the word, pick its picture from four (audio-first)
+  | "picture-choice" // hear the word, pick its picture from four (audio-first)
+  | "flash"; // one-and-done task card (e.g. a scenario step); never goes through SRS
 
 export interface ReviewFacet {
   id: string;

@@ -13,7 +13,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LessonsService } from '../lessons/lessons.service';
 import { UserService } from '../users/user.service';
-import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, REVIEW_FACETS_COLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, REVIEW_FACETS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
@@ -26,7 +26,8 @@ import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
 import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 
-const VOCAB_READY_MIN_STAGE = 1;
+/** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
+export const VOCAB_READY_MIN_STAGE = 3;
 
 @Injectable()
 export class ScenariosService {
@@ -998,45 +999,63 @@ export class ScenariosService {
   async checkAndSetVocabReady(uid: string, scenarioId: string): Promise<void> {
     const scenario = await this.getScenario(uid, scenarioId);
     if (!scenario || scenario.state !== 'drill' || scenario.vocabReady === true) return;
-
-    const linkedKuIds = scenario.extractedKUs.filter(ku => ku.kuId).map(ku => ku.kuId!);
-    if (linkedKuIds.length === 0) return;
-
-    const kuStatus = await this.getKuStatus(uid, scenarioId);
-    const allReady = linkedKuIds.every(kuId => (kuStatus[kuId]?.minSrsStage ?? -1) >= VOCAB_READY_MIN_STAGE);
-
-    if (allReady) {
+    if ((await this.scenarioReadiness(uid, scenario)).ready) {
       await this.scenariosColRef(uid).doc(scenarioId).update({ vocabReady: true });
       this.logger.log(`Set vocabReady=true for scenario ${scenarioId} uid=${uid}`);
     }
   }
 
-  async getKuStatus(uid: string, scenarioId: string): Promise<Record<string, { maxSrsStage: number | null; minSrsStage: number | null }>> {
+  /** Per-item SRS status of a scenario's Key Vocabulary and Key Grammar, plus whether Role Play is unlocked. */
+  async getKuStatus(uid: string, scenarioId: string): Promise<{
+    items: Record<string, { maxSrsStage: number | null; minSrsStage: number | null }>;
+    ready: boolean;
+    minStage: number;
+    /** Key Grammar labels (grammarMatches only store a kuId). */
+    grammar: { kuId: string; content: string; title: string }[];
+  }> {
     const scenario = await this.getScenario(uid, scenarioId);
     if (!scenario) throw new NotFoundException('Scenario not found');
+    const { items, ready } = await this.scenarioReadiness(uid, scenario);
+    const grammarIds = [...new Set((scenario.grammarMatches ?? []).map(g => g.kuId).filter(Boolean))];
+    const grammarDocs = grammarIds.length
+      ? await this.db.getAll(...grammarIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id)))
+      : [];
+    const grammar = grammarDocs.filter(d => d.exists).map(d => ({
+      kuId: d.id,
+      content: d.data()!.content as string,
+      title: (d.data()!.data?.title as string) ?? '',
+    }));
+    return { items, ready, minStage: VOCAB_READY_MIN_STAGE, grammar };
+  }
 
-    const kuIds = scenario.extractedKUs
-      .filter(ku => ku.kuId)
-      .map(ku => ku.kuId!);
-
-    if (kuIds.length === 0) return {};
+  /**
+   * The Role Play gate, in one place: every linked Key Vocabulary (extractedKUs) and Key
+   * Grammar (grammarMatches) item needs its lowest facet at VOCAB_READY_MIN_STAGE or above.
+   * Used by checkAndSetVocabReady, the scenario page (via getKuStatus) and Flash cards.
+   */
+  async scenarioReadiness(uid: string, scenario: Scenario): Promise<{ items: Record<string, { maxSrsStage: number | null; minSrsStage: number | null }>; ready: boolean }> {
+    const kuIds = [...new Set([
+      ...scenario.extractedKUs.filter(ku => ku.kuId).map(ku => ku.kuId!),
+      ...(scenario.grammarMatches ?? []).map(g => g.kuId).filter(Boolean),
+    ])];
+    // Nothing linked means nothing to graduate: Role Play is open.
+    if (kuIds.length === 0) return { items: {}, ready: true };
 
     const facetsRef = uid === ADMIN_USER_ID
       ? this.db.collection(REVIEW_FACETS_COLLECTION)
       : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
 
-    const result: Record<string, { maxSrsStage: number | null; minSrsStage: number | null }> = {};
-
+    const items: Record<string, { maxSrsStage: number | null; minSrsStage: number | null }> = {};
     await Promise.all(kuIds.map(async (kuId) => {
       const snap = await facetsRef.where('kuId', '==', kuId).get();
       const stages = snap.docs.map(d => (d.data().srsStage as number) ?? 0);
-      result[kuId] = {
+      items[kuId] = {
         maxSrsStage: stages.length > 0 ? Math.max(...stages) : null,
         minSrsStage: stages.length > 0 ? Math.min(...stages) : null,
       };
     }));
-
-    return result;
+    const ready = kuIds.every(kuId => (items[kuId].minSrsStage ?? -1) >= VOCAB_READY_MIN_STAGE);
+    return { items, ready };
   }
 
   private async validateScenario(scenario: Scenario, jlptLevel: string): Promise<void> {

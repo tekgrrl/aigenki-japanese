@@ -121,6 +121,11 @@ export class TutorService {
           ? ' Likewise, grammarMatches must only use kuIds from get_grammar_patterns — no exceptions.'
           : ''),
       );
+      lines.push(
+        'The scenario must give the user something to review: feature at least one Vocab item from ' +
+        "get_review_candidates in the user's lines, as Key Vocabulary. " +
+        'Items the user already knows well may be used alongside.',
+      );
     }
 
     return this.run(uid, [
@@ -143,16 +148,18 @@ export class TutorService {
     )) as { jlptLevel: string };
     const jlptLevel = dto.difficulty ?? profile.jlptLevel;
 
-    const [frontier, leech, levelSeed] = await Promise.all([
+    const [frontier, leech, levelSeed, candidates] = await Promise.all([
       this.executor.execute(uid, { callId: 'strict-frontier', name: 'get_frontier_vocab', args: {} }, cache) as Promise<{ content: string }[]>,
       this.executor.execute(uid, { callId: 'strict-leech', name: 'get_leech_vocab', args: {} }, cache) as Promise<{ content: string }[]>,
       this.executor.execute(uid, { callId: 'strict-seed', name: 'get_level_seed', args: { jlptLevel } }, cache) as Promise<{ grammar: string[]; vocab: string[] }>,
+      this.executor.execute(uid, { callId: 'strict-candidates', name: 'get_review_candidates', args: {} }, cache) as Promise<{ content: string; type: string }[]>,
     ]);
 
     const vocabSet = new Set<string>([
       ...frontier.map(e => e.content),
       ...leech.map(e => e.content),
       ...levelSeed.vocab,
+      ...candidates.filter(c => c.type === 'Vocab').map(c => c.content),
     ]);
     if (dto.targetVocab) vocabSet.add(dto.targetVocab);
 

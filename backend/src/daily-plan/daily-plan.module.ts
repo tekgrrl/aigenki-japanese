@@ -8,5 +8,6 @@ import { StatsModule } from '../stats/stats.module';
   imports: [FirebaseModule, StatsModule],
   controllers: [DailyPlanController],
   providers: [DailyPlanService],
+  exports: [DailyPlanService],
 })
 export class DailyPlanModule {}

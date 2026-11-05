@@ -5,7 +5,7 @@ function makeService(kanjiAlive: string[], aiResult: 'pass' | 'fail' = 'fail') {
   const gemini = { evaluateAnswer: jest.fn().mockResolvedValue({ result: aiResult, explanation: '' }) };
   const kanji = { getKanjiAliveMeanings: jest.fn().mockResolvedValue(kanjiAlive) };
   const none = {} as any;
-  const service = new ReviewsService(none, gemini as any, none, none, none, none, none, none, none, kanji as any);
+  const service = new ReviewsService(none, gemini as any, none, none, none, none, none, none, none, kanji as any, none);
   return { service, gemini, kanji };
 }
 

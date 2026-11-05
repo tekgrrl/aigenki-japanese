@@ -14,6 +14,7 @@ import { FuriganaText } from "@/components/FuriganaText";
 import SentenceAssemblyCard from "@/components/review/SentenceAssemblyCard";
 import SentenceClozeCard from "@/components/review/SentenceClozeCard";
 import PictureChoiceCard from "@/components/review/PictureChoiceCard";
+import FlashCard from "@/components/review/FlashCard";
 import InputModeBadge from "@/components/review/InputModeBadge";
 import FacetDebugPanel from "@/components/review/FacetDebugPanel";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
@@ -29,7 +30,7 @@ import { Mic } from "lucide-react";
 type AnswerState = "unanswered" | "evaluating" | "correct" | "incorrect";
 
 /** Facet types rendered by their own card component instead of the generic question/answer card. */
-const CUSTOM_CARDS = new Set(["sentence-assembly", "sentence-cloze", "picture-choice"]);
+const CUSTOM_CARDS = new Set(["sentence-assembly", "sentence-cloze", "picture-choice", "flash"]);
 const isCustomCard = (facetType: string) => CUSTOM_CARDS.has(facetType);
 
 export default function ReviewPage() {
@@ -668,6 +669,8 @@ export default function ReviewPage() {
         // Listening practice: no Japanese text before answering (the word and sentence
         // are revealed afterwards). Any stored clozeSentence is ignored.
         return "Listen, then type the meaning of the word";
+      case "flash":
+        return facet.data?.scenarioTitle || "Scenario step";
       case "AI-Generated-Question":
         return dynamicQuestion;
       case "Content-to-Definition":
@@ -708,6 +711,8 @@ export default function ReviewPage() {
           : "Kanji Character";
       case "audio":
         return "Audio Comprehension";
+      case "flash":
+        return "Scenario step";
       default:
         return "...";
     }
@@ -940,6 +945,11 @@ export default function ReviewPage() {
             onAdvance={advanceToNext}
           />
         </div>
+      )}
+
+      {/* --- Flash card (one-and-done scenario step) --- */}
+      {currentItem.facet.facetType === "flash" && (
+        <FlashCard key={currentItem.facet.id} facet={currentItem.facet} onAdvance={advanceToNext} />
       )}
 
       {/* --- Review Card --- */}

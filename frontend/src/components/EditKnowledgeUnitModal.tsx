@@ -27,6 +27,7 @@ export default function EditKnowledgeUnitModal({
   const [grammarNotes, setGrammarNotes] = useState("");
   const [initialGrammarNotes, setInitialGrammarNotes] = useState("");
   const [grammarCorpusNotes, setGrammarCorpusNotes] = useState("");
+  const [scenarioReady, setScenarioReady] = useState(false);
   const [corpusNotes, setCorpusNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export default function EditKnowledgeUnitModal({
       } else if (knowledgeUnit.type === "Grammar") {
         setGrammarTitle(knowledgeUnit.data?.title || "");
         setGrammarCorpusNotes(knowledgeUnit.data?.corpusNotes || "");
+        setScenarioReady(knowledgeUnit.data?.scenarioReady === true);
         setJlptLevel(knowledgeUnit.data?.jlptLevel || "");
         setReading("");
         setDefinition("");
@@ -115,6 +117,7 @@ export default function EditKnowledgeUnitModal({
         grammarTitle !== (knowledgeUnit.data?.title || "") ||
         grammarNotes !== initialGrammarNotes ||
         grammarCorpusNotes !== (knowledgeUnit.data?.corpusNotes || "") ||
+        scenarioReady !== (knowledgeUnit.data?.scenarioReady === true) ||
         jlptLevel !== (knowledgeUnit.data?.jlptLevel || "")
       );
     }
@@ -136,6 +139,7 @@ export default function EditKnowledgeUnitModal({
             title: grammarTitle,
             corpusNotes: grammarCorpusNotes,
             jlptLevel: jlptLevel || null,
+            scenarioReady,
           },
         };
       } else {
@@ -288,6 +292,15 @@ export default function EditKnowledgeUnitModal({
                   className={`${inputClass} resize-none`}
                 />
               </div>
+
+              <label className="flex items-center gap-2 text-sm text-shodo-ink">
+                <input
+                  type="checkbox"
+                  checked={scenarioReady}
+                  onChange={(e) => setScenarioReady(e.target.checked)}
+                />
+                Scenario ready: gets a scenario chain when it reaches SRS stage 3
+              </label>
             </>
           )}
 
