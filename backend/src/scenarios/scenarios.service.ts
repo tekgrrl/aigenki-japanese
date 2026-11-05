@@ -27,7 +27,7 @@ import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
-const VOCAB_READY_MIN_STAGE = 3;
+export const VOCAB_READY_MIN_STAGE = 3;
 
 @Injectable()
 export class ScenariosService {
@@ -1038,7 +1038,8 @@ export class ScenariosService {
       ...scenario.extractedKUs.filter(ku => ku.kuId).map(ku => ku.kuId!),
       ...(scenario.grammarMatches ?? []).map(g => g.kuId).filter(Boolean),
     ])];
-    if (kuIds.length === 0) return { items: {}, ready: false };
+    // Nothing linked means nothing to graduate: Role Play is open.
+    if (kuIds.length === 0) return { items: {}, ready: true };
 
     const facetsRef = uid === ADMIN_USER_ID
       ? this.db.collection(REVIEW_FACETS_COLLECTION)

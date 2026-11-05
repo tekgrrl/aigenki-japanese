@@ -53,8 +53,6 @@ export default function FlashCard({ facet, onAdvance }: Props) {
     total: number;
   } | null>(null);
   const [acking, setAcking] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset per card
-  useEffect(() => setAcking(false), [facet.id]);
 
   // The waiting step shows how far along the scenario's key items are.
   useEffect(() => {

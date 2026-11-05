@@ -15,23 +15,23 @@ function setup(opts: { existingScenario?: boolean } = {}) {
     scenarioReadiness: jest.fn(async () => ({ items: {}, ready: false })),
   };
   const tutorService = { generateScenario: jest.fn(async () => { scenarios.set('s-new', { id: 's-new', title: 'At the gate', state: 'encounter' }); return 's-new'; }) };
-  const statsService = { removeScenarioOpportunity: jest.fn() };
+  const dailyPlanService = { dismissOpportunity: jest.fn() };
   const kuService = { findOneById: jest.fn(async (id: string) => (id === G ? { id: G, type: 'Grammar', content: '{V-te}はいけません', data: { title: 'Must not', scenarioReady: true } } : id === 'g-no' ? { id, type: 'Grammar', content: 'よ', data: {} } : { id, type: 'Vocab', content: 'x' })) };
-  const service = new ScenarioFlashService(db as any, kuService as any, scenariosService as any, statsService as any, tutorService as any);
+  const service = new ScenarioFlashService(db as any, kuService as any, scenariosService as any, dailyPlanService as any, tutorService as any);
   if (opts.existingScenario) scenarios.set('s-old', { id: 's-old', title: 'Old one', state: 'drill' });
   const cards = () => [...db.store(`users/${UID}/review-facets`).values()].filter(f => f.facetType === 'flash');
-  return { db, service, scenarios, scenariosService, tutorService, statsService, cards };
+  return { db, service, scenarios, scenariosService, tutorService, dailyPlanService, cards };
 }
 
 describe('ScenarioFlashService.start', () => {
   it('generates a scenario from the grammar point and creates a "drill" card due now', async () => {
-    const { service, tutorService, statsService, cards } = setup();
+    const { service, tutorService, dailyPlanService, cards } = setup();
     await service.start(UID, G);
     expect(tutorService.generateScenario).toHaveBeenCalledWith(UID, expect.objectContaining({ sourceType: 'grammar-pattern', pattern: '{V-te}はいけません', sourceKuId: G, strict: true }));
     expect(cards()).toHaveLength(1);
     expect(cards()[0]).toMatchObject({ kuId: 's-new', sourceCollection: 'scenarios', data: { step: 'drill', scenarioId: 's-new', grammarKuId: G } });
     expect(cards()[0].source).toBeUndefined(); // never counts toward a UKU
-    expect(statsService.removeScenarioOpportunity).toHaveBeenCalledWith(UID, G);
+    expect(dailyPlanService.dismissOpportunity).toHaveBeenCalledWith(UID, G);
   });
 
   it('reuses an existing scenario for the grammar point and starts at its current step', async () => {
@@ -132,5 +132,11 @@ describe('ScenariosService.scenarioReadiness (the Role Play gate)', () => {
     const r = await svc.scenarioReadiness(UID, scenario);
     expect(r.ready).toBe(true);
     expect(Object.keys(r.items).sort()).toEqual([G, 'v1']);
+  });
+
+  it('a scenario with nothing linked has nothing to graduate: ready', async () => {
+    const svc = new ScenariosService(new FakeFirestore() as any, ...(Array(8).fill({}) as [any, any, any, any, any, any, any, any]));
+    const scenario: any = { extractedKUs: [{ content: 'x' }], grammarMatches: [] };
+    expect((await svc.scenarioReadiness(UID, scenario)).ready).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import { FIRESTORE_CONNECTION, REVIEW_FACETS_COLLECTION } from '../firebase/fire
 import { ADMIN_USER_ID, SRS_INTERVALS } from '../lib/constants';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
-import { StatsService } from '../stats/stats.service';
+import { DailyPlanService } from '../daily-plan/daily-plan.service';
 import { TutorService } from '../tutor/tutor.service';
 import { Scenario } from '../types';
 
@@ -44,7 +44,7 @@ export class ScenarioFlashService {
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly scenariosService: ScenariosService,
-    private readonly statsService: StatsService,
+    private readonly dailyPlanService: DailyPlanService,
     private readonly tutorService: TutorService,
   ) {}
 
@@ -112,8 +112,9 @@ export class ScenarioFlashService {
           ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
         });
       }
-      // The check-in's "Ready to practice" suggestion for this grammar point is now handled.
-      await this.statsService.removeScenarioOpportunity(uid, grammarKuId);
+      // The check-in's "Ready to practice" suggestion for this grammar point is now handled
+      // (stats and today's cached daily plan).
+      await this.dailyPlanService.dismissOpportunity(uid, grammarKuId);
       this.logger.log(`start: grammar ${ku.content} (${grammarKuId}) uid=${uid} → scenario ${scenarioId} (${previous[0] ? 'reused' : 'generated'}), step=${step ?? 'done'}`);
     } finally {
       this.starting.delete(key);

@@ -45,8 +45,8 @@ export const TOOL_REGISTRY: AiToolDefinition[] = [
     name: 'get_review_candidates',
     description:
       "Get the user's enrolled Vocab and Grammar that still need review (lowest SRS stage below 3), " +
-      'weakest first. A scenario must give the user something to review: feature at least one of these ' +
-      "in the user's lines (as Key Vocabulary, or as a grammar match by kuId). Already-mastered items may be used alongside.",
+      'weakest first. A scenario must give the user something to review: feature at least one Vocab item ' +
+      "from these in the user's lines, as Key Vocabulary. Already-mastered items may be used alongside.",
     parameters: {
       type: 'object',
       properties: {},

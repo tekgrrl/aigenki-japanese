@@ -18,7 +18,7 @@ import { FacetType, ReviewFacet } from '@/types';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
-import { ScenariosService } from '../scenarios/scenarios.service';
+import { ScenariosService, VOCAB_READY_MIN_STAGE } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { KanjiService } from '../kanji/kanji.service';
@@ -198,7 +198,7 @@ export class ReviewsService {
         }
 
         // Check if a linked scenario's vocab is now all drill-ready
-        if (txResult.newStage >= 1 && txResult.kuId) {
+        if (txResult.newStage >= VOCAB_READY_MIN_STAGE && txResult.kuId) {
             void (async () => {
                 try {
                     const uku = await this.userKnowledgeUnitsService.findByKuId(uid, txResult.kuId);

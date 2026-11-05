@@ -48,3 +48,7 @@ if a change actually breaks the stated intent. New decisions get added here as t
   flagged *after* a learner passed stage 3 waits for that learner's next promotion. That's accepted.
 - **A deleted scenario is regenerated** (a new Gemini run) the next time its grammar point is promoted.
   That's accepted.
+- **Flash card cost on small numbers is accepted:** `sync()` handles cards one at a time before due
+  reviews are fetched; `start()` repeats a few reads on later promotions after a chain has finished;
+  the scenario page counts gate items itself (it may count a duplicated item twice; the backend's
+  `ready` decides the button).
