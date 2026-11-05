@@ -43,3 +43,8 @@ if a change actually breaks the stated intent. New decisions get added here as t
   stricter stage-3 gate today. It isn't recomputed downwards.
 - A **seen Flash card** (scenario opened, or "Not now") is hidden for 8h (the first SRS interval), then
   comes back if its step still isn't done. The scenario itself is never a must-do.
+- **A chain starts on promotion** to SRS stage 3 or above, not on every pass. Every learner is promoted
+  through stage 3, so a point flagged `scenarioReady` during curation always gets its chain. A point
+  flagged *after* a learner passed stage 3 waits for that learner's next promotion. That's accepted.
+- **A deleted scenario is regenerated** (a new Gemini run) the next time its grammar point is promoted.
+  That's accepted.

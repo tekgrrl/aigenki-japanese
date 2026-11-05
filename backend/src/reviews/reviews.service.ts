@@ -243,17 +243,18 @@ export class ReviewsService {
                         // (one stage below the first level boundary), so a bulk-marked Vocab
                         // item's very first-ever review can cross a level immediately — surfacing
                         // "go practice this!" before any real spaced-repetition has happened.
-                        // A Grammar point at SRS stage 3 or above starts its scenario chain (Flash
-                        // cards: Get to Drill → Graduate → Get to Simulate → Complete). Any pass at
-                        // or above the stage, not only the crossing, so a point flagged scenarioReady
-                        // after it passed stage 3 still gets one. start() dedupes (existing chain,
-                        // existing or finished scenario), so repeat passes are cheap no-ops.
-                        if (ku.type === 'Grammar' && newStage >= SCENARIO_FLASH_STAGE && ku.data?.scenarioReady === true) {
+                        // A Grammar point promoted to SRS stage 3 or above starts its scenario chain
+                        // (Flash cards: Get to Drill → Graduate → Get to Simulate → Complete). Every
+                        // learner is promoted through stage 3, so this fires once per learner; later
+                        // promotions are cheap no-ops (start() dedupes on an existing chain and reuses
+                        // an existing scenario). The chain replaces the "Ready to practice" suggestion.
+                        const flashChain = ku.type === 'Grammar' && newStage >= SCENARIO_FLASH_STAGE && ku.data?.scenarioReady === true;
+                        if (flashChain) {
                             void this.scenarioFlashService.start(uid, kuId).catch(e =>
                                 this.logger.error(`Failed to start scenario Flash chain uid=${uid} kuId=${kuId}`, e),
                             );
                         }
-                        if (ku.type === 'Grammar' && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
+                        if (ku.type === 'Grammar' && !flashChain && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
                             await this.statsService.recordScenarioOpportunity(uid, {
                                 kuId,
                                 content: ku.content,

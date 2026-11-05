@@ -987,7 +987,7 @@ export default function ScenarioPage({
                       (scenario.state === "drill" && !isReadyForRoleplay) ||
                       (scenario.state === "simulate" && chatHistory.length === 0)
                     }
-                    title={scenario.state === "drill" && !isReadyForRoleplay ? `${readyKUs.length}/${linkedKUs.length} words and grammar points reviewed: each needs at least one successful review first` : undefined}
+                    title={scenario.state === "drill" && !isReadyForRoleplay ? `${readyKUs.length}/${linkedKUs.length} words and grammar points at Familiar (SRS stage 3): all of them need to be there first` : undefined}
                     className={`px-8 py-3 rounded-lg font-bold transition-colors shadow-sm ${
                       scenario.state === "drill"
                         ? isReadyForRoleplay

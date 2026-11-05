@@ -82,6 +82,24 @@ describe('ScenarioFlashService.sync', () => {
     expect(cards()).toHaveLength(0);
   });
 
+  it('a stored vocabReady does not open the roleplay step when live readiness fails', async () => {
+    const { service, scenarios, cards } = setup();
+    await service.start(UID, G);
+    Object.assign(scenarios.get('s-new'), { state: 'drill', vocabReady: true });
+    await service.sync(UID);
+    expect(cards()[0].data.step).toBe('graduate');
+  });
+
+  it('ends the chain when the roleplay finished (objective met) or the scenario was deactivated', async () => {
+    for (const patch of [{ isObjectiveMet: true }, { isActive: false }]) {
+      const { service, scenarios, cards } = setup();
+      await service.start(UID, G);
+      Object.assign(scenarios.get('s-new'), { state: 'simulate', ...patch });
+      await service.sync(UID);
+      expect(cards()).toHaveLength(0);
+    }
+  });
+
   it('removes a card whose scenario was deleted', async () => {
     const { service, scenarios, cards } = setup();
     await service.start(UID, G);

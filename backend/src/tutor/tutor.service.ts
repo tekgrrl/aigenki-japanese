@@ -122,8 +122,8 @@ export class TutorService {
           : ''),
       );
       lines.push(
-        'The scenario must give the user something to review: feature at least one item from ' +
-        "get_review_candidates in the user's lines (as Key Vocabulary, or as a grammar match by kuId). " +
+        'The scenario must give the user something to review: feature at least one Vocab item from ' +
+        "get_review_candidates in the user's lines, as Key Vocabulary. " +
         'Items the user already knows well may be used alongside.',
       );
     }

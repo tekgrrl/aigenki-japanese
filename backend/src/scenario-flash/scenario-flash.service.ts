@@ -159,11 +159,16 @@ export class ScenarioFlashService {
 
   /** The first step of the chain the scenario hasn't completed yet, or null when it's all done. */
   private async currentStep(uid: string, scenario: Scenario): Promise<ScenarioFlashStep | null> {
+    // Deactivated by the user (scenarios list), or the roleplay ended (handleChat sets
+    // isObjectiveMet and deactivates, before the user presses finish): the chain is done.
+    if (scenario.isActive === false || scenario.isObjectiveMet === true) return null;
     switch (scenario.state) {
       case 'encounter':
         return 'drill';
       case 'drill':
-        return scenario.vocabReady || (await this.scenariosService.scenarioReadiness(uid, scenario)).ready
+        // Live readiness only, the same check the scenario page uses to enable Role Play. A
+        // stored vocabReady can be stale (set under the old stage-1 gate, or an item lapsed).
+        return (await this.scenariosService.scenarioReadiness(uid, scenario)).ready
           ? 'simulate'
           : 'graduate';
       case 'simulate':
