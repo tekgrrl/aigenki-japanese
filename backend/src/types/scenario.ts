@@ -146,7 +146,7 @@ export interface Scenario {
     progress?: Record<string, LevelProgress>;
     currentLevelStatus?: ProgressStatus;
 
-    /** Set to true when all linked vocab KUs have minSrsStage >= VOCAB_READY_MIN_STAGE. Written by ReviewsService post-SRS-update. Used for dashboard queries. */
+    /** Set to true when all linked vocab KUs have minSrsStage >= VOCAB_READY_MIN_STAGE (3), Key Grammar included. Written by ReviewsService post-SRS-update. Used for dashboard queries. */
     vocabReady?: boolean;
 }
 

@@ -5,6 +5,7 @@ import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
 import { AdminGuard } from '../auth/admin.guard';
 import { ALREADY_KNOWN_STAGE } from '../lib/constants';
+import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
 
 @Controller('reviews')
 @UseGuards(FirebaseAuthGuard)
@@ -14,6 +15,7 @@ export class ReviewsController {
   constructor(
     private readonly reviewsService: ReviewsService,
     private readonly reviewProgressService: ReviewProgressService,
+    private readonly scenarioFlashService: ScenarioFlashService,
   ) { }
 
   @Post('evaluate')
@@ -58,6 +60,13 @@ export class ReviewsController {
   @UseGuards(AdminGuard)
   async returnToLessonsAsAudioFirst(@UserId() uid: string, @Param('kuId') kuId: string) {
     return this.reviewProgressService.returnToLessonsAsAudioFirst(uid, kuId);
+  }
+
+  /** The user has seen a Flash card: hide it for the first SRS interval (8h). */
+  @Post('flash/:id/ack')
+  async acknowledgeFlash(@UserId() uid: string, @Param('id') id: string) {
+    await this.scenarioFlashService.acknowledge(uid, id);
+    return { success: true };
   }
 
   @Put('facets/:id')

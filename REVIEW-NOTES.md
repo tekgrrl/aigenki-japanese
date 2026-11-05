@@ -35,3 +35,11 @@ if a change actually breaks the stated intent. New decisions get added here as t
   is stated rather than left to a side effect.
 - **Whole-KU pictures** (`subject.kind: 'ku'`) aren't shown to learners anywhere yet, and don't count
   for audio-first. That's intentional for now; the admin UI says so.
+
+## Scenarios and Flash cards
+- **The Role Play gate** (every Key Vocabulary and Key Grammar item at SRS stage 3 or above) applies to
+  **all** scenarios, not only those started from a Flash card chain.
+- A scenario that already has `vocabReady: true` stored **keeps it**, even if it wouldn't pass the
+  stricter stage-3 gate today. It isn't recomputed downwards.
+- A **seen Flash card** (scenario opened, or "Not now") is hidden for 8h (the first SRS interval), then
+  comes back if its step still isn't done. The scenario itself is never a must-do.

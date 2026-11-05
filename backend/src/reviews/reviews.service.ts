@@ -22,8 +22,12 @@ import { ScenariosService } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { KanjiService } from '../kanji/kanji.service';
+import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
 import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
+
+/** A Grammar KU whose facet reaches this SRS stage gets its scenario chain (the user's rule, 2026-11-04; tunable). */
+const SCENARIO_FLASH_STAGE = 3;
 
 /**
  * Resolves which Firestore collection a ReviewFacet's kuId points to.
@@ -55,6 +59,7 @@ export class ReviewsService {
         private readonly learningProgressService: LearningProgressService,
         private readonly reviewProgressService: ReviewProgressService,
         private readonly kanjiService: KanjiService,
+        private readonly scenarioFlashService: ScenarioFlashService,
     ) { }
 
     private facetsColRef(uid: string): CollectionReference {
@@ -238,6 +243,16 @@ export class ReviewsService {
                         // (one stage below the first level boundary), so a bulk-marked Vocab
                         // item's very first-ever review can cross a level immediately — surfacing
                         // "go practice this!" before any real spaced-repetition has happened.
+                        // A Grammar point at SRS stage 3 or above starts its scenario chain (Flash
+                        // cards: Get to Drill → Graduate → Get to Simulate → Complete). Any pass at
+                        // or above the stage, not only the crossing, so a point flagged scenarioReady
+                        // after it passed stage 3 still gets one. start() dedupes (existing chain,
+                        // existing or finished scenario), so repeat passes are cheap no-ops.
+                        if (ku.type === 'Grammar' && newStage >= SCENARIO_FLASH_STAGE && ku.data?.scenarioReady === true) {
+                            void this.scenarioFlashService.start(uid, kuId).catch(e =>
+                                this.logger.error(`Failed to start scenario Flash chain uid=${uid} kuId=${kuId}`, e),
+                            );
+                        }
                         if (ku.type === 'Grammar' && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
                             await this.statsService.recordScenarioOpportunity(uid, {
                                 kuId,
@@ -527,6 +542,13 @@ export class ReviewsService {
     } // END generateReviewFacets
 
     async getDueReviews(uid: string) {
+        // Flash cards follow their scenario's state; bring them up to date first. Never
+        // let a sync problem block reviews.
+        try {
+            await this.scenarioFlashService.sync(uid);
+        } catch (e) {
+            this.logger.error(`Scenario Flash sync failed uid=${uid}`, e);
+        }
         const now = Timestamp.now();
 
         const snapshot = await this.facetsBaseQuery(uid)

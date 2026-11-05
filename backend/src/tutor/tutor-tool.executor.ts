@@ -5,13 +5,19 @@ import {
   FIRESTORE_CONNECTION,
   KNOWLEDGE_UNITS_COLLECTION,
   LESSONS_COLLECTION,
+  REVIEW_FACETS_COLLECTION,
 } from '../firebase/firebase.module';
+import { ADMIN_USER_ID } from '../lib/constants';
 import { AiToolCall } from './providers/ai-provider.interface';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { getLevelSeed } from './level-seed.data';
 import { FacetType, Lesson } from '../types';
 import { dropStrayComponentKanji } from '../lessons/lessons.service';
+
+/** Items below this SRS stage still need review: scenario candidates (the user's rule, 2026-11-04). */
+const REVIEW_CANDIDATE_STAGE = 3;
+const REVIEW_CANDIDATE_LIMIT = 20;
 
 @Injectable()
 export class TutorToolExecutor {
@@ -52,6 +58,8 @@ export class TutorToolExecutor {
         return this.getFrontierVocab(uid, call.args.facetTypes as FacetType[] | undefined, cache);
       case 'get_leech_vocab':
         return this.getLeechVocab(uid, call.args.facetTypes as FacetType[] | undefined, cache);
+      case 'get_review_candidates':
+        return this.getReviewCandidates(uid);
       case 'get_allowed_grammar':
         return this.getAllowedGrammar(uid, cache);
       case 'get_weak_grammar':
@@ -115,6 +123,42 @@ export class TutorToolExecutor {
       );
     }
     return entries;
+  }
+
+  /**
+   * Enrolled Vocab and Grammar whose lowest facet is below REVIEW_CANDIDATE_STAGE, weakest
+   * first, capped. Audio-first words (picture-choice facets) are left out: scenarios show text.
+   */
+  private async getReviewCandidates(uid: string): Promise<{ kuId: string; content: string; type: string; minSrsStage: number }[]> {
+    const facets = uid === ADMIN_USER_ID
+      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
+      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const minStage = new Map<string, number>();
+    const audioFirst = new Set<string>();
+    (await facets.select('kuId', 'srsStage', 'facetType', 'sourceCollection').get()).docs.forEach(d => {
+      const f = d.data();
+      if (!f.kuId || f.facetType === 'flash' || f.sourceCollection === 'scenarios' || f.sourceCollection === 'concepts') return;
+      if (f.facetType === 'picture-choice') audioFirst.add(f.kuId);
+      const stage = (f.srsStage as number) ?? 0;
+      minStage.set(f.kuId, Math.min(minStage.get(f.kuId) ?? Infinity, stage));
+    });
+    const weak = [...minStage.entries()]
+      .filter(([kuId, stage]) => stage < REVIEW_CANDIDATE_STAGE && !audioFirst.has(kuId))
+      .sort((a, b) => a[1] - b[1]);
+    if (weak.length === 0) return [];
+    const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
+    const out: { kuId: string; content: string; type: string; minSrsStage: number }[] = [];
+    for (let i = 0; i < weak.length && out.length < REVIEW_CANDIDATE_LIMIT; i += 50) {
+      const chunk = weak.slice(i, i + 50);
+      const docs = await this.db.getAll(...chunk.map(([kuId]) => kuCol.doc(kuId)));
+      docs.forEach((d, n) => {
+        const type = d.data()?.type;
+        if (d.exists && (type === 'Vocab' || type === 'Grammar')) {
+          out.push({ kuId: d.id, content: d.data()!.content as string, type, minSrsStage: chunk[n][1] });
+        }
+      });
+    }
+    return out.slice(0, REVIEW_CANDIDATE_LIMIT);
   }
 
   private async getLeechVocab(

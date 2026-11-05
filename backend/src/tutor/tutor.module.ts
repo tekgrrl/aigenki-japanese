@@ -28,5 +28,6 @@ import { StatsModule } from '../stats/stats.module';
     },
     TutorService,
   ],
+  exports: [TutorService],
 })
 export class TutorModule {}

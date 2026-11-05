@@ -12,6 +12,7 @@ import { LearningProgressModule } from '../learning-progress/learning-progress.m
 import { ReviewProgressModule } from '../review-progress/review-progress.module';
 import { AuthModule } from '../auth/auth.module';
 import { KanjiModule } from '../kanji/kanji.module';
+import { ScenarioFlashModule } from '../scenario-flash/scenario-flash.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { KanjiModule } from '../kanji/kanji.module';
     ReviewProgressModule,
     AuthModule,
     KanjiModule,
+    ScenarioFlashModule,
   ],
   controllers: [ReviewsController],
   providers: [ReviewsService],
