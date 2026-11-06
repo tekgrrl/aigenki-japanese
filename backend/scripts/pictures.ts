@@ -18,7 +18,7 @@
  *   redraw <pictureId> [--note <text>] [--brief <json>]   redraw; waits and prints it
  *   check  <pictureId>                                re-run the text check
  *   attach <pictureId> <subject>                      (re)attach; no subject = detach
- *   status <pictureId> <approved|needs-review|rejected|unpicturable>
+ *   status <pictureId> <approved|needs-review|rejected>   (only the AI marks unpicturable)
  */
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';

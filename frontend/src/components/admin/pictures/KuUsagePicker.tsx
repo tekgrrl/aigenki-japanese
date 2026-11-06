@@ -84,6 +84,7 @@ export default function KuUsagePicker({ actions, refreshKey = 0, compact }: Prop
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a deliberate re-fetch trigger
   useEffect(() => {
     setStates(null);
+    setError(null);
     if (selected) loadStates(selected);
   }, [selected, loadStates, refreshKey]);
 
@@ -165,7 +166,7 @@ export default function KuUsagePicker({ actions, refreshKey = 0, compact }: Prop
               {selected.type} pictures aren&apos;t in this flow yet.
             </p>
           ) : !states ? (
-            <p className="mt-2 text-sm text-shodo-ink-faint">Loading usages…</p>
+            !error && <p className="mt-2 text-sm text-shodo-ink-faint">Loading usages…</p>
           ) : (
             <>
               {!states.labelled && (

@@ -1,17 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import AudioFirstSwitch from "@/components/admin/AudioFirstSwitch";
 import AddPicturePanel from "@/components/admin/pictures/AddPicturePanel";
 import NewPicturePanel from "@/components/admin/pictures/NewPicturePanel";
 import PictureCardTools from "@/components/admin/pictures/PictureCardTools";
-import AudioFirstSwitch from "@/components/admin/AudioFirstSwitch";
 import { resolveKuId, SUBJECT_LABEL, type SubjectKind } from "@/components/admin/pictures/pictureApi";
+import { apiFetch } from "@/lib/api-client";
+import type { AdminPicture, PictureStatus } from "@/types";
 
 /** When the admin last looked at Needs Review: newer pictures there are highlighted. */
 const LAST_SEEN_KEY = "admin.pictures.needsReviewLastSeen";
 const millis = (t: AdminPicture["createdAt"]) => t._seconds * 1000 + Math.floor(t._nanoseconds / 1e6);
-import { apiFetch } from "@/lib/api-client";
-import type { AdminPicture, PictureStatus } from "@/types";
 
 interface Job {
   running: boolean;

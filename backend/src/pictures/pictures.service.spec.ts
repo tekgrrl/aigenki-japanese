@@ -335,7 +335,7 @@ describe('PicturesService', () => {
 
     it('a second redraw of the same picture is refused while one is running', async () => {
       seed(vocabLesson([ex('time', 1)]));
-      existingPicture('p1', 'time', 'approved');
+      existingPicture('p1', 'time', 'needs-review');
       let release!: () => void;
       gemini.generatePictureBrief.mockImplementation(() => new Promise(r => (release = () => r(okBrief))));
       const first = service.startRedraw('p1');
@@ -348,7 +348,7 @@ describe('PicturesService', () => {
 
     it('a forced generation does not delete a picture that is mid-redraw', async () => {
       seed(vocabLesson([ex('time', 1)]));
-      existingPicture('p1', 'time', 'approved');
+      existingPicture('p1', 'time', 'needs-review');
       let release!: () => void;
       gemini.generatePictureBrief.mockImplementationOnce(() => new Promise(r => (release = () => r(okBrief))));
       await service.startRedraw('p1');
@@ -361,7 +361,7 @@ describe('PicturesService', () => {
 
     it('an unpicturable redraw removes the old image file', async () => {
       seed(vocabLesson([ex('time', 1)]));
-      existingPicture('p1', 'time', 'approved');
+      existingPicture('p1', 'time', 'needs-review');
       gemini.generatePictureBrief.mockResolvedValue({ ...okBrief, picturable: false });
       await service.startRedraw('p1');
       await waitFor(() => service.getJob().redrawing.length === 0);
@@ -483,6 +483,14 @@ describe('PicturesService', () => {
       uploadedPicture('up1', 'time');
       await expect(service.startRedraw('up1')).rejects.toBeInstanceOf(BadRequestException);
       expect(service.getJob().redrawing).toEqual([]);
+    });
+
+    it('approved pictures cannot be redrawn (it would unbind them)', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'approved');
+      await expect(service.startRedraw('p1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(service.getJob().redrawing).toEqual([]);
+      expect(pictures().find(p => p.id === 'p1')!.status).toBe('approved');
     });
   });
 
@@ -749,6 +757,14 @@ describe('PicturesService', () => {
       (service as any).job.current = [KU];
       const res = await service.usageStates(KU);
       expect(res.usages.map(u => [u.usage, u.state, u.drawing])).toEqual([['time', 'bound', false], ['cost', 'waiting', true]]);
+    });
+
+    it('a forced bulk job counts every usage of the word as being drawn', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      existingPicture('r', 'cost', 'rejected');
+      Object.assign((service as any).job, { current: [KU], force: true });
+      const res = await service.usageStates(KU);
+      expect(res.usages.map(u => [u.usage, u.state, u.drawing])).toEqual([['time', 'waiting', true], ['cost', 'waiting', true]]);
     });
 
     it('flags a word whose examples are not all labelled', async () => {

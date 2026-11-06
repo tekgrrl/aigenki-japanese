@@ -128,6 +128,8 @@ export default function PictureCardTools({ pic, disabled, onDone }: Props) {
             actions={(ku, u) =>
               ku.id === pic.kuId && u.usage.trim().toLowerCase() === pic.usage.trim().toLowerCase() ? (
                 <span className="text-xs text-shodo-ink-faint">Current</span>
+              ) : u.state === "bound" ? (
+                <span className="text-xs text-shodo-ink-faint">Already has a picture</span>
               ) : (
                 <button
                   type="button"

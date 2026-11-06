@@ -76,7 +76,7 @@ const CONCURRENCY = 2;
 export class PicturesService {
   private readonly logger = new Logger(PicturesService.name);
   private readonly dir: string;
-  private job = { running: false, total: 0, done: 0, failed: 0, current: [] as string[] };
+  private job = { running: false, total: 0, done: 0, failed: 0, current: [] as string[], force: false };
   /** Picture ids with a redraw in progress (redraws run in the background). */
   private readonly redrawing = new Set<string>();
   /** New pictures being rendered in the background. Their doc appears when done. */
@@ -153,7 +153,8 @@ export class PicturesService {
     const lesson = lessonDoc.data() as VocabLesson;
     const pics = existing.docs.filter(d => isUsagePicture(d.data()));
     const drawing = [...this.rendering.values()].filter(r => r.kuId === kuId);
-    // A bulk job drawing this word fills its usages that have no picture of any status.
+    // A bulk job drawing this word fills its usages that have no picture of any status
+    // (a forced job redraws every usage).
     const bulkDrawing = this.job.current.includes(kuId);
     return {
       kuId,
@@ -166,7 +167,7 @@ export class PicturesService {
         const bound = by('approved');
         const waiting = [...by('needs-review'), ...by('unpicturable')];
         const isDrawing =
-          drawing.some(r => usageKey(r.usage) === usageKey(s.usage)) || (bulkDrawing && mine.length === 0);
+          drawing.some(r => usageKey(r.usage) === usageKey(s.usage)) || (bulkDrawing && (this.job.force || mine.length === 0));
         const state: UsageState = bound.length ? 'bound' : waiting.length || isDrawing ? 'waiting' : 'none';
         return {
           usage: s.usage,
@@ -201,7 +202,7 @@ export class PicturesService {
   async startGeneration(opts: { kuIds?: string[]; missingLimit?: number; force?: boolean }) {
     if (this.job.running) throw new BadRequestException('A generation job is already running');
     // Claim the job slot before any await, so two quick requests can't both start one.
-    this.job = { running: true, total: 0, done: 0, failed: 0, current: [] };
+    this.job = { running: true, total: 0, done: 0, failed: 0, current: [], force: !!opts.force };
     let kuIds: string[];
     try {
       kuIds = [...new Set(opts.kuIds ?? [])];
@@ -330,6 +331,9 @@ export class PicturesService {
       if (opts.brief) assertBrief(opts.brief);
       pic = await this.get(id);
       if (pic.origin === 'uploaded') throw new BadRequestException('Uploaded pictures can\'t be redrawn: upload a new one instead');
+      // A redraw lands in Needs Review, which would unbind it from learners. Changing a
+      // bound picture is a later step.
+      if (pic.status === 'approved') throw new BadRequestException('Approved pictures can\'t be redrawn yet');
       ctx = await this.redrawContext(pic, opts.note);
     } catch (e) {
       this.redrawing.delete(id);
@@ -733,7 +737,6 @@ export function usagesLabelled(lesson: VocabLesson): boolean {
  * usage when every example is labelled, otherwise just the first example. No cap: every
  * usage the slides teach gets a picture. (No examples at all → one definition-based picture.)
  */
-
 export function usageSources(lesson: VocabLesson): PictureSource[] {
   const examples = lesson.context_examples ?? [];
   const definition = (lesson.definitions ?? [])[0] ?? lesson.definition ?? '';
