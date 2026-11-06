@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BadRequestException } from '@nestjs/common';
-import { PicturesService, subjectOf, usageSources } from './pictures.service';
+import { FieldValue } from 'firebase-admin/firestore';
+import { PicturesService, subjectOf, usageSources, usagesLabelled } from './pictures.service';
 import { PictureRenderer } from './picture-renderer';
 
 // ─── Minimal in-memory Firestore (only what PicturesService uses) ────────────
@@ -23,7 +24,9 @@ class FakeDocRef {
   async update(data: Data) {
     const cur = this.store.get(this.id);
     if (!cur) throw new Error(`update of missing doc ${this.id}`);
-    this.store.set(this.id, { ...cur, ...data });
+    const next = { ...cur, ...data };
+    for (const [k, v] of Object.entries(data)) if (v instanceof FieldValue && v.isEqual(FieldValue.delete())) delete next[k];
+    this.store.set(this.id, next);
   }
   async delete() {
     this.store.delete(this.id);
@@ -158,11 +161,11 @@ describe('PicturesService', () => {
   });
 
   describe('generateForKu', () => {
-    it('creates one approved picture per usage, with its file on disk', async () => {
+    it('creates one picture per usage, waiting in Needs Review, with its file on disk', async () => {
       seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
       const { pictures: made, failed } = await service.generateForKu(KU);
       expect(failed).toBe(0);
-      expect(made.map(p => [p.usage, p.status])).toEqual([['time', 'approved'], ['cost', 'approved']]);
+      expect(made.map(p => [p.usage, p.status])).toEqual([['time', 'needs-review'], ['cost', 'needs-review']]);
       for (const p of made) expect(fs.existsSync(path.join(dir, p.file!))).toBe(true);
     });
 
@@ -208,8 +211,8 @@ describe('PicturesService', () => {
         .mockResolvedValueOnce({ hasText: true, where: 'a sign' })
         .mockResolvedValueOnce({ hasText: false, where: 'none' });
       const { pictures: made } = await service.generateForKu(KU);
-      expect(made[0].status).toBe('approved');
-      expect(made[0].attempts).toHaveLength(2);
+      expect(made[0].status).toBe('needs-review'); // a clean image still waits for the admin
+      expect(made[0].attempts.map(a => a.hasText)).toEqual([true, false]);
       expect(gemini.generatePicture).toHaveBeenCalledTimes(2);
     });
 
@@ -244,12 +247,13 @@ describe('PicturesService', () => {
   });
 
   describe('forced replace never loses an approved picture to a worse one', () => {
-    it('an approved replacement removes the old picture and its file', async () => {
+    it('a clean replacement waits in Needs Review beside the old approved picture', async () => {
       seed(vocabLesson([ex('time', 1)]));
       existingPicture('old', 'time', 'approved');
       await service.generateForKu(KU, true);
-      expect(pictures().map(p => p.id)).toEqual(['auto1']);
-      expect(fs.existsSync(path.join(dir, 'old-1.png'))).toBe(false);
+      const byId = Object.fromEntries(pictures().map(p => [p.id, p.status]));
+      expect(byId).toEqual({ old: 'approved', auto1: 'needs-review' });
+      expect(fs.existsSync(path.join(dir, 'old-1.png'))).toBe(true);
     });
 
     it('a needs-review replacement leaves the old approved picture in place', async () => {
@@ -316,7 +320,7 @@ describe('PicturesService', () => {
       await new Promise(r => setImmediate(r));
       await waitFor(() => service.getJob().redrawing.length === 0);
       const p = pictures().find(x => x.id === 'p1')!;
-      expect(p.status).toBe('approved');
+      expect(p.status).toBe('needs-review');
       expect(p.file).not.toBe('p1-1.png');
       expect(fs.readdirSync(dir).filter(f => f.startsWith('p1-'))).toEqual([p.file]);
     });
@@ -340,7 +344,7 @@ describe('PicturesService', () => {
       let release!: () => void;
       gemini.generatePictureBrief.mockImplementationOnce(() => new Promise(r => (release = () => r(okBrief))));
       await service.startRedraw('p1');
-      await service.generateForKu(KU, true); // approved replacement for 'time'
+      await service.generateForKu(KU, true); // a replacement for 'time'
       expect(pictures().some(p => p.id === 'p1')).toBe(true);
       await waitFor(() => !!release);
       release();
@@ -372,10 +376,10 @@ describe('PicturesService', () => {
       });
     }
 
-    it('upload stores an approved, uploaded picture with its file', async () => {
+    it('upload stores an uploaded picture, waiting in Needs Review, with its file', async () => {
       seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
       const pic = await service.upload(KU, 'COST', png());
-      expect(pic).toMatchObject({ status: 'approved', origin: 'uploaded', usage: 'cost', kuId: KU });
+      expect(pic).toMatchObject({ status: 'needs-review', origin: 'uploaded', usage: 'cost', kuId: KU });
       expect(fs.readFileSync(path.join(dir, pic.file!)).subarray(8).toString()).toBe('diagram');
     });
 
@@ -432,13 +436,12 @@ describe('PicturesService', () => {
       await expect(service.upload(KU, 'costs', png())).rejects.toThrow(/time, cost/);
     });
 
-    it('upload replaces other pictures for the same usage (marks them rejected)', async () => {
+    it('upload leaves the other pictures for its usage alone (it is not bound until approved)', async () => {
       seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
       existingPicture('gen-time', 'time', 'approved');
-      existingPicture('gen-cost', 'cost', 'approved');
       const up = await service.upload(KU, 'time', png());
       const status = Object.fromEntries(pictures().map(p => [p.id, p.status]));
-      expect(status).toEqual({ 'gen-time': 'rejected', 'gen-cost': 'approved', [up.id]: 'approved' });
+      expect(status).toEqual({ 'gen-time': 'approved', [up.id]: 'needs-review' });
     });
 
     it('a failed doc write removes the uploaded file', async () => {
@@ -577,7 +580,7 @@ describe('PicturesService', () => {
       expect(service.getJob().rendering.map(r => r.id)).toEqual([id]);
       await doneRendering();
       const p = pictures().find(x => x.id === id)!;
-      expect(p).toMatchObject({ kuId: 'g1', usage: '', status: 'approved', subject: { kind: 'ku', kuId: 'g1' } });
+      expect(p).toMatchObject({ kuId: 'g1', usage: '', status: 'needs-review', subject: { kind: 'ku', kuId: 'g1' } });
       expect(gemini.generatePictureBrief).toHaveBeenCalledWith(expect.objectContaining({ definition: 'Doing a favour' }), 'g1', '/pictures/brief-ku');
       expect(fs.existsSync(path.join(dir, p.file))).toBe(true);
     });
@@ -624,7 +627,7 @@ describe('PicturesService', () => {
       await service.redraw('p1', { brief });
       await waitFor(() => service.getJob().redrawing.length === 0);
       expect(gemini.generatePictureBrief).not.toHaveBeenCalled();
-      expect(pictures().find(p => p.id === 'p1')).toMatchObject({ brief, status: 'approved', usage: 'time' });
+      expect(pictures().find(p => p.id === 'p1')).toMatchObject({ brief, status: 'needs-review', usage: 'time' });
     });
 
     it('redraws with a note that steers the new brief', async () => {
@@ -694,8 +697,70 @@ describe('PicturesService', () => {
       db.collection('knowledge-units').doc('g1').set({ type: 'Grammar', content: '〜てくれる', data: { title: 'Receiving a favour' } });
       const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('d')]);
       const p = await service.upload('g1', undefined, { buffer: PNG, mimetype: 'image/png', size: PNG.length }, 'ku');
-      expect(p).toMatchObject({ kuId: 'g1', origin: 'uploaded', status: 'approved', subject: { kind: 'ku', kuId: 'g1' } });
+      expect(p).toMatchObject({ kuId: 'g1', origin: 'uploaded', status: 'needs-review', subject: { kind: 'ku', kuId: 'g1' } });
       expect(fs.existsSync(path.join(dir, p.file!))).toBe(true);
+    });
+  });
+
+  describe('usage states (Add a Picture)', () => {
+    it('reports each usage as none, waiting or bound; rejected pictures do not count', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2), ex('hang', 3), ex('rest', 4)]));
+      existingPicture('a', 'time', 'approved');
+      existingPicture('w', 'cost', 'needs-review');
+      existingPicture('u', 'hang', 'unpicturable', false);
+      existingPicture('r', 'rest', 'rejected');
+      const res = await service.usageStates(KU);
+      expect(res.labelled).toBe(true);
+      expect(res.usages.map(u => [u.usage, u.state, u.pictureIds, u.rejected])).toEqual([
+        ['time', 'bound', ['a'], 0],
+        ['cost', 'waiting', ['w'], 0],
+        ['hang', 'waiting', ['u'], 0],
+        ['rest', 'none', [], 1],
+      ]);
+      expect(res.usages[2].pictures).toEqual([{ id: 'u', status: 'unpicturable' }]);
+      expect(res.usages[0].pictures).toEqual([{ id: 'a', status: 'approved', file: 'a-1.png' }]);
+    });
+
+    it('a picture still being drawn makes its usage waiting', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      let release!: () => void;
+      gemini.generatePictureBrief.mockImplementationOnce(() => new Promise(r => (release = () => r(okBrief))));
+      await service.create({ subject: { kind: 'ku-usage', kuId: KU, usage: 'cost' } });
+      const during = await service.usageStates(KU);
+      expect(during.usages.map(u => [u.usage, u.state, u.drawing])).toEqual([['time', 'none', false], ['cost', 'waiting', true]]);
+      await waitFor(() => !!release);
+      release();
+      await waitFor(() => service.getJob().rendering.length === 0);
+      const after = await service.usageStates(KU);
+      expect(after.usages[1]).toMatchObject({ state: 'waiting', drawing: false });
+    });
+
+    it('flags a word whose examples are not all labelled', async () => {
+      seed(vocabLesson([ex('time', 1), ex(undefined, 2)], ['to take']));
+      const res = await service.usageStates(KU);
+      expect(res.labelled).toBe(false);
+      expect(res.usages.map(u => u.usage)).toEqual(['to take']);
+      expect(usagesLabelled(vocabLesson([]) as any)).toBe(false);
+    });
+
+    it('refuses non-Vocab KUs', async () => {
+      seed(vocabLesson([ex('x')]), 'Grammar');
+      await expect(service.usageStates(KU)).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('unpicturable is the AI\'s call', () => {
+    it('the admin cannot mark a picture unpicturable', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('p1', 'time', 'needs-review');
+      await expect(service.setStatus('p1', 'unpicturable')).rejects.toBeInstanceOf(BadRequestException);
+      expect(pictures().find(p => p.id === 'p1')?.status).toBe('needs-review');
+    });
+
+    it('a picture without an image cannot be approved', async () => {
+      seed(vocabLesson([ex('time', 1)]));
+      existingPicture('u1', 'time', 'unpicturable', false);
+      await expect(service.setStatus('u1', 'approved')).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

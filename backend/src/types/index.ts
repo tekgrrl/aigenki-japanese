@@ -777,5 +777,123 @@ export interface ContentFlag {
   createdAt: Timestamp;
 }
 
+// ── Pictures: documents in the global `pictures` collection ─────────────────
+// Image files live on local disk (PICTURES_DIR); these docs hold their metadata.
+
+export type PictureStatus = 'approved' | 'needs-review' | 'rejected' | 'unpicturable';
+
+/**
+ * Named render presets. `card`: the square picture card (cream paper, optional cast).
+ * `scene`: a wide establishing scene (e.g. a scenario's setting), with a soft full
+ * background. Both are text-free.
+ */
+export type PictureStyle = 'card' | 'scene';
+
+/** What the image model is asked to draw. */
+export interface PictureBrief {
+  picturable: boolean;
+  includeCast: boolean;
+  /** "none", or at most two simple meaning-carrying background elements. */
+  background: string;
+  scene: string;
+  /** Why it can't be drawn, when picturable is false (from the brief step or the admin). */
+  reason?: string;
+}
+
+/** One automatic check of a rendered image for leaked text. */
+export interface PictureTextCheck {
+  hasText: boolean;
+  where: string;
+}
+
+/**
+ * What a picture is OF.
+ * - 'ku-usage': one usage (sense) of a Vocab word — the picture cards.
+ * - 'ku': a whole KU or Concept (never a Kanji).
+ * - 'none': a free-standing asset, not attached to anything yet.
+ */
+export type PictureSubjectKind = 'ku-usage' | 'ku' | 'none';
+export const SUBJECT_KINDS: PictureSubjectKind[] = ['ku-usage', 'ku', 'none'];
+
+export interface PictureSubject {
+  kind: PictureSubjectKind;
+  /** Absent for 'none'. */
+  kuId?: string;
+  /** 'ku-usage' only. */
+  usage?: string;
+}
+
+/** What a picture was generated from — kept so a redraw uses the same usage. */
+export interface PictureSource {
+  usage: string;
+  definition: string;
+  sentence: string;
+  translation: string;
+}
+
+/** A `pictures` document exactly as stored (the id is the doc id, not a field). */
+export interface PictureDoc {
+  /** The subject's KU (or Concept) id; null for a free-standing ('none') picture. */
+  kuId: string | null;
+  /** Absent on docs written before subjects existed: those are 'ku-usage' (see subjectOf). */
+  subject?: PictureSubject;
+  /** The subject's word / KU content, or a free-standing picture's description. */
+  content: string;
+  reading: string;
+  /** The usage label for 'ku-usage'; "" otherwise. */
+  usage: string;
+  source: PictureSource;
+  status: PictureStatus;
+  /** Absent = generated. Only 'uploaded' is ever written. */
+  origin?: 'generated' | 'uploaded';
+  /** Absent = 'card'. Only 'scene' is ever written. */
+  style?: PictureStyle;
+  /** The editor's note the brief was last drafted with, or an upload's description. */
+  note?: string;
+  /** Absent on uploads. */
+  brief?: PictureBrief;
+  /** File name inside PICTURES_DIR; absent for unpicturable pictures. */
+  file?: string;
+  /** Empty on uploads. */
+  attempts: PictureTextCheck[];
+  createdAt: Timestamp;
+}
+
+/** A picture as the service returns it. */
+export type Picture = PictureDoc & { id: string };
+
+/** A picture in the admin list (computed, never stored). */
+export type AdminPicture = Picture & {
+  /** An uploaded usage picture whose usage no longer exists in the lesson. */
+  staleUsage?: boolean;
+};
+
+/** Where one of a Vocab word's usages stands in the picture flow (computed, never stored). */
+export type UsageState = 'none' | 'waiting' | 'bound';
+
+/** A Vocab word's usages and their picture states, for the Add a Picture flow. */
+export interface UsageStates {
+  kuId: string;
+  content: string;
+  reading: string;
+  /** False when some examples have no usage label: the word then counts as one usage. */
+  labelled: boolean;
+  usages: {
+    usage: string;
+    sentence: string;
+    translation: string;
+    /** bound: an approved picture; waiting: one in Needs Review / Unpicturable, or being drawn. */
+    state: UsageState;
+    /** The bound and waiting pictures. */
+    pictureIds: string[];
+    /** The same pictures, for a preview (no file when unpicturable). */
+    pictures: { id: string; status: PictureStatus; file?: string }[];
+    /** A picture for this usage is being drawn right now. */
+    drawing: boolean;
+    /** How many rejected pictures this usage has (they don't count). */
+    rejected: number;
+  }[];
+}
+
 export * from './scenario';
 export * from './grammar-section';

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BriefEditor from "./BriefEditor";
 import {
   buildSubject,
   type PictureBrief,
@@ -21,9 +22,9 @@ const input = "rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm";
  * then render. Rendering without a drafted brief drafts one on the server.
  */
 export default function NewPicturePanel({ onStarted }: Props) {
-  const [kind, setKind] = useState<SubjectKind>("ku-usage");
+  // Usage pictures are made in Add a Picture; this panel is for whole-KU and free-standing ones.
+  const [kind, setKind] = useState<SubjectKind>("ku");
   const [word, setWord] = useState("");
-  const [usage, setUsage] = useState("");
   const [note, setNote] = useState("");
   const [style, setStyle] = useState<"card" | "scene">("card");
   const [brief, setBrief] = useState<PictureBrief | null>(null);
@@ -37,7 +38,7 @@ export default function NewPicturePanel({ onStarted }: Props) {
     setBusy("draft");
     setError(null);
     try {
-      const subject = await buildSubject(kind, word, usage);
+      const subject = await buildSubject(kind, word, "");
       const drafted = await sendJson<PictureBrief>(
         "/api/pictures/briefs",
         "POST",
@@ -63,7 +64,7 @@ export default function NewPicturePanel({ onStarted }: Props) {
     setBusy("render");
     setError(null);
     try {
-      const subject = await buildSubject(kind, word, usage);
+      const subject = await buildSubject(kind, word, "");
       await sendJson<{ id: string }>("/api/pictures", "POST", {
         subject: kind === "none" ? undefined : subject,
         brief: brief ?? undefined,
@@ -80,9 +81,6 @@ export default function NewPicturePanel({ onStarted }: Props) {
       setBusy(null);
     }
   };
-
-  const patchBrief = (p: Partial<PictureBrief>) =>
-    setBrief((b) => (b ? { ...b, ...p } : b));
 
   const actions = (
     <div className="flex items-center gap-2">
@@ -119,11 +117,13 @@ export default function NewPicturePanel({ onStarted }: Props) {
           onChange={(e) => setKind(e.target.value as SubjectKind)}
           className={input}
         >
-          {(Object.keys(SUBJECT_LABEL) as SubjectKind[]).map((k) => (
-            <option key={k} value={k}>
-              {SUBJECT_LABEL[k]}
-            </option>
-          ))}
+          {(Object.keys(SUBJECT_LABEL) as SubjectKind[])
+            .filter((k) => k !== "ku-usage")
+            .map((k) => (
+              <option key={k} value={k}>
+                {SUBJECT_LABEL[k]}
+              </option>
+            ))}
         </select>
         {needsWord && (
           <input
@@ -132,15 +132,6 @@ export default function NewPicturePanel({ onStarted }: Props) {
             onChange={(e) => setWord(e.target.value)}
             placeholder={kind === "ku" ? "KU content or id" : "Word, e.g. 練習"}
             className={`${input} w-44`}
-          />
-        )}
-        {kind === "ku-usage" && (
-          <input
-            aria-label="Usage"
-            value={usage}
-            onChange={(e) => setUsage(e.target.value)}
-            placeholder="Usage (optional; defaults to the first)"
-            className={`${input} w-64`}
           />
         )}
         <select
@@ -168,43 +159,9 @@ export default function NewPicturePanel({ onStarted }: Props) {
 
       {brief ? (
         <div className="mt-4">
-          <h3 className="text-base font-bold">
-            Draft Brief
-            {!brief.picturable && (
-              <span className="ml-2 text-xs font-normal text-shodo-persimmon">
-                The model judged this unpicturable: edit the scene to override.
-              </span>
-            )}
-          </h3>
+          <h3 className="text-base font-bold">Draft Brief</h3>
           <div className="mt-2 ml-6 space-y-3">
-            <textarea
-              aria-label="Scene"
-              value={brief.scene}
-              onChange={(e) =>
-                patchBrief({ scene: e.target.value, picturable: true })
-              }
-              rows={3}
-              className={`${input} w-full`}
-            />
-            <label className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-shodo-ink-light">
-                Background
-              </span>
-              <input
-                value={brief.background}
-                onChange={(e) => patchBrief({ background: e.target.value })}
-                placeholder="e.g. a quiet classroom, a rainy street at dusk (empty = plain card)"
-                className={`${input} flex-1`}
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-shodo-ink-light">
-              <input
-                type="checkbox"
-                checked={brief.includeCast}
-                onChange={(e) => patchBrief({ includeCast: e.target.checked })}
-              />
-              Fude / Suzuri in the scene
-            </label>
+            <BriefEditor brief={brief} onChange={setBrief} />
             <button
               type="button"
               onClick={() => setBrief(null)}

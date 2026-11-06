@@ -3,16 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { GeminiService } from '../gemini/gemini.service';
-import { PictureBrief, PictureStyle } from '../prompts/picture.prompts';
+import type { PictureBrief, PictureStyle, PictureTextCheck } from '../types';
 
 export const IMAGE_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
 const MAX_ATTEMPTS = 3;
 
-export interface TextCheck {
-  hasText: boolean;
-  where: string;
-}
+export type TextCheck = PictureTextCheck;
 
 export interface RenderResult {
   /** Path relative to PICTURES_DIR (may include a subdirectory, e.g. "scenarios/uid/x.png"). */

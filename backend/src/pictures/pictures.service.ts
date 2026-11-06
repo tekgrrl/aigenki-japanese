@@ -5,59 +5,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CONCEPTS_COLLECTION, FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, LESSONS_COLLECTION, PICTURES_COLLECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { GeminiService } from '../gemini/gemini.service';
-import { PictureBrief, PictureBriefInput, PictureStyle } from '../prompts/picture.prompts';
-import { VocabLesson } from '../types';
+import { PictureBriefInput } from '../prompts/picture.prompts';
+import {
+  AdminPicture,
+  Picture,
+  PictureBrief,
+  PictureSource,
+  PictureStatus,
+  PictureStyle,
+  PictureSubject,
+  PictureSubjectKind,
+  SUBJECT_KINDS,
+  UsageState,
+  UsageStates,
+  VocabLesson,
+} from '../types';
 import { IMAGE_EXT, PictureRenderer, TextCheck } from './picture-renderer';
 
-export type PictureStatus = 'approved' | 'needs-review' | 'rejected' | 'unpicturable';
-
-/**
- * What a picture is OF.
- * - 'ku-usage': one usage (sense) of a Vocab word — the picture cards.
- * - 'ku': a whole KU or Concept of any type (e.g. a Grammar or Concept diagram).
- * - 'none': a free-standing asset, not attached to anything yet.
- * Docs written before subjects existed have no `subject` and are 'ku-usage' (see subjectOf).
- */
-export type PictureSubjectKind = 'ku-usage' | 'ku' | 'none';
-export interface PictureSubject {
-  kind: PictureSubjectKind;
-  kuId?: string;
-  usage?: string;
-}
-export const SUBJECT_KINDS: PictureSubjectKind[] = ['ku-usage', 'ku', 'none'];
-
-/** What a picture was generated from — kept so a regenerate uses the same usage. */
-export interface PictureSource {
-  usage: string;
-  definition: string;
-  sentence: string;
-  translation: string;
-}
-
-export interface Picture {
-  id: string;
-  /** The subject's KU (or Concept) id; null for a free-standing ('none') picture. */
-  kuId: string | null;
-  subject?: PictureSubject;
-  /** Render preset; absent = 'card'. */
-  style?: PictureStyle;
-  /** The editor's note the brief was last drafted with, if any. */
-  note?: string;
-  content: string;
-  reading: string;
-  usage: string;
-  status: PictureStatus;
-  source: PictureSource;
-  brief?: PictureBrief;
-  /** File name inside PICTURES_DIR; absent for unpicturable entries. */
-  file?: string;
-  attempts: TextCheck[];
-  /** 'uploaded' = made outside the system (e.g. a hand-made diagram). Absent = generated. */
-  origin?: 'generated' | 'uploaded';
-  /** Admin list only: an uploaded picture whose usage no longer exists in the lesson. */
-  staleUsage?: boolean;
-  createdAt: Timestamp;
-}
+// The picture types live in src/types; re-exported for this module's existing importers.
+export type { AdminPicture, Picture, PictureSource, PictureStatus, PictureSubject, PictureSubjectKind };
+export { SUBJECT_KINDS };
 
 /** A file accepted by upload (the subset of multer's file object we use). */
 export interface UploadedImage {
@@ -112,8 +79,8 @@ export class PicturesService {
   private job = { running: false, total: 0, done: 0, failed: 0, current: [] as string[] };
   /** Picture ids with a redraw in progress (redraws run in the background). */
   private readonly redrawing = new Set<string>();
-  /** New pictures being rendered in the background: id -> label. Their doc appears when done. */
-  private readonly rendering = new Map<string, string>();
+  /** New pictures being rendered in the background. Their doc appears when done. */
+  private readonly rendering = new Map<string, { label: string; kuId: string | null; usage: string }>();
 
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
@@ -161,10 +128,58 @@ export class PicturesService {
   }
 
   async setStatus(id: string, status: PictureStatus): Promise<Picture> {
+    // Only the brief step decides a picture can't be drawn; the admin redraws or rejects.
+    if (status === 'unpicturable') throw new BadRequestException('Only the AI marks a picture unpicturable: redraw or reject it instead');
     const pic = await this.get(id);
     if (status === 'approved' && !pic.file) throw new BadRequestException('A picture without an image cannot be approved');
     await this.col().doc(id).update({ status });
     return this.get(id);
+  }
+
+  /**
+   * Where each of a Vocab word's usages stands, for the Add a Picture flow:
+   * bound (an approved picture), waiting (one in Needs Review or Unpicturable, or being
+   * drawn now) or none. Rejected pictures don't count, but are reported.
+   */
+  async usageStates(kuId: string): Promise<UsageStates> {
+    const [kuDoc, lessonDoc, existing] = await Promise.all([
+      this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).get(),
+      this.db.collection(LESSONS_COLLECTION).doc(kuId).get(),
+      this.col().where('kuId', '==', kuId).get(),
+    ]);
+    if (!kuDoc.exists) throw new NotFoundException(`KU ${kuId} not found`);
+    if (kuDoc.data()?.type !== 'Vocab') throw new BadRequestException(`KU ${kuId} is not Vocab`);
+    if (!lessonDoc.exists) throw new BadRequestException(`KU ${kuId} has no lesson yet`);
+    const lesson = lessonDoc.data() as VocabLesson;
+    const pics = existing.docs.filter(d => isUsagePicture(d.data()));
+    const drawing = [...this.rendering.values()].filter(r => r.kuId === kuId);
+    return {
+      kuId,
+      content: lesson.vocab,
+      reading: lesson.reading,
+      labelled: usagesLabelled(lesson),
+      usages: usageSources(lesson).map(s => {
+        const mine = pics.filter(d => usageKey(d.data().usage) === usageKey(s.usage));
+        const by = (st: PictureStatus) => mine.filter(d => d.data().status === st).map(d => d.id);
+        const bound = by('approved');
+        const waiting = [...by('needs-review'), ...by('unpicturable')];
+        const isDrawing = drawing.some(r => usageKey(r.usage) === usageKey(s.usage));
+        const state: UsageState = bound.length ? 'bound' : waiting.length || isDrawing ? 'waiting' : 'none';
+        return {
+          usage: s.usage,
+          sentence: s.sentence,
+          translation: s.translation,
+          state,
+          pictureIds: [...bound, ...waiting],
+          pictures: [...bound, ...waiting].map(id => {
+            const d = mine.find(x => x.id === id)!.data();
+            return { id, status: d.status as PictureStatus, ...(d.file ? { file: d.file as string } : {}) };
+          }),
+          drawing: isDrawing,
+          rejected: by('rejected').length,
+        };
+      }),
+    };
   }
 
   getJob() {
@@ -172,7 +187,7 @@ export class PicturesService {
       ...this.job,
       current: [...this.job.current],
       redrawing: [...this.redrawing],
-      rendering: [...this.rendering].map(([id, label]) => ({ id, label })),
+      rendering: [...this.rendering].map(([id, r]) => ({ id, label: r.label })),
     };
   }
 
@@ -359,7 +374,7 @@ export class PicturesService {
         ? this.freeContext(input.note?.trim() || input.brief?.scene || '')
         : await this.resolveSubject(subject);
     const ref = this.col().doc();
-    this.rendering.set(ref.id, ctx.usage ? `${ctx.content} (${ctx.usage})` : ctx.content);
+    this.rendering.set(ref.id, { label: ctx.usage ? `${ctx.content} (${ctx.usage})` : ctx.content, kuId: ctx.kuId, usage: ctx.usage });
     this.produce(ref, ctx, { brief: input.brief, note: input.note, style: input.style })
       .catch(e => this.logger.error(`Picture ${ref.id} for ${ctx.content} failed: ${e?.message}`))
       .finally(() => this.rendering.delete(ref.id));
@@ -430,7 +445,9 @@ export class PicturesService {
     }
 
     const result = await this.renderer.render(brief, { style, prefix: ref.id, logId: ctx.kuId ?? ref.id });
-    const doc = { ...base, status: result.status as PictureStatus, brief, file: result.file, attempts: result.attempts };
+    // Every new Image waits for the admin: nothing reaches learners until it's approved.
+    // (The text check's verdict stays in `attempts`, which the admin card shows.)
+    const doc = { ...base, status: 'needs-review' as const, brief, file: result.file, attempts: result.attempts };
     await ref.set(doc);
     if (existingId) this.renderer.removeByPrefix(existingId, result.file);
     this.logger.log(`Picture ${ref.id} for ${ctx.content}${ctx.usage ? ` (${ctx.usage})` : ''}: ${doc.status} after ${result.attempts.length} attempt(s)`);
@@ -522,7 +539,7 @@ export class PicturesService {
 
   /**
    * Attach an image made outside the system (e.g. a hand-made diagram) to a Vocab KU.
-   * Stored like a generated picture, approved straight away, and marked
+   * Stored like a generated picture, waiting in Needs Review, and marked
    * origin 'uploaded' so generation never redraws, replaces or cleans it up.
    */
   async upload(kuId: string | undefined, usage: string | undefined, image: UploadedImage, kind: PictureSubjectKind = 'ku-usage', note?: string): Promise<Picture> {
@@ -568,7 +585,7 @@ export class PicturesService {
       subject: { kind: 'ku-usage' as const, kuId, usage: source.usage },
       usage: source.usage,
       source,
-      status: 'approved' as const,
+      status: 'needs-review' as const,
       origin: 'uploaded' as const,
       file,
       attempts: [],
@@ -581,19 +598,12 @@ export class PicturesService {
       throw e;
     }
 
-    // The upload replaces any other picture for this usage: those are marked rejected
-    // (reversible from the admin grid) so learners only ever get the upload.
-    const others = await this.col().where('kuId', '==', kuId).get();
-    for (const d of others.docs) {
-      if (d.id !== ref.id && isUsagePicture(d.data()) && usageKey(d.data().usage) === usageKey(doc.usage) && d.data().status !== 'rejected') {
-        await d.ref.update({ status: 'rejected' });
-      }
-    }
+    // Nothing else changes: the upload isn't bound to its usage until it's approved.
     this.logger.log(`Uploaded picture ${ref.id} for ${doc.content} (${doc.usage})`);
     return { id: ref.id, ...doc };
   }
 
-  /** Upload for a whole KU ('ku') or as a free-standing asset ('none'). Approved straight away. */
+  /** Upload for a whole KU ('ku') or as a free-standing asset ('none'). Waits in Needs Review. */
   private async uploadOther(kind: PictureSubjectKind, kuId: string | undefined, image: UploadedImage, ext: string, note?: string): Promise<Picture> {
     const ctx = kind === 'none' ? this.freeContext(note?.trim() || 'Uploaded image') : await this.resolveSubject({ kind, kuId });
     const ref = this.col().doc();
@@ -607,7 +617,7 @@ export class PicturesService {
       usage: ctx.usage,
       source: ctx.source,
       ...(note?.trim() ? { note: note.trim() } : {}),
-      status: 'approved' as const,
+      status: 'needs-review' as const,
       origin: 'uploaded' as const,
       file,
       attempts: [],
@@ -624,7 +634,7 @@ export class PicturesService {
   }
 
   /** Flags uploaded pictures whose usage is no longer one of their lesson's usages. */
-  async annotateStale(pictures: Picture[]): Promise<Picture[]> {
+  async annotateStale(pictures: Picture[]): Promise<AdminPicture[]> {
     const isUsageUpload = (p: Picture) => p.origin === 'uploaded' && subjectOf(p).kind === 'ku-usage' && !!p.kuId;
     const kuIds = [...new Set(pictures.filter(isUsageUpload).map(p => p.kuId!))];
     if (!kuIds.length) return pictures;
@@ -711,6 +721,12 @@ export class PicturesService {
  * usage when every example is labelled, otherwise just the first example. No cap: every
  * usage the slides teach gets a picture. (No examples at all → one definition-based picture.)
  */
+/** Does every example carry a usage label? If not, usageSources() falls back to one usage. */
+export function usagesLabelled(lesson: VocabLesson): boolean {
+  const examples = lesson.context_examples ?? [];
+  return examples.length > 0 && examples.every(e => e.usage?.trim());
+}
+
 export function usageSources(lesson: VocabLesson): PictureSource[] {
   const examples = lesson.context_examples ?? [];
   const definition = (lesson.definitions ?? [])[0] ?? lesson.definition ?? '';

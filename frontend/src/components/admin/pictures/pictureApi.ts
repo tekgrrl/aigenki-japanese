@@ -1,17 +1,13 @@
 import { apiFetch } from "@/lib/api-client";
+import type {
+  PictureBrief,
+  PictureSubject,
+  PictureSubjectKind,
+  UsageStates,
+} from "@/types";
 
-export type SubjectKind = "ku-usage" | "ku" | "none";
-export interface PictureSubject {
-  kind: SubjectKind;
-  kuId?: string;
-  usage?: string;
-}
-export interface PictureBrief {
-  picturable: boolean;
-  includeCast: boolean;
-  background: string;
-  scene: string;
-}
+export type { PictureBrief, PictureSubject, UsageStates };
+export type SubjectKind = PictureSubjectKind;
 
 export const SUBJECT_LABEL: Record<SubjectKind, string> = {
   "ku-usage": "A usage of a word",
@@ -70,6 +66,68 @@ export async function sendJson<T>(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (!res.ok)
+    throw new Error(
+      (await res.json().catch(() => ({}))).message ?? `HTTP ${res.status}`,
+    );
+  return (await res.json()) as T;
+}
+
+/** A KU search hit, as the Add a Picture search lists it. */
+export interface KuHit {
+  id: string;
+  content: string;
+  type: string;
+  reading?: string;
+  meaning?: string;
+}
+
+/**
+ * KUs matching a KU id or content, never Kanji (pictures don't attach to Kanji). An id
+ * that search doesn't match is looked up directly.
+ */
+export async function searchKus(query: string): Promise<KuHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const res = await apiFetch(
+    `/api/knowledge-units/search?${new URLSearchParams({ q })}`,
+  );
+  const raw = res.ok
+    ? ((await res.json()) as {
+        id: string;
+        content: string;
+        type: string;
+        data?: { reading?: string; definition?: string; title?: string };
+      }[])
+    : [];
+  let hits = raw.filter((k) => k.type !== "Kanji");
+  if (!hits.some((k) => k.id === q) && /^(wk-\d+|[A-Za-z0-9]{20})$/.test(q)) {
+    const one = await apiFetch(`/api/knowledge-units/${q}/global`);
+    if (one.ok) {
+      const k = (await one.json()) as (typeof raw)[number];
+      if (k.type !== "Kanji") hits = [k, ...hits];
+    }
+  }
+  // Exact matches first, then the rest as search returned them.
+  hits.sort((a, b) => Number(b.content === q || b.id === q) - Number(a.content === q || a.id === q));
+  return hits.map((k) => ({
+    id: k.id,
+    content: k.content,
+    type: k.type,
+    reading: k.data?.reading,
+    meaning: k.data?.definition ?? k.data?.title,
+  }));
+}
+
+/** A Vocab word's usages and where each stands (no picture / waiting / bound). */
+export function fetchUsageStates(kuId: string): Promise<UsageStates> {
+  return sendJsonGet<UsageStates>(
+    `/api/pictures/admin/usages?${new URLSearchParams({ kuId })}`,
+  );
+}
+
+async function sendJsonGet<T>(url: string): Promise<T> {
+  const res = await apiFetch(url);
   if (!res.ok)
     throw new Error(
       (await res.json().catch(() => ({}))).message ?? `HTTP ${res.status}`,
