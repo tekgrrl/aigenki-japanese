@@ -153,6 +153,8 @@ export class PicturesService {
     const lesson = lessonDoc.data() as VocabLesson;
     const pics = existing.docs.filter(d => isUsagePicture(d.data()));
     const drawing = [...this.rendering.values()].filter(r => r.kuId === kuId);
+    // A bulk job drawing this word fills its usages that have no picture of any status.
+    const bulkDrawing = this.job.current.includes(kuId);
     return {
       kuId,
       content: lesson.vocab,
@@ -163,7 +165,8 @@ export class PicturesService {
         const by = (st: PictureStatus) => mine.filter(d => d.data().status === st).map(d => d.id);
         const bound = by('approved');
         const waiting = [...by('needs-review'), ...by('unpicturable')];
-        const isDrawing = drawing.some(r => usageKey(r.usage) === usageKey(s.usage));
+        const isDrawing =
+          drawing.some(r => usageKey(r.usage) === usageKey(s.usage)) || (bulkDrawing && mine.length === 0);
         const state: UsageState = bound.length ? 'bound' : waiting.length || isDrawing ? 'waiting' : 'none';
         return {
           usage: s.usage,
@@ -286,14 +289,17 @@ export class PicturesService {
 
     // Clean up old pictures (both modes):
     // - stale: its usage no longer exists (e.g. after a relabel) and the word now has at
-    //   least one picture for a current usage;
+    //   least one approved picture for a current usage;
     // - replaced (forced only): its usage got a new APPROVED picture. A worse replacement
     //   (needs-review / unpicturable) never removes an approved image.
     // Pictures mid-redraw, and uploaded pictures, are left alone.
     const current = new Set(sources.map(s => key(s.usage)));
     const approvedNew = new Set(pictures.filter(p => p.status === 'approved').map(p => key(p.usage)));
-    const coversCurrent =
-      pictures.some(p => p.file) || usageDocs.some(d => d.data().file && current.has(key(d.data().usage ?? '')));
+    // Only an APPROVED picture covers a usage: new pictures wait in Needs Review, and
+    // deleting the old ones before then would leave the word with nothing bound.
+    const coversCurrent = usageDocs.some(
+      d => d.data().status === 'approved' && d.data().file && current.has(key(d.data().usage ?? '')),
+    );
     for (const d of usageDocs) {
       if (this.redrawing.has(d.id) || d.data().origin === 'uploaded') continue; // never auto-delete uploads
       const u = key(d.data().usage ?? '');
@@ -715,17 +721,18 @@ export class PicturesService {
   }
 }
 
+/** Does every example carry a usage label? If not, usageSources() falls back to one usage. */
+export function usagesLabelled(lesson: VocabLesson): boolean {
+  const examples = lesson.context_examples ?? [];
+  return examples.length > 0 && examples.every(e => e.usage);
+}
+
 /**
  * Which usages get a picture — the same rule as the Start Learning slides
  * (frontend LessonSlides.vocabExampleSlides): the first example of each distinct
  * usage when every example is labelled, otherwise just the first example. No cap: every
  * usage the slides teach gets a picture. (No examples at all → one definition-based picture.)
  */
-/** Does every example carry a usage label? If not, usageSources() falls back to one usage. */
-export function usagesLabelled(lesson: VocabLesson): boolean {
-  const examples = lesson.context_examples ?? [];
-  return examples.length > 0 && examples.every(e => e.usage?.trim());
-}
 
 export function usageSources(lesson: VocabLesson): PictureSource[] {
   const examples = lesson.context_examples ?? [];

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { UsageState } from "@/types";
 import {
   fetchUsageStates,
@@ -67,12 +67,17 @@ export default function KuUsagePicker({ actions, refreshKey = 0, compact }: Prop
     }
   };
 
+  // The word selected now: a slow reply for an earlier selection must not overwrite it.
+  const current = useRef<string | null>(null);
+  current.current = selected?.id ?? null;
+
   const loadStates = useCallback(async (ku: KuHit) => {
     if (ku.type !== "Vocab") return;
     try {
-      setStates(await fetchUsageStates(ku.id));
+      const s = await fetchUsageStates(ku.id);
+      if (current.current === ku.id) setStates(s);
     } catch (e) {
-      setError((e as Error).message);
+      if (current.current === ku.id) setError((e as Error).message);
     }
   }, []);
 

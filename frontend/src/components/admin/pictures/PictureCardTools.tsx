@@ -109,7 +109,8 @@ export default function PictureCardTools({ pic, disabled, onDone }: Props) {
             onClick={() =>
               run(() =>
                 sendJson(`/api/pictures/${pic.id}/redraw`, "POST", {
-                  brief: { picturable: brief.picturable, includeCast: brief.includeCast, background: brief.background, scene: brief.scene },
+                  // Redrawing is the admin's choice to draw it, so the brief is picturable.
+                  brief: { picturable: true, includeCast: brief.includeCast, background: brief.background, scene: brief.scene },
                 }),
               )
             }

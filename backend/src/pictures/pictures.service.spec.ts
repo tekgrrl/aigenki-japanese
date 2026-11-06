@@ -285,12 +285,20 @@ describe('PicturesService', () => {
   });
 
   describe('stale pictures (usage no longer exists, e.g. after a relabel)', () => {
-    it('are removed once the word has an image for a current usage (normal run)', async () => {
+    it('are kept while the new pictures only wait in Needs Review', async () => {
       seed(vocabLesson([ex('practice', 1), ex('practice', 2)]));
       existingPicture('stale1', 'practicing a skill', 'approved');
       existingPicture('stale2', 'practice session (noun)', 'approved');
       await service.generateForKu(KU);
-      expect(pictures().map(p => p.usage)).toEqual(['practice']);
+      expect(pictures().map(p => p.usage).sort()).toEqual(['practice', 'practice session (noun)', 'practicing a skill']);
+    });
+
+    it('are removed once a current usage has an approved picture', async () => {
+      seed(vocabLesson([ex('practice', 1), ex('drill', 2)]));
+      existingPicture('cur', 'practice', 'approved');
+      existingPicture('stale1', 'practicing a skill', 'approved');
+      await service.generateForKu(KU);
+      expect(pictures().map(p => p.usage).sort()).toEqual(['drill', 'practice']);
       expect(fs.readdirSync(dir).filter(f => f.startsWith('stale'))).toEqual([]);
     });
 
@@ -733,6 +741,14 @@ describe('PicturesService', () => {
       await waitFor(() => service.getJob().rendering.length === 0);
       const after = await service.usageStates(KU);
       expect(after.usages[1]).toMatchObject({ state: 'waiting', drawing: false });
+    });
+
+    it('a bulk job drawing the word makes its picture-less usages waiting', async () => {
+      seed(vocabLesson([ex('time', 1), ex('cost', 2)]));
+      existingPicture('a', 'time', 'approved');
+      (service as any).job.current = [KU];
+      const res = await service.usageStates(KU);
+      expect(res.usages.map(u => [u.usage, u.state, u.drawing])).toEqual([['time', 'bound', false], ['cost', 'waiting', true]]);
     });
 
     it('flags a word whose examples are not all labelled', async () => {

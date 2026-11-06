@@ -90,7 +90,7 @@ export async function searchKus(query: string): Promise<KuHit[]> {
   const q = query.trim();
   if (!q) return [];
   const res = await apiFetch(
-    `/api/knowledge-units/search?${new URLSearchParams({ q })}`,
+    `/api/knowledge-units/search?${new URLSearchParams({ q, excludeType: "Kanji" })}`,
   );
   const raw = res.ok
     ? ((await res.json()) as {
@@ -100,7 +100,8 @@ export async function searchKus(query: string): Promise<KuHit[]> {
         data?: { reading?: string; definition?: string; title?: string };
       }[])
     : [];
-  let hits = raw.filter((k) => k.type !== "Kanji");
+  // Kanji are excluded server-side, before the result cap.
+  let hits = raw;
   if (!hits.some((k) => k.id === q) && /^(wk-\d+|[A-Za-z0-9]{20})$/.test(q)) {
     const one = await apiFetch(`/api/knowledge-units/${q}/global`);
     if (one.ok) {

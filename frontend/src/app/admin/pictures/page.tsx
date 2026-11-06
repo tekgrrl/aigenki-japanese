@@ -58,15 +58,26 @@ export default function PicturesAdminPage() {
   const [fileInputKey, setFileInputKey] = useState(0);
   // Needs Review highlight: pictures newer than the last visit. Read on entering the tab,
   // written when leaving it (or the page), so arrivals while you're here stay highlighted.
+  // The write on leaving is deferred a tick: React StrictMode (dev) unmounts and remounts
+  // straight away, and that remount must not read the value its own cleanup just wrote.
   const [seenBefore, setSeenBefore] = useState<number | null>(null);
+  const pendingSeen = useRef<number | null>(null);
   useEffect(() => {
     if (tab !== "needs-review") return;
-    setSeenBefore(Number(localStorage.getItem(LAST_SEEN_KEY) ?? 0));
+    if (pendingSeen.current !== null) {
+      clearTimeout(pendingSeen.current);
+      pendingSeen.current = null;
+    } else {
+      setSeenBefore(Number(localStorage.getItem(LAST_SEEN_KEY) ?? 0));
+    }
     const markSeen = () => localStorage.setItem(LAST_SEEN_KEY, String(Date.now()));
     window.addEventListener("pagehide", markSeen);
     return () => {
       window.removeEventListener("pagehide", markSeen);
-      markSeen();
+      pendingSeen.current = window.setTimeout(() => {
+        pendingSeen.current = null;
+        markSeen();
+      }, 0);
     };
   }, [tab]);
 
