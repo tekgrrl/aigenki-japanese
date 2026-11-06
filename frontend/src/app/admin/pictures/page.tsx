@@ -1,30 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import AudioFirstSwitch from "@/components/admin/AudioFirstSwitch";
+import AddPicturePanel from "@/components/admin/pictures/AddPicturePanel";
 import NewPicturePanel from "@/components/admin/pictures/NewPicturePanel";
 import PictureCardTools from "@/components/admin/pictures/PictureCardTools";
-import AudioFirstSwitch from "@/components/admin/AudioFirstSwitch";
-import { type PictureSubject, resolveKuId, SUBJECT_LABEL, type SubjectKind } from "@/components/admin/pictures/pictureApi";
+import { resolveKuId, SUBJECT_LABEL, type SubjectKind } from "@/components/admin/pictures/pictureApi";
 import { apiFetch } from "@/lib/api-client";
+import type { AdminPicture, PictureStatus } from "@/types";
 
-type PictureStatus = "approved" | "needs-review" | "rejected" | "unpicturable";
-
-interface Picture {
-  id: string;
-  kuId: string | null;
-  subject?: PictureSubject;
-  style?: "card" | "scene";
-  note?: string;
-  content: string;
-  reading: string;
-  usage: string;
-  status: PictureStatus;
-  file?: string;
-  brief?: { picturable: boolean; includeCast: boolean; background: string; scene: string };
-  attempts: { hasText: boolean; where: string }[];
-  origin?: "generated" | "uploaded";
-  staleUsage?: boolean;
-}
+/** When the admin last looked at Needs Review: newer pictures there are highlighted. */
+const LAST_SEEN_KEY = "admin.pictures.needsReviewLastSeen";
+const millis = (t: AdminPicture["createdAt"]) => t._seconds * 1000 + Math.floor(t._nanoseconds / 1e6);
 
 interface Job {
   running: boolean;
@@ -54,7 +41,7 @@ const STATUS_STYLE: Record<PictureStatus, string> = {
 /** Picture cards for audio-first vocab: generate, then approve / reject / regenerate. */
 export default function PicturesAdminPage() {
   const [tab, setTab] = useState<PictureStatus | "all">("needs-review");
-  const [pictures, setPictures] = useState<Picture[]>([]);
+  const [pictures, setPictures] = useState<AdminPicture[]>([]);
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [words, setWords] = useState("");
@@ -62,20 +49,44 @@ export default function PicturesAdminPage() {
   const [force, setForce] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [uploadKind, setUploadKind] = useState<SubjectKind>("ku-usage");
+  const [uploadKind, setUploadKind] = useState<SubjectKind>("ku");
   const [uploadWord, setUploadWord] = useState("");
   const [uploadUsage, setUploadUsage] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   // Bumped after each upload to remount (clear) the file input.
   const [fileInputKey, setFileInputKey] = useState(0);
+  // Needs Review highlight: pictures newer than the last visit. Read on entering the tab,
+  // written when leaving it (or the page), so arrivals while you're here stay highlighted.
+  // The write on leaving is deferred a tick: React StrictMode (dev) unmounts and remounts
+  // straight away, and that remount must not read the value its own cleanup just wrote.
+  const [seenBefore, setSeenBefore] = useState<number | null>(null);
+  const pendingSeen = useRef<number | null>(null);
+  useEffect(() => {
+    if (tab !== "needs-review") return;
+    if (pendingSeen.current !== null) {
+      clearTimeout(pendingSeen.current);
+      pendingSeen.current = null;
+    } else {
+      setSeenBefore(Number(localStorage.getItem(LAST_SEEN_KEY) ?? 0));
+    }
+    const markSeen = () => localStorage.setItem(LAST_SEEN_KEY, String(Date.now()));
+    window.addEventListener("pagehide", markSeen);
+    return () => {
+      window.removeEventListener("pagehide", markSeen);
+      pendingSeen.current = window.setTimeout(() => {
+        pendingSeen.current = null;
+        markSeen();
+      }, 0);
+    };
+  }, [tab]);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (tab !== "all") params.set("status", tab);
     const res = await apiFetch(`/api/pictures/admin?${params}`);
     if (res.ok) {
-      const data = (await res.json()) as { pictures: Picture[]; job: Job };
+      const data = (await res.json()) as { pictures: AdminPicture[]; job: Job };
       setPictures(data.pictures);
       setJob(data.job);
     }
@@ -154,7 +165,7 @@ export default function PicturesAdminPage() {
         setMessage(`Upload failed: ${(await res.json().catch(() => ({}))).message ?? res.status}`);
         return;
       }
-      const pic = (await res.json()) as Picture;
+      const pic = (await res.json()) as AdminPicture;
       setMessage(`Uploaded: ${pic.content}${pic.usage ? ` (${pic.usage})` : ""}`);
       setUploadWord("");
       setUploadUsage("");
@@ -162,8 +173,8 @@ export default function PicturesAdminPage() {
       setFileInputKey((k) => k + 1);
       // Switching tab reloads via the effect; only reload directly if we're already there
       // (calling load() after setTab would fetch the old tab and race the effect's fetch).
-      if (tab === "approved") await load();
-      else setTab("approved");
+      if (tab === "needs-review") await load();
+      else setTab("needs-review");
     } finally {
       setUploading(false);
     }
@@ -194,7 +205,7 @@ export default function PicturesAdminPage() {
     await startJob({ kuIds: ids, force }, missing.length ? `Not found (skipped): ${missing.join(", ")}` : undefined);
   };
 
-  const act = async (pic: Picture, action: "approve" | "reject" | "regenerate") => {
+  const act = async (pic: AdminPicture, action: "approve" | "reject" | "regenerate") => {
     setBusyId(pic.id);
     try {
       const res =
@@ -222,10 +233,102 @@ export default function PicturesAdminPage() {
       <h1 className="text-2xl font-bold mb-1">Picture Cards</h1>
       <p className="text-sm text-shodo-ink-faint mb-6">
         Text-free illustrations: picture cards for word usages, whole-KU pictures and diagrams, and free-standing
-        assets. Generated images that pass the automatic text check are approved; the rest wait here for review.
+        assets. Every new picture waits in Needs Review; approving it binds it to its word and puts it in front of
+        learners.
       </p>
 
-      <Section title="Generate in bulk" hint="Picture cards for word usages, drafted and drawn automatically." first>
+      <Section
+        title="Add a Picture"
+        hint="Find a word by KU id or content, then Generate or Upload a picture for a usage that has none. It waits in Needs Review; carry on with the next word."
+        first
+      >
+        <AddPicturePanel
+          onStarted={(m) => {
+            setMessage(m);
+            load(); // picks up job.rendering, which starts the polling
+          }}
+        />
+      </Section>
+
+      <details className="mb-10 border-t border-shodo-ink/15 pt-6">
+        <summary className="cursor-pointer text-sm font-semibold text-shodo-ink-light">
+          Whole-KU and free-standing pictures (unchanged for now)
+        </summary>
+        <div className="mt-4">
+      <Section
+        title="Make one picture"
+        hint="Choose what it's of, draft a brief, adjust it, then render. A note steers the brief; for a free-standing picture the note is the description."
+      >
+        <NewPicturePanel
+          onStarted={(m) => {
+            setMessage(m);
+            load(); // picks up job.rendering, which starts the polling
+          }}
+        />
+      </Section>
+
+      <Section
+        title="Upload"
+        hint="For what a generated picture can't show (e.g. a diagram). Uploads wait in Needs Review and are never redrawn or replaced by generation."
+      >
+        <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Upload for"
+              value={uploadKind}
+              onChange={(e) => setUploadKind(e.target.value as SubjectKind)}
+              className="rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
+            >
+              {(Object.keys(SUBJECT_LABEL) as SubjectKind[])
+                .filter((k) => k !== "ku-usage")
+                .map((k) => (
+                  <option key={k} value={k}>
+                    {SUBJECT_LABEL[k]}
+                  </option>
+                ))}
+            </select>
+            {uploadKind !== "none" && (
+            <input
+              aria-label="Word"
+              value={uploadWord}
+              onChange={(e) => setUploadWord(e.target.value)}
+              placeholder={uploadKind === "ku" ? "KU content or id" : "Word, e.g. くれる"}
+              className="w-40 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
+            />
+            )}
+            {uploadKind !== "ku" && (
+            <input
+              aria-label="Usage (optional)"
+              value={uploadUsage}
+              onChange={(e) => setUploadUsage(e.target.value)}
+              placeholder={uploadKind === "none" ? "Description (optional)" : "Usage (optional; defaults to the first)"}
+              className="w-72 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
+            />
+            )}
+            <input
+              key={fileInputKey}
+              aria-label="Image file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+              className="text-sm"
+            />
+            <button
+              type="button"
+              onClick={upload}
+              disabled={uploading || !uploadFile || (uploadKind !== "none" && !uploadWord.trim())}
+              className="rounded bg-shodo-ink px-4 py-2 text-sm font-semibold text-shodo-paper disabled:opacity-40"
+            >
+              {uploading ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+        </div>
+      </Section>
+
+        </div>
+      </details>
+
+      <Section title="Generate in bulk" hint="Picture cards for word usages, drafted and drawn automatically. They wait in Needs Review like any new picture.">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4">
           <label htmlFor="picture-words" className="block text-sm font-semibold mb-2">
@@ -285,74 +388,6 @@ export default function PicturesAdminPage() {
       </div>
       </Section>
 
-      <Section
-        title="Make one picture"
-        hint="Choose what it's of, draft a brief, adjust it, then render. A note steers the brief; for a free-standing picture the note is the description."
-      >
-        <NewPicturePanel
-          onStarted={(m) => {
-            setMessage(m);
-            load(); // picks up job.rendering, which starts the polling
-          }}
-        />
-      </Section>
-
-      <Section
-        title="Upload"
-        hint="For what a generated picture can't show (e.g. a diagram). Uploads are approved straight away and never redrawn or replaced by generation."
-      >
-        <div className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label="Upload for"
-              value={uploadKind}
-              onChange={(e) => setUploadKind(e.target.value as SubjectKind)}
-              className="rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
-            >
-              {(Object.keys(SUBJECT_LABEL) as SubjectKind[]).map((k) => (
-                <option key={k} value={k}>
-                  {SUBJECT_LABEL[k]}
-                </option>
-              ))}
-            </select>
-            {uploadKind !== "none" && (
-            <input
-              aria-label="Word"
-              value={uploadWord}
-              onChange={(e) => setUploadWord(e.target.value)}
-              placeholder={uploadKind === "ku" ? "KU content or id" : "Word, e.g. くれる"}
-              className="w-40 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
-            />
-            )}
-            {uploadKind !== "ku" && (
-            <input
-              aria-label="Usage (optional)"
-              value={uploadUsage}
-              onChange={(e) => setUploadUsage(e.target.value)}
-              placeholder={uploadKind === "none" ? "Description (optional)" : "Usage (optional; defaults to the first)"}
-              className="w-72 rounded border border-shodo-ink/15 bg-shodo-paper p-2 text-sm"
-            />
-            )}
-            <input
-              key={fileInputKey}
-              aria-label="Image file"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-              className="text-sm"
-            />
-            <button
-              type="button"
-              onClick={upload}
-              disabled={uploading || !uploadFile || (uploadKind !== "none" && !uploadWord.trim())}
-              className="rounded bg-shodo-ink px-4 py-2 text-sm font-semibold text-shodo-paper disabled:opacity-40"
-            >
-              {uploading ? "Uploading…" : "Upload"}
-            </button>
-          </div>
-        </div>
-      </Section>
-
       <Section title="Library" hint="Every picture, by review status.">
       {message && <p className="mb-4 text-sm text-shodo-persimmon">{message}</p>}
       {(job?.rendering?.length ?? 0) > 0 && (
@@ -377,8 +412,14 @@ export default function PicturesAdminPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {pictures.map((pic) => {
             const working = busyId === pic.id || !!job?.redrawing.includes(pic.id);
+            const isNew = tab === "needs-review" && seenBefore !== null && millis(pic.createdAt) > seenBefore;
+            const what =
+              pic.subject?.kind === "ku" ? "the whole KU" : pic.subject?.kind === "none" ? null : `${pic.content} (${pic.usage})`;
             return (
-            <div key={pic.id} className="rounded-lg border border-shodo-ink/10 bg-shodo-paper-warm overflow-hidden">
+            <div
+              key={pic.id}
+              className={`rounded-lg border bg-shodo-paper-warm overflow-hidden ${isNew ? "border-shodo-persimmon ring-2 ring-shodo-persimmon/40" : "border-shodo-ink/10"}`}
+            >
               {pic.file ? (
                 // biome-ignore lint/performance/noImgElement: served by the backend from local disk; next/image optimisation isn't wanted here
                 <img
@@ -397,6 +438,9 @@ export default function PicturesAdminPage() {
                     {pic.content} <span className="text-sm font-normal text-shodo-ink-light">{pic.reading}</span>
                   </span>
                   <span className="flex gap-1">
+                    {isNew && (
+                      <span className="rounded px-2 py-0.5 text-xs font-semibold bg-shodo-persimmon text-shodo-paper">New</span>
+                    )}
                     {pic.origin === "uploaded" && (
                       <span className="rounded px-2 py-0.5 text-xs font-semibold bg-shodo-indigo/15 text-shodo-indigo">uploaded</span>
                     )}
@@ -404,9 +448,18 @@ export default function PicturesAdminPage() {
                   </span>
                 </div>
                 <p className="text-sm text-shodo-ink-light">
-                  {pic.subject?.kind === "ku" ? "Whole KU" : pic.subject?.kind === "none" ? "Free-standing" : pic.usage}
+                  {what === null
+                    ? "Free-standing"
+                    : pic.status === "approved"
+                      ? `Bound to ${what}`
+                      : `Made for ${what} · not bound yet`}
                   {pic.style === "scene" && <span className="text-shodo-ink-faint"> · scene</span>}
                 </p>
+                {pic.status === "unpicturable" && (
+                  <p className="text-xs text-shodo-persimmon">
+                    Why it can&apos;t be drawn: {pic.brief?.reason ?? "no reason recorded"}
+                  </p>
+                )}
                 {pic.note && <p className="text-xs text-shodo-ink-faint">Note: {pic.note}</p>}
                 {pic.staleUsage && (
                   <p className="text-xs text-shodo-persimmon">
@@ -432,7 +485,7 @@ export default function PicturesAdminPage() {
                       Reject
                     </button>
                   )}
-                  {pic.origin !== "uploaded" && (
+                  {pic.origin !== "uploaded" && pic.status !== "approved" && (
                     <button type="button" disabled={working} onClick={() => act(pic, "regenerate")}
                       title="Draw this picture again for the same usage"
                       className="rounded border border-shodo-ink/20 px-3 py-1 text-xs font-semibold disabled:opacity-40">
@@ -441,8 +494,7 @@ export default function PicturesAdminPage() {
                   )}
                 </div>
                 <PictureCardTools
-                  pictureId={pic.id}
-                  canRedraw={pic.origin !== "uploaded"}
+                  pic={pic}
                   disabled={working}
                   onDone={(m) => {
                     if (m) setMessage(m);

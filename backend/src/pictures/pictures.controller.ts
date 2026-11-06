@@ -48,6 +48,14 @@ export class PicturesController {
     return this.picturesService.choices(uid, kuId, Math.min(Math.max(Number(n) || 3, 1), 8));
   }
 
+  /** A Vocab word's usages and where each stands (no picture / waiting / bound), for Add a Picture. */
+  @Get('admin/usages')
+  @UseGuards(AdminGuard)
+  async usageStates(@Query('kuId') kuId: string) {
+    if (!kuId) throw new BadRequestException('kuId is required');
+    return this.picturesService.usageStates(kuId);
+  }
+
   /** All pictures with optional filters, plus the current generation job (admin review grid). */
   @Get('admin')
   @UseGuards(AdminGuard)
@@ -143,7 +151,7 @@ export class PicturesController {
     return this.picturesService.check(id);
   }
 
-  /** Any of: review status, (re)attach to a subject (kind 'none' detaches), an edited brief. */
+  /** Any of: review status (not unpicturable: only the AI decides that), (re)attach to a subject (kind 'none' detaches), an edited brief. */
   @Patch(':id')
   @UseGuards(AdminGuard)
   async update(@Param('id') id: string, @Body() body: { status?: PictureStatus; subject?: unknown; brief?: PictureBrief }) {

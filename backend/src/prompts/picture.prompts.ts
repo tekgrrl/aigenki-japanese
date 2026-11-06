@@ -6,13 +6,9 @@
  * checks the result for leaked text. Tuned against 8 test words on 2026-11-02.
  */
 
-export interface PictureBrief {
-  picturable: boolean;
-  includeCast: boolean;
-  /** "none", or at most two simple meaning-carrying background elements. */
-  background: string;
-  scene: string;
-}
+import type { PictureBrief, PictureStyle } from '../types';
+
+export type { PictureBrief, PictureStyle };
 
 export const PICTURE_BRIEF_SCHEMA = {
   type: 'OBJECT',
@@ -21,6 +17,8 @@ export const PICTURE_BRIEF_SCHEMA = {
     includeCast: { type: 'BOOLEAN' },
     background: { type: 'STRING' },
     scene: { type: 'STRING' },
+    // Only when picturable is false: shown to the admin so they know why.
+    reason: { type: 'STRING' },
   },
   required: ['picturable', 'includeCast', 'background', 'scene'],
 };
@@ -77,7 +75,8 @@ Decide:
 ${noteBlock(w.note)}
 Return JSON only:
 {"picturable": bool, "includeCast": bool, "background": "none" | string,
- "scene": string}`;
+ "scene": string,
+ "reason": string (only when picturable is false: one short sentence saying why)}`;
 }
 
 function noteBlock(note?: string): string {
@@ -107,7 +106,8 @@ Decide:
 
 Return JSON only:
 {"picturable": bool, "includeCast": bool, "background": "none" | string,
- "scene": string}`;
+ "scene": string,
+ "reason": string (only when picturable is false: one short sentence saying why)}`;
 }
 
 const CAST_BLOCK = `
@@ -123,12 +123,7 @@ appears at most once, and the brush shape exists only as Fude's topknot: no loos
 brushes or extra brush tips.
 `;
 
-/**
- * Named render presets. `card`: the square picture card (cream paper, optional cast).
- * `scene`: a wide establishing scene (e.g. a scenario's setting), with a soft full
- * background. Both are text-free.
- */
-export type PictureStyle = 'card' | 'scene';
+/** Render presets (PictureStyle is defined in types). */
 export const PICTURE_STYLES: Record<PictureStyle, { aspectRatio: string }> = {
   card: { aspectRatio: '1:1' },
   scene: { aspectRatio: '16:9' },

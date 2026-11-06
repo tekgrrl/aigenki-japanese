@@ -166,7 +166,7 @@ export class KnowledgeUnitsService {
         } as unknown as KnowledgeUnit;
     }
 
-    async search(query: string, type?: string, jlptLevel?: string): Promise<KnowledgeUnit[]> {
+    async search(query: string, type?: string, jlptLevel?: string, excludeType?: string): Promise<KnowledgeUnit[]> {
         // Firestore has no native substring/contains query, only prefix-range
         // tricks \u2014 which miss anything the query isn't the literal start of
         // (e.g. searching "\u306a" wouldn't find "Present form of \u3044 and \u306a
@@ -177,7 +177,7 @@ export class KnowledgeUnitsService {
         // Revisit with a real search index (see feature backlog) if/when the
         // corpus outgrows this.
         //
-        // type/jlptLevel are applied here, before the result cap below \u2014 a
+        // type/excludeType/jlptLevel are applied here, before the result cap below \u2014 a
         // common query character (\u306a: 85 hits) can otherwise bury a relevant
         // result under more common ones from a type the caller didn't want,
         // in a way no amount of post-hoc client-side filtering can recover.
@@ -187,6 +187,7 @@ export class KnowledgeUnitsService {
         const matches = cache
             .filter(ku => ku.content?.toLowerCase()?.includes(q))
             .filter(ku => !type || ku.type === type)
+            .filter(ku => !excludeType || ku.type !== excludeType)
             .filter(ku => !jlptLevel || (ku.data as any)?.jlptLevel === jlptLevel);
 
         // Rank prefix matches above mid-string matches. (A length-based
