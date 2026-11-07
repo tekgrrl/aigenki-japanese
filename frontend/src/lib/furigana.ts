@@ -51,3 +51,11 @@ export function buildFuriganaMarkup(
 export function stripFurigana(s: string): string {
   return s.replace(/\[[^\]]*\]/g, "");
 }
+
+/** CJK ideographs (Extension A, Unified, Compatibility): the same set as the backend's kanjiIn(). */
+const KANJI = /[㐀-䶿一-鿿豈-﫿]/;
+
+/** True if the text contains any kanji. A word without one has nothing to read, so no reading card. */
+export function hasKanji(text: string): boolean {
+  return KANJI.test(text);
+}
