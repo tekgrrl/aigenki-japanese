@@ -393,8 +393,8 @@ classDiagram
 | `attempts` | one per render try | `[]` |
 | `status` when made | needs-review (the text check's verdict is in `attempts`), or unpicturable | needs-review |
 | `note` | the editor's steer, if any | whole-KU and free-standing only: a description |
-| redraw | allowed | refused |
-| bulk generation | may replace or delete it | never touches it; an active upload blocks generation for its usage |
+| redraw | allowed, except when approved (a redraw lands in needs-review, which would unbind it) | refused |
+| bulk generation | may delete it (stale usage, see below); a forced run adds a needs-review copy beside it and removes nothing | never touches it; an active upload blocks generation for its usage |
 
 **Status.** Nothing is approved automatically: every new or redrawn picture starts in needs-review.
 "Bound" (shown to learners) means approved; a picture is only *made for* its subject until then.
@@ -414,12 +414,16 @@ A picture without a `file` can't be approved.
 - Bulk generation counts a usage as covered by a picture of **any** status; the Add a Picture flow
   (`GET /pictures/admin/usages`) counts approved as bound, needs-review / unpicturable / being drawn as
   waiting, and rejected as nothing.
+- Nothing yet stops a usage from getting a second picture beside a bound one (forced bulk runs; approving
+  a second picture). The owner's rule: a usage that has a picture must not get another; a "remove before
+  add" step is still to be designed. Add a Picture offers Generate/Upload only on usages with no
+  picture, and Change word/usage won't move a picture onto a bound usage.
 - Re-attaching (`PATCH subject`) rewrites `subject`, `kuId`, `content`, `reading`, `usage` and `source`
   but keeps `brief`, `file`, `status` and `attempts`. So a re-attached picture's brief can describe its
   old subject.
 - `staleUsage` (admin list only) applies to uploaded usage pictures whose usage label is no longer in
   the lesson. A generated picture in that state is deleted instead, the next time bulk generation
-  runs for its word, provided the word then has a picture for one of its current usages.
+  runs for its word, provided the word then has an **approved** picture for one of its current usages.
 
 **In the dev database** (2026-11-06, 41 docs):
 
