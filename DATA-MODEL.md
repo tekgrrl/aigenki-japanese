@@ -394,7 +394,7 @@ classDiagram
 | `status` when made | needs-review (the text check's verdict is in `attempts`), or unpicturable | needs-review |
 | `note` | the editor's steer, if any | whole-KU and free-standing only: a description |
 | redraw | allowed, except when approved (a redraw lands in needs-review, which would unbind it) | refused |
-| bulk generation | may delete it (stale usage, see below); a forced run adds a needs-review copy beside it and removes nothing | never touches it; an active upload blocks generation for its usage |
+| bulk generation | may delete it (stale usage, see below); a forced run adds a needs-review copy beside it rather than replacing it | never touches it; an active upload blocks generation for its usage |
 
 **Status.** Nothing is approved automatically: every new or redrawn picture starts in needs-review.
 "Bound" (shown to learners) means approved; a picture is only *made for* its subject until then.
