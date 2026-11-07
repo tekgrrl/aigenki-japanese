@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { fetchChoices, pictureUrl, shuffle, type PictureRef } from "@/lib/pictures";
+import { LessonPeekedNote } from "@/components/review/ReviewActionButtons";
 
 interface Props {
   kuId: string;
@@ -17,6 +18,13 @@ interface Props {
   onAdvance: () => void;
   /** "dark" on the review screen, "paper" in Start Learning. */
   tone?: "dark" | "paper";
+  /** Review screen only: Skip and Review Lesson, shown until a picture is picked. */
+  onSkip?: () => void;
+  onShowLesson?: () => void;
+  showLesson?: boolean;
+  isFetchingLesson?: boolean;
+  /** The lesson was opened before picking: the pictures can't be picked, only skipped. */
+  lessonPeeked?: boolean;
 }
 
 /**
@@ -30,7 +38,21 @@ interface Props {
  */
 const DISTRACTORS = 3;
 
-export default function PictureChoiceCard({ kuId, reading, meaning, pictures, onSpeak, onResult, onAdvance, tone = "dark" }: Props) {
+export default function PictureChoiceCard({
+  kuId,
+  reading,
+  meaning,
+  pictures,
+  onSpeak,
+  onResult,
+  onAdvance,
+  tone = "dark",
+  onSkip,
+  onShowLesson,
+  showLesson,
+  isFetchingLesson,
+  lessonPeeked,
+}: Props) {
   const [target] = useState<PictureRef>(() => pictures[Math.floor(Math.random() * pictures.length)]);
   const [options, setOptions] = useState<PictureRef[] | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -60,7 +82,7 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
   }, [picked]);
 
   const pick = async (option: PictureRef) => {
-    if (picked) return;
+    if (picked || lessonPeeked) return;
     setPicked(option.id);
     onSpeak(reading); // re-pair the sound with the (now highlighted) picture
     await onResult?.(option.id === target.id ? "pass" : "fail");
@@ -69,7 +91,7 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
   // Keyboard: 1–4 to pick, Enter for next once picked.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!options || picked) return;
+      if (!options || picked || lessonPeeked) return;
       const n = Number(e.key);
       if (n >= 1 && n <= options.length) pick(options[n - 1]);
     };
@@ -107,7 +129,9 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
           {options.map((option, i) => {
             const isTarget = option.id === target.id;
             const isPicked = option.id === picked;
-            const ring = !picked
+            const ring = lessonPeeked
+              ? "opacity-40 cursor-not-allowed"
+              : !picked
               ? "ring-2 ring-transparent hover:ring-blue-400"
               : isTarget
                 ? "ring-4 ring-green-500"
@@ -118,7 +142,7 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
               <button
                 key={option.id}
                 type="button"
-                disabled={!!picked}
+                disabled={!!picked || lessonPeeked}
                 onClick={() => pick(option)}
                 aria-label={`Picture ${i + 1}`}
                 className={`relative rounded-xl overflow-hidden bg-[#f9f7f2] transition ${ring}`}
@@ -129,6 +153,31 @@ export default function PictureChoiceCard({ kuId, reading, meaning, pictures, on
               </button>
             );
           })}
+        </div>
+      )}
+
+      {options && !picked && onSkip && (
+        <div className="w-full max-w-xl">
+          {lessonPeeked && <LessonPeekedNote className={subtle} />}
+          <div className="flex gap-4 mt-2">
+            <button
+              type="button"
+              onClick={onSkip}
+              className="flex-1 px-6 py-3 bg-gray-500 text-white text-lg font-semibold rounded-md shadow-md hover:bg-gray-600"
+            >
+              Skip
+            </button>
+            {onShowLesson && (
+              <button
+                type="button"
+                onClick={onShowLesson}
+                disabled={isFetchingLesson}
+                className="flex-1 px-6 py-3 bg-[#0A5C36] text-white text-lg font-semibold rounded-md shadow-md hover:bg-[#084a2b] disabled:bg-gray-800 disabled:text-gray-500"
+              >
+                {isFetchingLesson ? "Loading..." : showLesson ? "Hide Lesson" : "Review Lesson"}
+              </button>
+            )}
+          </div>
         </div>
       )}
 

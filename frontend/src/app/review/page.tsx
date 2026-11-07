@@ -78,6 +78,9 @@ export default function ReviewPage() {
   const [showLesson, setShowLesson] = useState(false);
   const [lessonForReview, setLessonForReview] = useState<Lesson | null>(null);
   const [isFetchingLesson, setIsFetchingLesson] = useState(false);
+  // Opening the lesson before answering forfeits the item for this round: it can only be
+  // skipped (Skip never reschedules, so it stays due and comes back next session).
+  const [peekedLesson, setPeekedLesson] = useState(false);
 
   // --- Dictation (speech-to-text) State ---
   const {
@@ -243,6 +246,7 @@ export default function ReviewPage() {
       setLevelStatus(null);
       setShowLesson(false);
       setLessonForReview(null);
+      setPeekedLesson(false);
       setShowFeedbackModal(false);
       scout.reset();
       fetchDueItems();
@@ -389,7 +393,7 @@ export default function ReviewPage() {
 
   const handleEvaluateAnswer = async (e: FormEvent) => {
     e.preventDefault();
-    if (answerState !== "unanswered" || !currentItem) return;
+    if (answerState !== "unanswered" || !currentItem || peekedLesson) return;
     if (isListening) stopListening();
 
     // --- New: Short-circuit for empty answer ---
@@ -545,6 +549,9 @@ export default function ReviewPage() {
       setShowLesson(false);
       return;
     }
+    // Custom cards leave answerState at "unanswered", so a lesson opened after their own
+    // answer sets the flag too. Harmless: they have nothing left to submit by then.
+    if (answerState === "unanswered") setPeekedLesson(true);
     if (lessonForReview) {
       setShowLesson(true);
       return;
@@ -598,6 +605,7 @@ export default function ReviewPage() {
     setLevelStatus(null);
     setShowLesson(false);
     setLessonForReview(null);
+    setPeekedLesson(false);
     resetListening();
     // Use functional update to ensure we use the latest state
     setCurrentIndex((prevIndex) => prevIndex + 1);
@@ -917,6 +925,7 @@ export default function ReviewPage() {
           onShowLesson={handleShowLesson}
           showLesson={showLesson}
           isFetchingLesson={isFetchingLesson}
+          lessonPeeked={peekedLesson}
         />
       )}
 
@@ -928,6 +937,10 @@ export default function ReviewPage() {
           onResult={handleUpdateSrs}
           onAdvance={advanceToNext}
           onSkip={advanceToNext}
+          onShowLesson={handleShowLesson}
+          showLesson={showLesson}
+          isFetchingLesson={isFetchingLesson}
+          lessonPeeked={peekedLesson}
         />
       )}
 
@@ -943,6 +956,11 @@ export default function ReviewPage() {
             onSpeak={fetchAndPlayAudio}
             onResult={handleUpdateSrs}
             onAdvance={advanceToNext}
+            onSkip={advanceToNext}
+            onShowLesson={handleShowLesson}
+            showLesson={showLesson}
+            isFetchingLesson={isFetchingLesson}
+            lessonPeeked={peekedLesson}
           />
         </div>
       )}
@@ -1085,13 +1103,14 @@ export default function ReviewPage() {
             <ReviewActionButtons
               submitLabel={answerState === "evaluating" ? "Evaluating..." : "Submit Answer"}
               submitType="submit"
-              submitDisabled={answerState !== "unanswered" || isDynamicLoading || !userAnswer.trim()}
+              submitDisabled={answerState !== "unanswered" || isDynamicLoading || !userAnswer.trim() || peekedLesson}
               size="xl"
               onSkip={handleSkip}
               skipDisabled={answerState !== "unanswered" || isDynamicLoading}
               onShowLesson={handleShowLesson}
               showLesson={showLesson}
               isFetchingLesson={isFetchingLesson}
+              lessonPeeked={peekedLesson}
             />
 
             {/* Level Change Notification Overlay */}
