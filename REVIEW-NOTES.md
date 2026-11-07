@@ -52,3 +52,10 @@ if a change actually breaks the stated intent. New decisions get added here as t
   reviews are fetched; `start()` repeats a few reads on later promotions after a chain has finished;
   the scenario page counts gate items itself (it may count a duplicated item twice; the backend's
   `ready` decides the button).
+
+## Reviews
+- **Opening Review Lesson before answering** locks the card for this round: only Skip is left. A skipped
+  card stays due, so reloading the page or clicking the Review tab brings it straight back, unlocked.
+  That's accepted; the cost is deliberately light.
+- **Existing reading cards for words without kanji** (Content-to-Reading on katakana words, made
+  before the no-kanji rule) are left alone, not deleted by a migration. Only new cards are stopped.

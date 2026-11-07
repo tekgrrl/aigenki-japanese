@@ -9,6 +9,7 @@ import {
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
+import { kanjiIn } from '../lib/kanji-chars';
 import { isUsefulAssembly } from '../lib/assembly-quality';
 import {
   FacetStageDefinition,
@@ -761,8 +762,9 @@ export class ReviewProgressService {
         return [{ content: vl.vocab, reading: vl.reading, definitions: vl.definitions ?? [], contextExample }];
       }
 
-      // Skip reading review for kana-only vocab — content IS the reading
-      if (entry.type === 'Content-to-Reading' && vl.vocab === vl.reading) return [];
+      // Skip the reading review for a word with no kanji: there's nothing to read. (Comparing
+      // vocab with reading missed katakana words, whose reading is stored in hiragana.)
+      if (entry.type === 'Content-to-Reading' && kanjiIn(vl.vocab).length === 0) return [];
 
       // Content-to-Definition, Definition-to-Content, Content-to-Reading, AI-Generated-Question
       return [{ content: vl.vocab, reading: vl.reading, definitions: vl.definitions ?? [] }];

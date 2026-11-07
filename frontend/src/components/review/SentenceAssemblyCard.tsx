@@ -18,6 +18,7 @@ interface Props {
   onShowLesson?: () => void;
   showLesson?: boolean;
   isFetchingLesson?: boolean;
+  lessonPeeked?: boolean;
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -56,7 +57,7 @@ function stripFinalPunctuation(fragments: string[]): string[] {
   return out.filter((f) => f.trim() !== "");
 }
 
-export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSkip, onSpeak, onShowLesson, showLesson, isFetchingLesson }: Props) {
+export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSkip, onSpeak, onShowLesson, showLesson, isFetchingLesson, lessonPeeked }: Props) {
   const data = facet.data as Partial<AssemblyExample> & {
     goalTitle: string;
     sourceId?: string;
@@ -168,7 +169,7 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
   };
 
   const handleSubmit = async () => {
-    if (assembled.length === 0 || submitted) return;
+    if (assembled.length === 0 || submitted || lessonPeeked) return;
     setIsSubmitting(true);
     const assembledStr = assembled.join("");
     const exactMatch = assembledStr === answer || normalize(assembledStr) === normalize(answer);
@@ -327,6 +328,7 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
           onShowLesson={onShowLesson}
           showLesson={showLesson}
           isFetchingLesson={isFetchingLesson}
+          lessonPeeked={lessonPeeked}
         />
       )}
 

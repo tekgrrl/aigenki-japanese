@@ -78,6 +78,9 @@ export default function ReviewPage() {
   const [showLesson, setShowLesson] = useState(false);
   const [lessonForReview, setLessonForReview] = useState<Lesson | null>(null);
   const [isFetchingLesson, setIsFetchingLesson] = useState(false);
+  // Opening the lesson before answering forfeits the item for this round: it can only be
+  // skipped (Skip never reschedules, so it stays due and comes back next session).
+  const [peekedLesson, setPeekedLesson] = useState(false);
 
   // --- Dictation (speech-to-text) State ---
   const {
@@ -243,6 +246,7 @@ export default function ReviewPage() {
       setLevelStatus(null);
       setShowLesson(false);
       setLessonForReview(null);
+      setPeekedLesson(false);
       setShowFeedbackModal(false);
       scout.reset();
       fetchDueItems();
@@ -299,6 +303,10 @@ export default function ReviewPage() {
     // Still loading
     if (answerState === "unanswered" && currentIndex + 1 < reviewQueue.length) {
       scout.park(currentItem);
+      // The next item slides into this index without advanceToNext, so clear this item's lesson state.
+      setShowLesson(false);
+      setLessonForReview(null);
+      setPeekedLesson(false);
       setReviewQueue((prev) =>
         prev[currentIndex]?.facet.id === facetId ? prev.filter((_, i) => i !== currentIndex) : prev,
       );
@@ -389,7 +397,7 @@ export default function ReviewPage() {
 
   const handleEvaluateAnswer = async (e: FormEvent) => {
     e.preventDefault();
-    if (answerState !== "unanswered" || !currentItem) return;
+    if (answerState !== "unanswered" || !currentItem || peekedLesson) return;
     if (isListening) stopListening();
 
     // --- New: Short-circuit for empty answer ---
@@ -545,7 +553,14 @@ export default function ReviewPage() {
       setShowLesson(false);
       return;
     }
+    // The card locks only once the lesson is actually on screen (not if the fetch fails).
+    // Custom cards leave answerState at "unanswered", so a lesson opened after their own
+    // answer sets the flag too. Harmless: they have nothing left to submit by then.
+    const lockIfUnanswered = () => {
+      if (answerState === "unanswered") setPeekedLesson(true);
+    };
     if (lessonForReview) {
+      lockIfUnanswered();
       setShowLesson(true);
       return;
     }
@@ -564,6 +579,7 @@ export default function ReviewPage() {
       if (res.ok) {
         const data = await res.json() as Lesson;
         setLessonForReview(data);
+        lockIfUnanswered();
         setShowLesson(true);
       }
     } catch (e) {
@@ -598,6 +614,7 @@ export default function ReviewPage() {
     setLevelStatus(null);
     setShowLesson(false);
     setLessonForReview(null);
+    setPeekedLesson(false);
     resetListening();
     // Use functional update to ensure we use the latest state
     setCurrentIndex((prevIndex) => prevIndex + 1);
@@ -917,6 +934,7 @@ export default function ReviewPage() {
           onShowLesson={handleShowLesson}
           showLesson={showLesson}
           isFetchingLesson={isFetchingLesson}
+          lessonPeeked={peekedLesson}
         />
       )}
 
@@ -928,6 +946,10 @@ export default function ReviewPage() {
           onResult={handleUpdateSrs}
           onAdvance={advanceToNext}
           onSkip={advanceToNext}
+          onShowLesson={handleShowLesson}
+          showLesson={showLesson}
+          isFetchingLesson={isFetchingLesson}
+          lessonPeeked={peekedLesson}
         />
       )}
 
@@ -943,6 +965,11 @@ export default function ReviewPage() {
             onSpeak={fetchAndPlayAudio}
             onResult={handleUpdateSrs}
             onAdvance={advanceToNext}
+            onSkip={advanceToNext}
+            onShowLesson={handleShowLesson}
+            showLesson={showLesson}
+            isFetchingLesson={isFetchingLesson}
+            lessonPeeked={peekedLesson}
           />
         </div>
       )}
@@ -1062,14 +1089,14 @@ export default function ReviewPage() {
                     ? "Type the English meaning..."
                     : "Type your answer..."
               }
-              disabled={answerState !== "unanswered" || isDynamicLoading}
-              className={`w-full p-4 ${isDictationAvailable(currentItem) ? "pr-14" : ""} bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500`}
+              disabled={answerState !== "unanswered" || isDynamicLoading || peekedLesson}
+              className={`w-full p-4 ${isDictationAvailable(currentItem) ? "pr-14" : ""} bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500 ${peekedLesson ? "opacity-50 cursor-not-allowed" : ""}`}
             />
             {isSpeechSupported && isDictationAvailable(currentItem) && (
               <button
                 type="button"
                 onClick={() => (isListening ? stopListening() : startListening())}
-                disabled={answerState !== "unanswered" || isDynamicLoading}
+                disabled={answerState !== "unanswered" || isDynamicLoading || peekedLesson}
                 title={isListening ? "Stop dictation" : "Start dictation"}
                 className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full transition-colors ${
                   isListening
@@ -1085,13 +1112,14 @@ export default function ReviewPage() {
             <ReviewActionButtons
               submitLabel={answerState === "evaluating" ? "Evaluating..." : "Submit Answer"}
               submitType="submit"
-              submitDisabled={answerState !== "unanswered" || isDynamicLoading || !userAnswer.trim()}
+              submitDisabled={answerState !== "unanswered" || isDynamicLoading || !userAnswer.trim() || peekedLesson}
               size="xl"
               onSkip={handleSkip}
               skipDisabled={answerState !== "unanswered" || isDynamicLoading}
               onShowLesson={handleShowLesson}
               showLesson={showLesson}
               isFetchingLesson={isFetchingLesson}
+              lessonPeeked={peekedLesson}
             />
 
             {/* Level Change Notification Overlay */}

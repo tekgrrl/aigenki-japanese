@@ -9,7 +9,7 @@ import GrammarLessonView from "@/components/lessons/GrammarLessonView";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import KuMetaTags from "@/components/lessons/KuMetaTags";
 import { FuriganaText } from "@/components/FuriganaText";
-import { buildFuriganaMarkup } from "@/lib/furigana";
+import { buildFuriganaMarkup, hasKanji } from "@/lib/furigana";
 import { apiFetch } from "@/lib/api-client";
 
 const stripFurigana = (s: string) => s.replace(/\[[^\]]*\]/g, '').trim();
@@ -212,7 +212,7 @@ export default function LearnItemPage() {
   const getAvailableStandardFacetKeys = (existingFacetTypes: Set<string>): string[] => {
     if (!lesson || !ku) return [];
     if (lesson.type === "Vocab") {
-      const hasReadingFacet = ku.type === "Vocab" && (ku as any).data?.reading !== ku?.content;
+      const hasReadingFacet = ku.type === "Vocab" && hasKanji(ku.content ?? "");
       const hasAudio = ((lesson as VocabLesson).context_examples?.length ?? 0) > 0;
       return [
         "Definition-to-Content",
@@ -476,7 +476,7 @@ export default function LearnItemPage() {
     const isAddMore = existingFacetTypes.size > 0;
 
     // Determine which standard options remain unconfigured
-    const hasReadingFacet = ku?.type === "Vocab" && (ku as any).data?.reading !== ku?.content;
+    const hasReadingFacet = ku?.type === "Vocab" && hasKanji(ku.content ?? "");
     const hasAudio = lesson?.type === "Vocab" && ((lesson as VocabLesson).context_examples?.length ?? 0) > 0;
     const hasContextExamples = lesson?.type === "Vocab" && ((lesson as VocabLesson).context_examples?.length ?? 0) > 0;
     const availableKanjiComponents = lesson?.type === "Vocab"

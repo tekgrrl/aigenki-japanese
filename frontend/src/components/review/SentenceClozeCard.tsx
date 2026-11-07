@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, FormEvent } from "react";
 import * as wanakana from "wanakana";
 import { ReviewFacet } from "@/types";
 import InputModeBadge from "@/components/review/InputModeBadge";
+import ReviewActionButtons from "@/components/review/ReviewActionButtons";
 
 interface ClozeData {
   front: {
@@ -23,9 +24,13 @@ interface Props {
   onResult: (result: "pass" | "fail") => Promise<void>;
   onAdvance: () => void;
   onSkip: () => void;
+  onShowLesson?: () => void;
+  showLesson?: boolean;
+  isFetchingLesson?: boolean;
+  lessonPeeked?: boolean;
 }
 
-export default function SentenceClozeCard({ facet, onResult, onAdvance, onSkip }: Props) {
+export default function SentenceClozeCard({ facet, onResult, onAdvance, onSkip, onShowLesson, showLesson, isFetchingLesson, lessonPeeked }: Props) {
   const { front, back, goalTitle } = facet.data as ClozeData;
 
   const [userAnswer, setUserAnswer] = useState("");
@@ -42,7 +47,7 @@ export default function SentenceClozeCard({ facet, onResult, onAdvance, onSkip }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (submitted || isSubmitting) return;
+    if (submitted || isSubmitting || lessonPeeked) return;
     setIsSubmitting(true);
 
     const trimmed = userAnswer.trim();
@@ -94,27 +99,22 @@ export default function SentenceClozeCard({ facet, onResult, onAdvance, onSkip }
           autoFocus
           onChange={e => setUserAnswer(wanakana.toKana(e.target.value, { IMEMode: true }))}
           placeholder="回答を入力して..."
-          disabled={submitted}
-          className="w-full p-4 bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500"
+          disabled={submitted || lessonPeeked}
+          className={`w-full p-4 bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500 ${lessonPeeked ? "opacity-50 cursor-not-allowed" : ""}`}
         />
 
         {!submitted && (
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={onSkip}
-              className="flex-1 px-6 py-3 bg-gray-500 text-white text-lg font-semibold rounded-md hover:bg-gray-600"
-            >
-              Skip
-            </button>
-            <button
-              type="submit"
-              disabled={userAnswer.trim() === "" || isSubmitting}
-              className="flex-1 px-6 py-3 bg-blue-600 text-white text-lg font-semibold rounded-md hover:bg-blue-700 disabled:bg-gray-800 disabled:text-gray-500"
-            >
-              {isSubmitting ? "Checking…" : "Submit"}
-            </button>
-          </div>
+          <ReviewActionButtons
+            submitLabel={isSubmitting ? "Checking…" : "Submit"}
+            submitType="submit"
+            submitDisabled={userAnswer.trim() === "" || isSubmitting}
+            onSkip={onSkip}
+            skipDisabled={isSubmitting}
+            onShowLesson={onShowLesson}
+            showLesson={showLesson}
+            isFetchingLesson={isFetchingLesson}
+            lessonPeeked={lessonPeeked}
+          />
         )}
       </form>
 
