@@ -303,6 +303,10 @@ export default function ReviewPage() {
     // Still loading
     if (answerState === "unanswered" && currentIndex + 1 < reviewQueue.length) {
       scout.park(currentItem);
+      // The next item slides into this index without advanceToNext, so clear this item's lesson state.
+      setShowLesson(false);
+      setLessonForReview(null);
+      setPeekedLesson(false);
       setReviewQueue((prev) =>
         prev[currentIndex]?.facet.id === facetId ? prev.filter((_, i) => i !== currentIndex) : prev,
       );
@@ -549,10 +553,14 @@ export default function ReviewPage() {
       setShowLesson(false);
       return;
     }
+    // The card locks only once the lesson is actually on screen (not if the fetch fails).
     // Custom cards leave answerState at "unanswered", so a lesson opened after their own
     // answer sets the flag too. Harmless: they have nothing left to submit by then.
-    if (answerState === "unanswered") setPeekedLesson(true);
+    const lockIfUnanswered = () => {
+      if (answerState === "unanswered") setPeekedLesson(true);
+    };
     if (lessonForReview) {
+      lockIfUnanswered();
       setShowLesson(true);
       return;
     }
@@ -571,6 +579,7 @@ export default function ReviewPage() {
       if (res.ok) {
         const data = await res.json() as Lesson;
         setLessonForReview(data);
+        lockIfUnanswered();
         setShowLesson(true);
       }
     } catch (e) {
@@ -1080,14 +1089,14 @@ export default function ReviewPage() {
                     ? "Type the English meaning..."
                     : "Type your answer..."
               }
-              disabled={answerState !== "unanswered" || isDynamicLoading}
+              disabled={answerState !== "unanswered" || isDynamicLoading || peekedLesson}
               className={`w-full p-4 ${isDictationAvailable(currentItem) ? "pr-14" : ""} bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500`}
             />
             {isSpeechSupported && isDictationAvailable(currentItem) && (
               <button
                 type="button"
                 onClick={() => (isListening ? stopListening() : startListening())}
-                disabled={answerState !== "unanswered" || isDynamicLoading}
+                disabled={answerState !== "unanswered" || isDynamicLoading || peekedLesson}
                 title={isListening ? "Stop dictation" : "Start dictation"}
                 className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full transition-colors ${
                   isListening

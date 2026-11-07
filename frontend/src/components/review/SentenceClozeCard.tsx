@@ -99,7 +99,7 @@ export default function SentenceClozeCard({ facet, onResult, onAdvance, onSkip, 
           autoFocus
           onChange={e => setUserAnswer(wanakana.toKana(e.target.value, { IMEMode: true }))}
           placeholder="回答を入力して..."
-          disabled={submitted}
+          disabled={submitted || lessonPeeked}
           className="w-full p-4 bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500"
         />
 
@@ -109,6 +109,7 @@ export default function SentenceClozeCard({ facet, onResult, onAdvance, onSkip, 
             submitType="submit"
             submitDisabled={userAnswer.trim() === "" || isSubmitting}
             onSkip={onSkip}
+            skipDisabled={isSubmitting}
             onShowLesson={onShowLesson}
             showLesson={showLesson}
             isFetchingLesson={isFetchingLesson}

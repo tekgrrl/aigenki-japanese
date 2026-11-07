@@ -48,35 +48,74 @@ export default function ReviewActionButtons({
       </button>
       {lessonPeeked && <LessonPeekedNote />}
 
-      <div className="flex gap-4 mt-4">
-        <button
-          type="button"
-          onClick={onSkip}
-          disabled={skipDisabled}
-          className="flex-1 px-6 py-3 bg-gray-500 text-white text-lg font-semibold rounded-md shadow-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-800 disabled:text-gray-500"
-        >
-          Skip
-        </button>
-        {onShowLesson && (
-          <button
-            type="button"
-            onClick={onShowLesson}
-            disabled={isFetchingLesson}
-            className="flex-1 px-6 py-3 bg-[#0A5C36] text-white text-lg font-semibold rounded-md shadow-md hover:bg-[#084a2b] focus:outline-none focus:ring-2 focus:ring-green-800 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-800 disabled:text-gray-500"
-          >
-            {isFetchingLesson ? "Loading..." : showLesson ? "Hide Lesson" : "Review Lesson"}
-          </button>
-        )}
-      </div>
+      <SkipLessonRow
+        className="mt-4"
+        onSkip={onSkip}
+        skipDisabled={skipDisabled}
+        onShowLesson={onShowLesson}
+        showLesson={showLesson}
+        isFetchingLesson={isFetchingLesson}
+      />
     </div>
   );
 }
 
 /** Shown under a disabled answer control once the lesson has been opened before answering. */
-export function LessonPeekedNote({ className = "text-gray-400" }: { className?: string }) {
+export function LessonPeekedNote({
+  className = "text-gray-400",
+}: {
+  className?: string;
+}) {
   return (
     <p className={`mt-2 text-sm text-center ${className}`}>
-      You opened the lesson, so this one can&apos;t be answered now. Skip it and it&apos;ll come back next session.
+      You opened the lesson, so this one can&apos;t be answered now. Skip it and
+      it&apos;ll come back next session.
     </p>
+  );
+}
+
+interface SkipLessonRowProps {
+  className?: string;
+  onSkip: () => void;
+  skipDisabled?: boolean;
+  onShowLesson?: () => void;
+  showLesson?: boolean;
+  isFetchingLesson?: boolean;
+}
+
+/** Skip + Review Lesson side by side. Also used on its own by cards with no Submit (picture choice). */
+export function SkipLessonRow({
+  className = "",
+  onSkip,
+  skipDisabled,
+  onShowLesson,
+  showLesson,
+  isFetchingLesson,
+}: SkipLessonRowProps) {
+  return (
+    <div className={`flex gap-4 ${className}`}>
+      <button
+        type="button"
+        onClick={onSkip}
+        disabled={skipDisabled}
+        className="flex-1 px-6 py-3 bg-gray-500 text-white text-lg font-semibold rounded-md shadow-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-800 disabled:text-gray-500"
+      >
+        Skip
+      </button>
+      {onShowLesson && (
+        <button
+          type="button"
+          onClick={onShowLesson}
+          disabled={isFetchingLesson}
+          className="flex-1 px-6 py-3 bg-[#0A5C36] text-white text-lg font-semibold rounded-md shadow-md hover:bg-[#084a2b] focus:outline-none focus:ring-2 focus:ring-green-800 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-800 disabled:text-gray-500"
+        >
+          {isFetchingLesson
+            ? "Loading..."
+            : showLesson
+              ? "Hide Lesson"
+              : "Review Lesson"}
+        </button>
+      )}
+    </div>
   );
 }

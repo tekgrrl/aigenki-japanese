@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { fetchChoices, pictureUrl, shuffle, type PictureRef } from "@/lib/pictures";
-import { LessonPeekedNote } from "@/components/review/ReviewActionButtons";
+import { LessonPeekedNote, SkipLessonRow } from "@/components/review/ReviewActionButtons";
 
 interface Props {
   kuId: string;
@@ -159,25 +159,13 @@ export default function PictureChoiceCard({
       {options && !picked && onSkip && (
         <div className="w-full max-w-xl">
           {lessonPeeked && <LessonPeekedNote className={subtle} />}
-          <div className="flex gap-4 mt-2">
-            <button
-              type="button"
-              onClick={onSkip}
-              className="flex-1 px-6 py-3 bg-gray-500 text-white text-lg font-semibold rounded-md shadow-md hover:bg-gray-600"
-            >
-              Skip
-            </button>
-            {onShowLesson && (
-              <button
-                type="button"
-                onClick={onShowLesson}
-                disabled={isFetchingLesson}
-                className="flex-1 px-6 py-3 bg-[#0A5C36] text-white text-lg font-semibold rounded-md shadow-md hover:bg-[#084a2b] disabled:bg-gray-800 disabled:text-gray-500"
-              >
-                {isFetchingLesson ? "Loading..." : showLesson ? "Hide Lesson" : "Review Lesson"}
-              </button>
-            )}
-          </div>
+          <SkipLessonRow
+            className="mt-2"
+            onSkip={onSkip}
+            onShowLesson={onShowLesson}
+            showLesson={showLesson}
+            isFetchingLesson={isFetchingLesson}
+          />
         </div>
       )}
 
