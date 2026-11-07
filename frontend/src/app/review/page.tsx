@@ -1090,7 +1090,7 @@ export default function ReviewPage() {
                     : "Type your answer..."
               }
               disabled={answerState !== "unanswered" || isDynamicLoading || peekedLesson}
-              className={`w-full p-4 ${isDictationAvailable(currentItem) ? "pr-14" : ""} bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500`}
+              className={`w-full p-4 ${isDictationAvailable(currentItem) ? "pr-14" : ""} bg-gray-700 border-2 border-gray-600 text-white text-xl rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 disabled:text-gray-500 ${peekedLesson ? "opacity-50 cursor-not-allowed" : ""}`}
             />
             {isSpeechSupported && isDictationAvailable(currentItem) && (
               <button

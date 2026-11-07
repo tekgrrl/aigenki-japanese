@@ -42,9 +42,9 @@ export default function ReviewActionButtons({
         type={submitType}
         onClick={submitType === "button" ? onSubmit : undefined}
         disabled={submitDisabled || lessonPeeked}
-        className={`w-full px-6 ${submitSizeClasses} bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-500 ${lessonPeeked ? "disabled:cursor-not-allowed" : "disabled:cursor-wait"}`}
+        className={`w-full px-6 ${submitSizeClasses} bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-500 ${lessonPeeked ? "opacity-50 disabled:cursor-not-allowed" : "disabled:cursor-wait"}`}
       >
-        {submitLabel}
+        {lessonPeeked ? "Locked: lesson opened" : submitLabel}
       </button>
       {lessonPeeked && <LessonPeekedNote />}
 
