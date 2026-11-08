@@ -3,6 +3,7 @@ import {
     FIRESTORE_CONNECTION,
     KNOWLEDGE_UNITS_COLLECTION,
     LESSONS_COLLECTION,
+    PICTURES_COLLECTION,
     QUESTIONS_COLLECTION,
     REVIEW_FACETS_COLLECTION,
     USER_KUS_SUBCOLLECTION,
@@ -164,6 +165,46 @@ export class KnowledgeUnitsService {
                 ? data.createdAt.toDate().toISOString()
                 : data.createdAt,
         } as unknown as KnowledgeUnit;
+    }
+
+    /**
+     * Admin browsing: search and/or filter the whole corpus (from the in-memory cache, so
+     * every KU, wk-* included) and return one page with the total. With a query, prefix
+     * matches come first; otherwise results are in content order. Each item carries
+     * `hasPicture` (an approved picture is attached to it).
+     */
+    async browse(opts: { q?: string; type?: string; jlptLevel?: string; page?: number; pageSize?: number }): Promise<{
+        items: (KnowledgeUnit & { hasPicture: boolean })[];
+        total: number;
+        page: number;
+        pageSize: number;
+    }> {
+        const q = (opts.q ?? '').trim().toLowerCase();
+        const pageSize = Math.min(Math.max(Math.floor(opts.pageSize ?? 50), 1), 200);
+        const cache = await this.ensureSearchCache();
+        const matches = cache
+            .filter(ku => !q || ku.content?.toLowerCase()?.includes(q))
+            .filter(ku => !opts.type || ku.type === opts.type)
+            .filter(ku => !opts.jlptLevel || (ku.data as any)?.jlptLevel === opts.jlptLevel);
+        matches.sort((a, b) => {
+            if (q) {
+                const rank = (k: KnowledgeUnit) => (k.content.toLowerCase().startsWith(q) ? 0 : 1);
+                const byRank = rank(a) - rank(b);
+                if (byRank !== 0) return byRank;
+            }
+            return (a.content ?? '').localeCompare(b.content ?? '', 'ja');
+        });
+        const total = matches.length;
+        const lastPage = Math.max(1, Math.ceil(total / pageSize));
+        const page = Math.min(Math.max(Math.floor(opts.page ?? 1), 1), lastPage);
+        const slice = matches.slice((page - 1) * pageSize, page * pageSize);
+
+        const pictured = new Set<string>();
+        if (slice.length > 0) {
+            const pics = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
+            pics.forEach(d => { const id = d.data().kuId; if (id) pictured.add(id); });
+        }
+        return { items: slice.map(ku => ({ ...ku, hasPicture: pictured.has(ku.id) })), total, page, pageSize };
     }
 
     async search(query: string, type?: string, jlptLevel?: string, excludeType?: string): Promise<KnowledgeUnit[]> {
