@@ -64,6 +64,17 @@ export default function ReviewPage() {
   const [pendingSrsResult, setPendingSrsResult] = useState<
     "pass" | "fail" | null
   >(null);
+  // Vocab meaning card: the usage a correct answer matched, sent with the SRS update.
+  const [pendingUsage, setPendingUsage] = useState<{ id: string; label?: string } | null>(null);
+  // Vocab meaning card: the word's usage meanings, shown as the correct answer instead of its definitions.
+  const [usageMeanings, setUsageMeanings] = useState<string[] | null>(null);
+  // Vocab meaning card: progress through the word's usages at its current SRS stage.
+  const [usageProgress, setUsageProgress] = useState<{
+    label?: string;
+    proven: number;
+    total: number;
+    outcome: "promote" | "hold" | "fail" | "free-fail";
+  } | null>(null);
 
   const [levelStatus, setLevelStatus] = useState<{
     direction: "up" | "down";
@@ -223,7 +234,7 @@ export default function ReviewPage() {
       const response = await apiFetch("/api/reviews/facets?due=true");
       if (!response.ok) throw new Error("Failed to fetch due review items");
       const data: ReviewItem[] = await response.json();
-      setReviewQueue(shuffleArray(data));
+      setReviewQueue(shuffleArray(data.map(asPresented)));
     } catch (err) {
       if (err instanceof Error) setError(err.message);
       else setError("An unknown error occurred");
@@ -243,6 +254,8 @@ export default function ReviewPage() {
       setAiExplanation("");
       setSessionFailureCounts({});
       setPendingSrsResult(null);
+      setPendingUsage(null);
+      setUsageProgress(null);
       setLevelStatus(null);
       setShowLesson(false);
       setLessonForReview(null);
@@ -328,7 +341,7 @@ export default function ReviewPage() {
 
   // --- Core SRS Logic ---
 
-  const handleUpdateSrs = async (result: "pass" | "fail") => {
+  const handleUpdateSrs = async (result: "pass" | "fail", usage?: { id: string; label?: string } | null) => {
     if (!currentItem) return;
     try {
       const response = await apiFetch(
@@ -338,12 +351,15 @@ export default function ReviewPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ result }),
+          body: JSON.stringify({ result, ...(usage ? { usageId: usage.id } : {}) }),
         },
       );
       if (!response.ok) throw new Error("Failed to update SRS data");
 
       const data = await response.json();
+      if (data.outcome && data.totalUsages > 1) {
+        setUsageProgress({ label: usage?.label, proven: data.provenUsageIds?.length ?? 0, total: data.totalUsages, outcome: data.outcome });
+      }
       const newStage = data.newStage;
       const oldStage = currentItem.facet.srsStage || 0;
 
@@ -497,14 +513,28 @@ export default function ReviewPage() {
         throw new Error(errData.error || "Evaluation API failed");
       }
 
-      const { result, explanation } = await response.json();
+      const { result, explanation, usageId, usageLabel, usageMeanings: meanings, usagePreview } = await response.json();
       setAiExplanation(explanation);
+      setUsageMeanings(Array.isArray(meanings) && meanings.length > 0 ? meanings : null);
+      // Show the meaning card's progress straight away: a new AI question's SRS update waits
+      // for "Rate this question", and the real update (when it runs) replaces this.
+      if (usagePreview) {
+        setUsageProgress({ proven: usagePreview.provenCount, total: usagePreview.totalUsages, outcome: usagePreview.outcome });
+      }
+      // The bare-word meaning card is told the usage by the evaluator; an AI question shown for
+      // a meaning card already knows which usage it asks about.
+      const usage = usageId
+        ? { id: usageId as string, label: usageLabel as string | undefined }
+        : currentItem.facet.data?.usageId
+          ? { id: currentItem.facet.data.usageId as string, label: currentItem.facet.data.usageLabel as string | undefined }
+          : null;
 
       if (result === "pass") {
         if (isNewAiQuestion(currentItem)) {
           setPendingSrsResult("pass");
+          setPendingUsage(usage);
         } else {
-          await handleUpdateSrs("pass");
+          await handleUpdateSrs("pass", usage);
         }
         setAnswerState("correct");
       } else {
@@ -610,6 +640,9 @@ export default function ReviewPage() {
     setAiExplanation("");
     setError(null);
     setPendingSrsResult(null);
+    setPendingUsage(null);
+    setUsageProgress(null);
+    setUsageMeanings(null);
     setShowFeedbackModal(false);
     setLevelStatus(null);
     setShowLesson(false);
@@ -658,7 +691,7 @@ export default function ReviewPage() {
   };
 
   const handleFeedbackKeep = async () => {
-    if (pendingSrsResult) await handleUpdateSrs(pendingSrsResult);
+    if (pendingSrsResult) await handleUpdateSrs(pendingSrsResult, pendingUsage);
     if (dynamicQuestionId) await recordFeedback(dynamicQuestionId, "keep");
     advanceToNext();
   };
@@ -673,7 +706,7 @@ export default function ReviewPage() {
   const handleFeedbackUndecided = async () => {
     if (dynamicQuestionId) await recordFeedback(dynamicQuestionId, "report");
     if (currentItem) scout.forget(currentItem.facet.id);
-    if (pendingSrsResult) await handleUpdateSrs(pendingSrsResult);
+    if (pendingSrsResult) await handleUpdateSrs(pendingSrsResult, pendingUsage);
     advanceToNext();
   };
 
@@ -1170,7 +1203,7 @@ export default function ReviewPage() {
           {answerState === "incorrect" && (
             <p className="text-lg text-gray-200 mb-4">
               <span className="font-semibold">Correct answer:</span>{" "}
-              {getExpectedAnswer(currentItem).join(" / ")}
+              {(usageMeanings ?? getExpectedAnswer(currentItem)).join(" / ")}
             </p>
           )}
           {currentItem.facet.facetType === "audio" && (
@@ -1204,6 +1237,7 @@ export default function ReviewPage() {
               <span className="font-semibold">AI:</span> {aiExplanation}
             </p>
           )}
+          {usageProgress && <UsageProgressLine progress={usageProgress} />}
 
           {answerState === "incorrect" && currentItem && (
             <div className="mt-4">
@@ -1318,4 +1352,31 @@ function PlayButton({
       {label}
     </button>
   );
+}
+
+/** Vocab meaning card: which usage an answer proved, and how many of the word's usages are proven at this stage. */
+function UsageProgressLine({ progress }: { progress: { label?: string; proven: number; total: number; outcome: "promote" | "hold" | "fail" | "free-fail" } }) {
+  const { proven, total, outcome } = progress;
+  const text =
+    outcome === "promote"
+      ? `All ${total} meanings given at this stage, so it moves up.`
+      : outcome === "hold"
+        ? `${proven} of ${total} meanings given at this stage. Give the others to move it up.`
+        : outcome === "free-fail"
+          ? "This doesn't count against you: you've already given one of its meanings at this stage."
+          : null;
+  if (!text) return null;
+  return <p className="text-base text-gray-300 mt-2">{text}</p>;
+}
+
+/**
+ * A Vocab meaning card the backend chose to show as an AI question about one usage: render it
+ * as that type (so the AI-question flow and the scout apply), keeping the card's id for SRS.
+ */
+function asPresented(item: ReviewItem): ReviewItem {
+  if (!item.presentAs) return item;
+  return {
+    ...item,
+    facet: { ...item.facet, facetType: item.presentAs, data: { ...item.facet.data, usageId: item.usageId, usageLabel: item.usageLabel } },
+  };
 }

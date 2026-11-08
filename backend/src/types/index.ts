@@ -544,6 +544,8 @@ export interface ReviewFacet {
   questionAttempts?: number;
   /** Which stage in the KU's facet unlock sequence this facet belongs to. */
   sequenceStage?: number;
+  /** Vocab meaning card: the usages proven correct at the current SRS stage (cleared when it moves up). */
+  provenUsageIds?: string[];
   data?: any;
   source?: {
     type: 'lesson' | 'concept';
@@ -580,6 +582,8 @@ export interface QuestionItem {
     acceptedAlternatives?: string[];
     difficulty: LessonDifficulty;
   };
+  /** Vocab: the usage this question tests (a VocabLesson usage id). Absent on older questions. */
+  usageId?: string;
   rank: number;        // 0–100, starts at 50; suitable threshold is 30
   rejectionCount: number; // tracked for observability; not used for ranking
   createdAt: string | Timestamp;

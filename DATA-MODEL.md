@@ -63,7 +63,9 @@ erDiagram
         string reading       "Vocab"
         array  definitions   "Vocab"
         string partOfSpeech  "Vocab"
-        array  context_examples "Vocab: sentence, translation, usage label"
+        array  context_examples "Vocab: sentence, translation, usage label, usageId"
+        array  usages        "Vocab: id (stable), label, meaning (the literal answer), acceptedAnswers"
+        array  usageSetAside "Vocab: definitions no example shows, so not usages"
         array  component_kanji  "Vocab: filtered on read (dropStrayComponentKanji)"
         boolean kanaOnly     "Vocab: never taught with its kanji breakdown"
         string pattern       "Grammar: overridden with KU.content at read time"
@@ -97,6 +99,7 @@ erDiagram
         string kuId             "FK → KnowledgeUnit.id OR Concept.id"
         string sourceCollection "knowledge-units | concepts | scenarios; absent on old docs"
         object data             "question, answer, acceptedAlternatives, context, difficulty"
+        string usageId          "Vocab: the usage the question tests; absent on older questions"
         number rank             "0–100, starts 50, suitable threshold 30; absent on old docs"
         number rejectionCount
     }
@@ -187,6 +190,7 @@ erDiagram
         timestamp nextReviewAt
         number consecutiveFailures
         string currentQuestionId "FK → Question.id"
+        array  provenUsageIds   "Vocab meaning card (Content-to-Definition): usages proven at the current srsStage"
         string source_type      "lesson | concept; absent on flash facets"
         string source_id
         object data             "facet-type payload; picture-choice holds a snapshot of the word's pictures, flash a scenario step"
@@ -438,6 +442,22 @@ A picture without a `file` can't be approved.
 No needs-review, scene or free-standing pictures exist yet. Of the 16 whole-KU pictures, 15 are on Vocab words and one (approved) is on the **Kanji** 山 (`m4ZDGTODIeH0NY5bxlkt`), made before the never-a-Kanji rule (#340).
 
 ---
+
+## Vocab usages and the meaning card
+
+Design: `specs/learning-goal-model.md`.
+
+- A Vocab lesson's `usages` are built from its examples and definitions (`LessonsService.buildVocabUsages`,
+  `scripts/build-usages.ts`). Ids are stable; existing labels are kept verbatim because pictures match
+  usages by label. Until built, `usagesOf()` treats the lesson as one usage accepting every definition.
+- The **meaning card** is the Vocab `Content-to-Definition` facet: one SRS stage for the word. A correct
+  answer is matched to a usage (locally, else by the AI with the usage list) and recorded in
+  `provenUsageIds`. The card moves up only when every usage is proven at its stage; the record then
+  clears. A wrong answer counts only while nothing is proven at that stage.
+- From SRS stage 4 (`AI_QUESTION_MIN_STAGE`, a placeholder), a due meaning card with an unproven usage
+  is served as an AI question about that usage (`presentAs`, `usageId` on the review item). The card and
+  its SRS are unchanged. Vocab no longer gets `AI-Generated-Question` facets of its own; existing ones on
+  old accounts keep their own SRS.
 
 ## Legacy data
 

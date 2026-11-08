@@ -419,12 +419,14 @@ export class ReviewProgressService {
       return;
     }
 
+    // A stage removed from the sequence (Vocab's old AI-question stage 6) has no readiness rule:
+    // a word still parked on it moves on to the next defined stage.
     const currentStageDef = sequence.stages.find(s => s.stage === uku.currentStage);
-    if (!currentStageDef) {
+    if (!currentStageDef && !sequence.stages.some(s => s.stage > (uku.currentStage ?? 0))) {
       this.logger.warn(`checkAndAdvanceStage: UKU.currentStage=${uku.currentStage} for kuId=${kuId} doesn't match any defined stage in the ${ku.type} sequence`);
       return;
     }
-    if (currentStageDef.unlockAtSrsStage === null) return; // terminal stage — normal, common, not logged
+    if (currentStageDef?.unlockAtSrsStage === null) return; // terminal stage — normal, common, not logged
 
     // One read serves both the readiness check and isStillKnown below.
     const kuFacets = await this.getFacetsForKu(uid, kuId);
@@ -434,7 +436,7 @@ export class ReviewProgressService {
       return;
     }
 
-    const allReady = stageFacets.every(
+    const allReady = !currentStageDef || stageFacets.every(
       f => (f.srsStage ?? 0) >= currentStageDef.unlockAtSrsStage!,
     );
     if (!allReady) return; // not every facet ready yet — normal, the common case, not logged

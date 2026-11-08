@@ -591,6 +591,8 @@ export interface ReviewFacet {
   /** @deprecated - failure tracking moved to UserQuestionState.consecutiveFailures */
   questionAttempts?: number;
   sequenceStage?: number;
+  /** Vocab meaning card: the usages proven correct at the current SRS stage (cleared when it moves up). */
+  provenUsageIds?: string[];
   data?: any;
   /** Which lesson's sequence this facet belongs to — differs from kuId for
    *  Kanji-Component-* facets, which target the component kanji's own kuId
@@ -603,6 +605,10 @@ export interface ReviewFacet {
 
 export interface ReviewItem {
   facet: ReviewFacet;
+  /** Vocab meaning card: shown as this type instead (an AI question about one usage). */
+  presentAs?: "AI-Generated-Question";
+  usageId?: string;
+  usageLabel?: string;
 }
 
 // This represents the structure of our old db.json

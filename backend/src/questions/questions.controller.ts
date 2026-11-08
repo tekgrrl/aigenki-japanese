@@ -14,9 +14,10 @@ export class QuestionsController {
     @Query('topic') topic: string,
     @Query('facetId') facetId: string,
     @Query('kuId') kuId: string,
+    @Query('usageId') usageId?: string,
   ) {
     if (!topic) throw new BadRequestException('Topic is required');
-    return this.questionsService.selectQuestion(uid, kuId, facetId, topic);
+    return this.questionsService.selectQuestion(uid, kuId, facetId, topic, usageId || undefined);
   }
 
   @Patch(':id/feedback')

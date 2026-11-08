@@ -1,6 +1,6 @@
 /**
  * Minimal in-memory Firestore for unit specs: collections, sub-collections, doc get/set/
- * update (dotted paths), delete, add, getAll, batch, and where() with ==, in and
+ * update (dotted paths), delete, add, getAll, batch, runTransaction, and where() with ==, in and
  * array-contains on (possibly nested) fields. select()/limit() are accepted and ignored.
  */
 type Data = Record<string, any>;
@@ -30,6 +30,18 @@ export class FakeFirestore {
   }
   async getAll(...refs: FakeDocRef[]) {
     return Promise.all(refs.map(r => r.get()));
+  }
+  /** Runs `fn` with a transaction whose writes are applied after it resolves (no contention). */
+  async runTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    const ops: (() => Promise<void>)[] = [];
+    const result = await fn({
+      get: (ref: FakeDocRef) => ref.get(),
+      set: (ref: FakeDocRef, data: Data, opts?: { merge?: boolean }) => { ops.push(() => ref.set(data, opts)); },
+      update: (ref: FakeDocRef, data: Data) => { ops.push(() => ref.update(data)); },
+      delete: (ref: FakeDocRef) => { ops.push(() => ref.delete()); },
+    });
+    for (const op of ops) await op();
+    return result;
   }
   batch() {
     const ops: (() => Promise<void>)[] = [];

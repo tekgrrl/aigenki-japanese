@@ -73,13 +73,16 @@ export class ReviewsController {
   async updateSrs(
     @UserId() uid: string,
     @Param('id') id: string,
-    @Body() body: { result: 'pass' | 'fail' }
+    @Body() body: { result: 'pass' | 'fail'; usageId?: string }
   ) {
     if (!body.result || (body.result !== 'pass' && body.result !== 'fail')) {
       throw new BadRequestException('Result must be "pass" or "fail"');
     }
+    if (body.usageId !== undefined && typeof body.usageId !== 'string') {
+      throw new BadRequestException('usageId must be a string');
+    }
 
-    return this.reviewsService.updateFacetSrs(uid, id, body.result);
+    return this.reviewsService.updateFacetSrs(uid, id, body.result, body.usageId);
   }
 
   @Post('generate')
