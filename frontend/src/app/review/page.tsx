@@ -107,9 +107,10 @@ export default function ReviewPage() {
   const audioCache = useRef<Record<string, string>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const fetchAndPlayAudio = async (text: string) => {
+  /** `stillWanted`: autoplay passes a check so a card that's no longer current never plays. */
+  const fetchAndPlayAudio = async (text: string, stillWanted: () => boolean = () => true) => {
     if (audioCache.current[text]) {
-      if (audioRef.current) {
+      if (audioRef.current && stillWanted()) {
         audioRef.current.src = audioCache.current[text];
         audioRef.current.play();
       }
@@ -126,7 +127,7 @@ export default function ReviewPage() {
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         audioCache.current[text] = url;
-        if (audioRef.current) {
+        if (audioRef.current && stillWanted()) {
           audioRef.current.src = url;
           audioRef.current.play();
         }
@@ -137,6 +138,9 @@ export default function ReviewPage() {
   };
 
   const currentItem = reviewQueue[currentIndex];
+  // The facet on screen right now, for checks that run after a delay (autoplay).
+  const currentFacetIdRef = useRef<string | undefined>(undefined);
+  currentFacetIdRef.current = currentItem?.facet.id;
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
 
@@ -248,6 +252,10 @@ export default function ReviewPage() {
   // Reload queue when the header Review tab is clicked while already on this page
   useEffect(() => {
     const handleReload = () => {
+      // Drop the old queue and stop its audio straight away: otherwise "card 0" is briefly the
+      // old queue's first card until the new one arrives, and its word autoplays.
+      audioRef.current?.pause();
+      setReviewQueue([]);
       setCurrentIndex(0);
       setUserAnswer("");
       setAnswerState("unanswered");
@@ -274,10 +282,15 @@ export default function ReviewPage() {
       currentItem &&
       (currentItem.facet.facetType === "audio" || currentItem.facet.facetType === "Content-to-Definition")
     ) {
-      // Small timeout to let UI mount
-      setTimeout(() => {
-        fetchAndPlayAudio(currentItem.facet.data?.reading || currentItem.facet.data?.content);
+      // Small timeout to let UI mount. Only play if this card is still the one on screen by
+      // the time the audio is ready (a reload or a quick move on can replace it).
+      const facetId = currentItem.facet.id;
+      const stillWanted = () => currentFacetIdRef.current === facetId;
+      const timer = setTimeout(() => {
+        if (!stillWanted()) return;
+        fetchAndPlayAudio(currentItem.facet.data?.reading || currentItem.facet.data?.content, stillWanted);
       }, 50);
+      return () => clearTimeout(timer);
     }
   }, [currentItem, currentIndex]); // Re-run whenever the currentItem OR the index changes
 
