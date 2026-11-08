@@ -59,3 +59,27 @@ if a change actually breaks the stated intent. New decisions get added here as t
   That's accepted; the cost is deliberately light.
 - **Existing reading cards for words without kanji** (Content-to-Reading on katakana words, made
   before the no-kanji rule) are left alone, not deleted by a migration. Only new cards are stopped.
+
+## Vocab usages and the meaning card
+- **The usage set is what the lesson's examples show.** Definitions no example shows are set aside, not
+  turned into usages, and missing senses are added by hand later. Accepted by the owner, including words
+  whose grouping was inherited from older labels.
+- **The meaning card's form rule is a placeholder** (AI question from SRS stage 4 for an unproven usage,
+  chosen at random). The real rule is deferred to an SRS tuning pass; don't flag the threshold.
+- **A correct answer that matches no usage** (the AI passes a real sense that isn't a usage) holds the
+  card at its stage. For a one-usage word any correct answer promotes, as before.
+- **Existing Vocab `AI-Generated-Question` facets** on current accounts keep their own SRS. Accounts are
+  being scrapped or migrated by script, so there's no data migration.
+- **Regenerating a Vocab lesson gives its usages new ids** (`set()` replaces the doc). Admin-only and
+  rare, and a regenerated lesson has new examples anyway; cards only lose that stage's proven usages
+  and questions get regenerated. Accepted.
+- **The Meanings list shows each usage's meaning and label, not its accepted answers** (the owner's
+  choice); accepted glosses still pass in reviews.
+- **AI-accepted answers are written onto the global lesson's usage** (`addUsageAnswer`), an agreed
+  exception to "global data changes only via the admin dashboard": it's the owner's design, so the
+  next attempt matches locally. AI questions already store accepted alternatives on the shared
+  Question doc. Forgiven misspellings are never stored.
+- **A wrong meaning-card answer after a usage is proven** ("free fail") keeps the stage and the proven
+  usages but reschedules at the stage's normal interval (the owner's choice), so the card doesn't come
+  straight back. Stats forecasts aren't adjusted for it (they're a cache).
+

@@ -10,7 +10,7 @@ import { ApiLog, Lesson, ScenarioEvaluation } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
 import { performance } from "perf_hooks"; // For timing
-import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageLabelMessage } from '../prompts/vocab.prompts';
+import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageBuildMessage } from '../prompts/vocab.prompts';
 import { buildScenarioEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
 import { buildFuriganaMessage } from '../prompts/grammar.prompts';
@@ -61,7 +61,9 @@ export class GeminiService implements OnModuleInit {
     userAnswer: string,
     expectedAnswers: string[],
     // New optional argument for structured logging
-    logContext?: Record<string, any>
+    logContext?: Record<string, any>,
+    /** Vocab meaning card: the usage ids the answer may match; the response then names one (or "none"). */
+    usageIds?: string[],
   ) {
     const initialLogData: ApiLog = {
       timestamp: Timestamp.now(),
@@ -85,7 +87,7 @@ export class GeminiService implements OnModuleInit {
     let capturedError: any;
     let aiJsonText: string | undefined; // Capture raw text for logging
     let evaluationResult:
-      | { result: "pass" | "fail"; explanation: string }
+      | { result: "pass" | "fail"; explanation: string; usageId?: string; misspelled?: boolean }
       | undefined;
 
     try {
@@ -108,8 +110,9 @@ export class GeminiService implements OnModuleInit {
             properties: {
               result: { type: "STRING", enum: ["pass", "fail"] },
               explanation: { type: "STRING" },
+              ...(usageIds ? { usageId: { type: "STRING", enum: [...usageIds, "none"] }, misspelled: { type: "BOOLEAN" } } : {}),
             },
-            required: ["result", "explanation"],
+            required: ["result", "explanation", ...(usageIds ? ["usageId", "misspelled"] : [])],
           },
         },
       });
@@ -736,27 +739,42 @@ export class GeminiService implements OnModuleInit {
   }
 
   /**
-   * Labels a Vocab lesson's existing context examples by usage/sense (lazy backfill for
-   * lessons generated before examples carried a `usage`). Returns one label per example,
-   * or null if the call fails or returns the wrong number of labels.
+   * Builds a Vocab lesson's usages from its examples and definitions (see buildUsageBuildMessage).
+   * Returns the parsed JSON for the caller to check (checkBuiltUsages), or null if the call fails.
    */
-  async labelExampleUsages(
+  async buildExampleUsages(
     vocab: string,
     definitions: string[],
     examples: { sentence: string; translation: string }[],
+    fixedLabels: (string | null)[],
     kuId: string,
     partOfSpeech?: string,
-  ): Promise<string[] | null> {
-    const userMessage = buildUsageLabelMessage(vocab, definitions, examples, partOfSpeech);
+  ): Promise<unknown | null> {
+    const userMessage = buildUsageBuildMessage(vocab, definitions, examples, fixedLabels, partOfSpeech);
     const schema = {
       type: 'OBJECT',
-      properties: { usages: { type: 'ARRAY', items: { type: 'STRING' } } },
-      required: ['usages'],
+      properties: {
+        usages: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              label: { type: 'STRING' },
+              meaning: { type: 'STRING' },
+              acceptedAnswers: { type: 'ARRAY', items: { type: 'STRING' } },
+            },
+            required: ['label', 'meaning', 'acceptedAnswers'],
+          },
+        },
+        exampleUsages: { type: 'ARRAY', items: { type: 'INTEGER' } },
+        setAside: { type: 'ARRAY', items: { type: 'STRING' } },
+      },
+      required: ['usages', 'exampleUsages', 'setAside'],
     };
 
     const logRef = await this.apilogService.startLog({
       timestamp: Timestamp.now(),
-      route: '/lessons/label-usages',
+      route: '/lessons/build-usages',
       status: 'pending',
       modelUsed: this.modelName,
       requestData: { userMessage, content: vocab, kuId },
@@ -774,14 +792,11 @@ export class GeminiService implements OnModuleInit {
       });
       aiJsonText = response.text;
       parsedJson = aiJsonText ? JSON.parse(aiJsonText) : null;
-      const usages: unknown = parsedJson?.usages;
-      if (!Array.isArray(usages) || usages.length !== examples.length || !usages.every(u => typeof u === 'string' && u.trim())) {
-        throw new Error(`Expected ${examples.length} usage labels, got ${JSON.stringify(usages)}`);
-      }
-      return usages.map((u: string) => u.trim());
+      if (!parsedJson) throw new Error('Empty response');
+      return parsedJson;
     } catch (error: any) {
       capturedError = error;
-      this.logger.error(`Failed to label example usages for ${vocab}`, error);
+      this.logger.error(`Failed to build usages for ${vocab}`, error);
       return null;
     } finally {
       if (logRef) {
@@ -794,7 +809,7 @@ export class GeminiService implements OnModuleInit {
           updateData.responseData = { rawText: aiJsonText, parsedJson };
         }
         this.apilogService.completeLog(logRef, updateData).catch(err =>
-          console.error('Failed to update label-usages log', err)
+          console.error('Failed to update build-usages log', err)
         );
       }
     }

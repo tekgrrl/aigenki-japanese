@@ -41,11 +41,9 @@ export const FACET_SEQUENCES: KuFacetSequence[] = [
         facets: [{ type: 'audio', source: 'primary' }],
         unlockAtSrsStage: 4,
       },
-      {
-        stage: 6,
-        facets: [{ type: 'AI-Generated-Question', source: 'primary' }],
-        unlockAtSrsStage: 5,
-      },
+      // Stage 6 (AI-Generated-Question) was removed: for Vocab, AI questions are a form of the
+      // meaning card (Content-to-Definition), not a card with its own SRS. Stage numbers are
+      // stored on facets and UKUs, so the gap stays.
       {
         stage: 7,
         facets: [{ type: 'Kanji-Component-Reading', source: 'kanji-components' }],

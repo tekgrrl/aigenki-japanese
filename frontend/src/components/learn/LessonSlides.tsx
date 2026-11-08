@@ -1,6 +1,7 @@
 "use client";
 
 import LessonNotes from "@/components/lessons/LessonNotes";
+import VocabUsageList, { hasUsages } from "@/components/lessons/VocabUsageList";
 import { useEffect, useRef, useCallback } from "react";
 import { VocabLesson, KanjiLesson, GrammarLesson, Lesson } from "@/types";
 import { apiFetch } from "@/lib/api-client";
@@ -105,29 +106,38 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
 }
 
 /**
- * Older Vocab lessons have unlabelled examples. Ask the backend to label them once (it
- * saves the labels on the lesson) so the slideshow can show one example per usage.
- * Best-effort: on any failure the slideshow just shows the first example.
+ * A Vocab lesson whose usages haven't been built yet (an older lesson, or a build after
+ * generation that failed): ask the backend to build them once (it saves them on the lesson),
+ * so the slideshow shows one example per usage and the Meanings list. Best-effort: on any
+ * failure the slideshow shows the definitions and the first example.
  */
 const LABEL_TIMEOUT_MS = 30_000;
 
 async function ensureUsageLabels(vl: VocabLesson, kuId: string) {
   const examples = vl.context_examples ?? [];
-  if (examples.length < 2 || examples.every((e) => e.usage)) return;
+  const built = (vl.usages?.length ?? 0) > 0 && examples.every((e) => e.usageId);
+  if (examples.length === 0 || built) return;
   try {
-    // Own timeout, not the lesson fetch's: a slow labelling call must never fail a lesson
-    // that has already loaded.
+    // Own timeout, not the lesson fetch's: a slow build must never fail a lesson that has
+    // already loaded.
     const res = await apiFetch(`/api/lessons/${kuId}/label-usages`, {
       method: "POST",
       signal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
     });
     if (!res.ok) return;
-    const { usages } = (await res.json()) as { usages: (string | null)[] };
-    if (Array.isArray(usages) && usages.length === examples.length) {
-      vl.context_examples = examples.map((e, i) => ({ ...e, usage: usages[i] ?? undefined }));
+    const body = (await res.json()) as {
+      usages: (string | null)[];
+      built?: { usages: NonNullable<VocabLesson["usages"]>; usageSetAside: string[] };
+    };
+    if (Array.isArray(body.usages) && body.usages.length === examples.length) {
+      vl.context_examples = examples.map((e, i) => ({ ...e, usage: body.usages[i] ?? undefined }));
+    }
+    if (body.built) {
+      vl.usages = body.built.usages;
+      vl.usageSetAside = body.built.usageSetAside;
     }
   } catch (e) {
-    console.warn(`[lesson-slides] usage labelling failed for ${vl.vocab}`, e);
+    console.warn(`[lesson-slides] building usages failed for ${vl.vocab}`, e);
   }
 }
 
@@ -333,19 +343,11 @@ function VocabMeaningSlide({ loaded }: { loaded: LoadedItem }) {
 
 function VocabDefinitionsSlide({ loaded }: { loaded: LoadedItem }) {
   const vl = loaded.lesson as VocabLesson;
-  const defs = vl.definitions?.length ? vl.definitions : vl.definition ? [vl.definition] : [];
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
-      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Definitions</span>
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">{hasUsages(vl) ? "Meanings" : "Definitions"}</span>
       <div className="text-4xl font-bold text-shodo-ink">{loaded.item.content}</div>
-      <ul className="space-y-3">
-        {defs.map((d, i) => (
-          <li key={i} className="flex items-start gap-3 text-lg text-shodo-ink-light">
-            <span className="text-shodo-ink-faint text-sm mt-1 w-5 shrink-0">{i + 1}.</span>
-            {d}
-          </li>
-        ))}
-      </ul>
+      <VocabUsageList lesson={vl} />
     </div>
   );
 }

@@ -3,13 +3,15 @@ import { StatsService } from '../stats/stats.service';
 import { Firestore } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
+  LESSONS_COLLECTION,
   QUESTIONS_COLLECTION,
   QUESTION_STATES_SUBCOLLECTION,
   CONCEPTS_COLLECTION,
   Timestamp,
   FieldValue,
 } from '../firebase/firebase.module';
-import { ReviewFacet, QuestionItem, UserQuestionState, ConceptKnowledgeUnit } from '@/types';
+import { ReviewFacet, QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage } from '@/types';
+import { usagesOf } from '../lessons/vocab-usages';
 import { GeminiService } from '../gemini/gemini.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
@@ -43,7 +45,12 @@ type QuestionResponse = {
   accepted_alternatives: string[] | undefined;
   questionId: string;
   isNew: boolean;
+  /** Vocab: the usage the question tests, if known. */
+  usageId?: string;
 };
+
+/** A Vocab usage to ask about, and whether it's the word's only usage (then older, usage-less questions fit too). */
+type TargetUsage = { usage: VocabUsage; only: boolean };
 
 @Injectable()
 export class QuestionsService {
@@ -70,6 +77,7 @@ export class QuestionsService {
       accepted_alternatives: question.data.acceptedAlternatives,
       questionId: question.id,
       isNew,
+      ...(question.usageId ? { usageId: question.usageId } : {}),
     };
   }
 
@@ -78,8 +86,15 @@ export class QuestionsService {
     this.logger.log(`Found ${snapshot.size} questions`);
   }
 
-  async selectQuestion(uid: string, kuId: string, facetId: string, topic: string): Promise<QuestionResponse> {
+  /**
+   * `usageId`: a Vocab meaning card shown as an AI question asks about one usage; only
+   * questions for that usage are reused, and a new one is generated for it.
+   */
+  async selectQuestion(uid: string, kuId: string, facetId: string, topic: string, usageId?: string): Promise<QuestionResponse> {
     if (!topic) throw new BadRequestException('Topic is required');
+
+    const target = usageId ? await this.targetUsage(kuId, usageId) : null;
+    const fits = (q: { usageId?: string }) => !target || q.usageId === target.usage.id || (!q.usageId && target.only);
 
     const facetData = facetId
       ? await this.reviewsService.getByFacetId(uid, facetId) as ReviewFacet | null
@@ -92,14 +107,14 @@ export class QuestionsService {
     // 1. Try to reuse the question already on the facet
     if (facetData?.currentQuestionId) {
       const reused = await this.tryReuseQuestion(uid, facetData.currentQuestionId);
-      if (reused) {
+      if (reused && fits(reused)) {
         this.logger.log(`Reusing question ${facetData.currentQuestionId} for facet ${facetId}`);
         return reused;
       }
     }
 
     // 2. Find another suitable question from the global corpus
-    const suitable = await this.findSuitableQuestion(uid, kuId, facetData?.currentQuestionId);
+    const suitable = await this.findSuitableQuestion(uid, kuId, facetData?.currentQuestionId, fits);
     if (suitable) {
       this.logger.log(`Found suitable question ${suitable.questionId} for KU ${kuId}`);
       if (facetId) await this.reviewsService.updateFacetQuestion(uid, facetId, suitable.questionId);
@@ -108,7 +123,16 @@ export class QuestionsService {
 
     // 3. Generate a new question via AI
     this.logger.log(`No suitable questions for KU ${kuId} — generating new one`);
-    return this.generateAndSave(uid, topic, kuId, facetId);
+    return this.generateAndSave(uid, topic, kuId, facetId, undefined, target?.usage);
+  }
+
+  /** The usage a meaning card asks about, from the word's lesson; null if it no longer exists. */
+  private async targetUsage(kuId: string, usageId: string): Promise<TargetUsage | null> {
+    const lesson = (await this.db.collection(LESSONS_COLLECTION).doc(kuId).get()).data() as Lesson | undefined;
+    if (lesson?.type !== 'Vocab') return null;
+    const usages = usagesOf(lesson);
+    const usage = usages.find(u => u.id === usageId);
+    return usage ? { usage, only: usages.length === 1 } : null;
   }
 
   private async tryReuseQuestion(uid: string, questionId: string): Promise<QuestionResponse | null> {
@@ -134,7 +158,12 @@ export class QuestionsService {
     return null;
   }
 
-  private async findSuitableQuestion(uid: string, kuId: string, excludeId?: string): Promise<QuestionResponse | null> {
+  private async findSuitableQuestion(
+    uid: string,
+    kuId: string,
+    excludeId?: string,
+    fits: (q: QuestionItem) => boolean = () => true,
+  ): Promise<QuestionResponse | null> {
     const snapshot = await this.db.collection(QUESTIONS_COLLECTION)
       .where('kuId', '==', kuId)
       .get();
@@ -143,7 +172,7 @@ export class QuestionsService {
 
     const candidates = snapshot.docs
       .map(d => ({ id: d.id, ...d.data() } as QuestionItem))
-      .filter(q => q.id !== excludeId && (q.rank ?? 50) >= SUITABLE_RANK_THRESHOLD);
+      .filter(q => q.id !== excludeId && (q.rank ?? 50) >= SUITABLE_RANK_THRESHOLD && fits(q));
 
     if (candidates.length === 0) return null;
 
@@ -165,7 +194,7 @@ export class QuestionsService {
     return null;
   }
 
-  private async generateAndSave(uid: string, topic: string, kuId: string, facetId?: string, mechanicData?: ConceptMechanic): Promise<QuestionResponse> {
+  private async generateAndSave(uid: string, topic: string, kuId: string, facetId?: string, mechanicData?: ConceptMechanic, usage?: VocabUsage): Promise<QuestionResponse> {
     if (mechanicData) {
       return this.generateConceptQuestion(uid, mechanicData, kuId, facetId);
     }
@@ -199,7 +228,7 @@ export class QuestionsService {
       }
     }
 
-    return this.generateVocabQuestion(uid, topic, kuId, facetId);
+    return this.generateVocabQuestion(uid, topic, kuId, facetId, usage);
   }
 
   private buildLevelToolHandler(uid: string): Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>> {
@@ -228,7 +257,8 @@ export class QuestionsService {
     required: ['question', 'answer'],
   };
 
-  private async generateVocabQuestion(uid: string, topic: string, kuId: string, facetId?: string): Promise<QuestionResponse> {
+  /** `usage`: ask about this usage's meaning (and store it on the question) instead of the KU's whole definition. */
+  private async generateVocabQuestion(uid: string, topic: string, kuId: string, facetId?: string, usage?: VocabUsage): Promise<QuestionResponse> {
     let reading: string | undefined;
     let meaning: string | undefined;
     if (kuId) {
@@ -244,6 +274,7 @@ export class QuestionsService {
         // concept IDs won't be in knowledge-units; proceed without enrichment
       }
     }
+    if (usage) meaning = usage.meaning;
 
     const isVerb = meaning?.toLowerCase().trimStart().startsWith('to ') ?? false;
     this.logger.log(`Question type selection: kuId=${kuId} meaning="${meaning}" isVerb=${isVerb}`);
@@ -293,6 +324,7 @@ export class QuestionsService {
       id: ref.id,
       kuId,
       sourceCollection: 'knowledge-units',
+      ...(usage ? { usageId: usage.id } : {}),
       data: {
         question: parsed.question,
         context: parsed.context,

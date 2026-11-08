@@ -8,13 +8,15 @@ import {
 import { CollectionReference, FieldValue, Firestore, Query, Timestamp } from 'firebase-admin/firestore';
 import {
     FIRESTORE_CONNECTION,
+    LESSONS_COLLECTION,
+    QUESTIONS_COLLECTION,
     REVIEW_FACETS_COLLECTION,
     USER_STATS_COLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID, MASTERED_STAGE, SELF_CERTIFIED_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
-import { FacetType, ReviewFacet } from '@/types';
+import { FacetType, Lesson, ReviewFacet, VocabLesson, VocabUsage } from '@/types';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
@@ -23,7 +25,9 @@ import { LearningProgressService } from '../learning-progress/learning-progress.
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { KanjiService } from '../kanji/kanji.service';
 import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
-import { buildAnswerEvaluatorPrompt } from '../prompts/evaluation.prompts';
+import { buildAnswerEvaluatorPrompt, buildMeaningEvaluatorPrompt } from '../prompts/evaluation.prompts';
+import { DEFAULT_USAGE_ID, usagesOf } from '../lessons/vocab-usages';
+import { chooseMeaningForm, matchUsageLocally, meaningOutcome, MeaningOutcome, normaliseAnswer, stripTrailingPunctuation } from './meaning-card';
 import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
 
 /** A Grammar KU whose facet reaches this SRS stage gets its scenario chain (the user's rule, 2026-11-04; tunable). */
@@ -80,7 +84,8 @@ export class ReviewsService {
         return doc.data();
     }
 
-    async updateFacetSrs(uid: string, facetId: string, result: 'pass' | 'fail') {
+    /** `usageId`: on a Vocab meaning card, the usage a correct answer matched (from evaluateAnswer). */
+    async updateFacetSrs(uid: string, facetId: string, result: 'pass' | 'fail', usageId?: string) {
         const txResult = await this.db.runTransaction(async (transaction) => {
             const facetRef = this.facetsColRef(uid).doc(facetId);
             const facetDoc = await transaction.get(facetRef);
@@ -101,10 +106,49 @@ export class ReviewsService {
             // Dates from Firestore are timestamps, convert if necessary (though usually handled by SDK)
             // const oldNextReviewDate = facetData.nextReviewAt ? facetData.nextReviewAt.toDate() : new Date();
 
-            const nextSrsStage = this.calculateNextStage(currentSrsStage, result);
+            // Vocab meaning card: the stage moves only once every usage is proven at this stage,
+            // and a wrong answer counts only while nothing is proven (see meaning-card.ts).
+            let meaning: { outcome: MeaningOutcome; proven: string[]; usageIds: string[] } | null = null;
+            if (facetData.facetType === 'Content-to-Definition') {
+                const lesson = (await transaction.get(this.db.collection(LESSONS_COLLECTION).doc(facetData.kuId))).data() as Lesson | undefined;
+                if (lesson?.type === 'Vocab') {
+                    const usageIds = usagesOf(lesson).map(u => u.id);
+                    // A one-usage word: any correct answer proves it, as before usages existed.
+                    const proved = usageIds.length === 1 ? usageIds[0] : usageId;
+                    if (usageIds.length > 0) meaning = { ...meaningOutcome(result, proved, facetData.provenUsageIds, usageIds), usageIds };
+                }
+            }
+
+            const usageResult = meaning ? { provenUsageIds: meaning.proven, totalUsages: meaning.usageIds.length, outcome: meaning.outcome } : {};
+            if (meaning?.outcome === 'free-fail') {
+                // Wrong while searching for another usage: the stage and the proven usages are
+                // unchanged, but the card waits the stage's normal interval, as a hold does, so it
+                // doesn't come straight back every session.
+                const freeFailNext = new Date(Date.now() + this.INTERVALS[currentSrsStage] * 60 * 60 * 1000);
+                transaction.update(facetRef, { nextReviewAt: freeFailNext, lastReviewAt: new Date() });
+                this.logger.log(`SRS Update [${facetId}]: FAIL not counted (usages already proven at stage ${currentSrsStage}); due again at the stage interval`);
+                return {
+                    success: true,
+                    facetId,
+                    prevStage: currentSrsStage,
+                    newStage: currentSrsStage,
+                    nextReview: freeFailNext,
+                    kuId: facetData.source?.id ?? facetData.kuId,
+                    targetKuId: facetData.kuId,
+                    facetType: facetData.facetType,
+                    prevConsecutiveFailures: facetData.consecutiveFailures ?? 0,
+                    newConsecutiveFailures: facetData.consecutiveFailures ?? 0,
+                    ...usageResult,
+                };
+            }
+
+            const nextSrsStage = meaning?.outcome === 'hold' ? currentSrsStage : this.calculateNextStage(currentSrsStage, result);
 
             const now = new Date();
-            const hoursToAdd = nextSrsStage === 0 ? 0 : this.INTERVALS[nextSrsStage];
+            // Stage 0 after a fail is due again at once (relearn now). A held meaning-card answer
+            // (correct, set incomplete) waits the stage's normal interval instead, or a word whose
+            // other usages the learner can't think of yet comes straight back (でも, 2026-11-08).
+            const hoursToAdd = meaning?.outcome === 'hold' ? this.INTERVALS[nextSrsStage] : nextSrsStage === 0 ? 0 : this.INTERVALS[nextSrsStage];
             const nextReviewDate = new Date(now.getTime() + hoursToAdd * 60 * 60 * 1000);
 
             // Calculate and update Stats via StatsService
@@ -133,6 +177,7 @@ export class ReviewsService {
                 nextReviewAt: nextReviewDate,
                 lastReviewAt: now,
                 consecutiveFailures: newConsecutiveFailures,
+                ...(meaning ? { provenUsageIds: meaning.proven } : {}),
                 history: FieldValue.arrayUnion({
                     stage: nextSrsStage,
                     timestamp: now,
@@ -163,6 +208,7 @@ export class ReviewsService {
                 facetType: facetData.facetType,
                 prevConsecutiveFailures,
                 newConsecutiveFailures,
+                ...usageResult,
             };
         });
 
@@ -269,7 +315,14 @@ export class ReviewsService {
             })();
         }
 
-        return { success: txResult.success, facetId: txResult.facetId, newStage: txResult.newStage, nextReview: txResult.nextReview };
+        return {
+            success: txResult.success,
+            facetId: txResult.facetId,
+            newStage: txResult.newStage,
+            nextReview: txResult.nextReview,
+            // Vocab meaning card: the usage record after this answer, for the review screen.
+            ...('outcome' in txResult ? { provenUsageIds: txResult.provenUsageIds, totalUsages: txResult.totalUsages, outcome: txResult.outcome } : {}),
+        };
     }
 
     /**
@@ -321,6 +374,55 @@ export class ReviewsService {
         facetType?: FacetType,
         facetId?: string,
     ) {
+        const out = await this.evaluateAnswerCore(uid, userAnswer, expectedAnswers, question, topic, questionId, kuId, facetType, facetId);
+        // Only meaning cards (bare word, or shown as an AI question) have a usage record to preview.
+        if (facetType !== 'Content-to-Definition' && facetType !== 'AI-Generated-Question') return out;
+        // A meaning card shown as an AI question proves the question's usage. Returned, so the
+        // SRS update credits the same usage the preview used.
+        const questionUsageId = facetType === 'AI-Generated-Question' && questionId
+            ? ((await this.db.collection(QUESTIONS_COLLECTION).doc(questionId).get()).data()?.usageId as string | undefined)
+            : undefined;
+        const usageId = 'usageId' in out && out.usageId ? out.usageId : questionUsageId;
+        const usagePreview = await this.meaningPreview(uid, facetId, out.result === 'pass' ? 'pass' : 'fail', usageId);
+        return { ...out, ...(questionUsageId ? { usageId: questionUsageId } : {}), ...(usagePreview ? { usagePreview } : {}) };
+    }
+
+    /**
+     * Vocab meaning card: what this answer will do to the card's usage record, without writing
+     * anything. A new AI question applies its SRS result only after "Rate this question", so the
+     * review screen shows the progress line from this. Null for any other card, or a one-usage word.
+     */
+    private async meaningPreview(uid: string, facetId: string | undefined, result: 'pass' | 'fail', usageId: string | undefined) {
+        if (!facetId) return null;
+        const facet = (await this.facetsColRef(uid).doc(facetId).get()).data() as ReviewFacet | undefined;
+        if (facet?.facetType !== 'Content-to-Definition') return null;
+        const lesson = (await this.db.collection(LESSONS_COLLECTION).doc(facet.kuId).get()).data() as Lesson | undefined;
+        if (lesson?.type !== 'Vocab') return null;
+        const usageIds = usagesOf(lesson).map(u => u.id);
+        if (usageIds.length < 2) return null;
+        const { outcome, proven } = meaningOutcome(result, usageId, facet.provenUsageIds, usageIds);
+        return { outcome, provenCount: outcome === 'promote' ? usageIds.length : proven.length, totalUsages: usageIds.length };
+    }
+
+    private async evaluateAnswerCore(
+        uid: string,
+        userAnswer: string,
+        expectedAnswers: string[],
+        question: string,
+        topic: string,
+        questionId: string,
+        kuId: string,
+        facetType?: FacetType,
+        facetId?: string,
+    ) {
+        // Vocab meaning card with built usages: match the answer to a usage.
+        if (facetType === 'Content-to-Definition' && kuId) {
+            const lesson = (await this.db.collection(LESSONS_COLLECTION).doc(kuId).get()).data() as Lesson | undefined;
+            if (lesson?.type === 'Vocab' && (lesson.usages?.length ?? 0) > 0) {
+                return this.evaluateMeaning(userAnswer, lesson, kuId, question, topic);
+            }
+        }
+
         // 1. Local Check — strip trailing Japanese/ASCII punctuation before comparing
         const stripTrailing = (s: string) => s.replace(/[。、！？,.!?\s]+$/u, '').trim();
         const normalize = (s: string) => stripTrailing(s.toLowerCase());
@@ -370,6 +472,67 @@ export class ReviewsService {
 
         return { ...evalResult, ...(addedAlternative ? { addedAlternative } : {}) };
     } // END evaluateAnswer
+
+    /**
+     * The Vocab meaning card: the answer may give any usage's meaning. Checked locally against
+     * every usage's meaning and accepted answers, otherwise by the AI with the usage list. A
+     * correct answer returns the usage it matched; one the AI accepted is added to that usage's
+     * accepted answers so the next attempt matches locally.
+     */
+    private async evaluateMeaning(userAnswer: string, lesson: VocabLesson, kuId: string, question: string, topic: string) {
+        const usages = usagesOf(lesson);
+        const matched = (u: VocabUsage | undefined) => (u ? { usageId: u.id, usageLabel: u.label || u.meaning } : {});
+
+        // What the review screen shows as the correct answer: the usages' meanings, not the old definitions list.
+        const usageMeanings = usages.map(u => u.meaning);
+
+        const local = matchUsageLocally(userAnswer, usages);
+        if (local) {
+            this.logger.log(`Local usage match for ${lesson.vocab}: "${userAnswer}" → ${local.label}`);
+            return { result: 'pass' as const, explanation: 'Correct!', usageMeanings, ...matched(local) };
+        }
+
+        const prompt = buildMeaningEvaluatorPrompt(lesson.vocab, usages, userAnswer);
+        const evalResult = await this.geminiService.evaluateAnswer(
+            prompt,
+            userAnswer,
+            usages.map(u => u.meaning),
+            { userAnswer, expectedAnswers: usages.map(u => u.meaning), question, topic },
+            usages.map(u => u.id),
+        ) as { result: 'pass' | 'fail'; explanation: string; usageId?: string; misspelled?: boolean };
+
+        const usage = evalResult.result === 'pass' ? usages.find(u => u.id === evalResult.usageId) : undefined;
+        let addedAlternative: string | undefined;
+        const answer = stripTrailingPunctuation(userAnswer); // stored as typed, case kept
+        // A forgiven misspelling passes, but is never stored: it would then pass locally for everyone.
+        if (usage && answer && usage.id !== DEFAULT_USAGE_ID && !evalResult.misspelled) {
+            addedAlternative = await this.addUsageAnswer(kuId, usage.id, answer);
+        }
+        return { result: evalResult.result, explanation: evalResult.explanation, usageMeanings, ...matched(usage), ...(addedAlternative ? { addedAlternative } : {}) };
+    }
+
+    /** Adds an AI-accepted answer to one usage's acceptedAnswers on the global lesson. Never fails the review. */
+    private async addUsageAnswer(kuId: string, usageId: string, answer: string): Promise<string | undefined> {
+        const ref = this.db.collection(LESSONS_COLLECTION).doc(kuId);
+        try {
+            const added = await this.db.runTransaction(async tx => {
+                const lesson = (await tx.get(ref)).data() as VocabLesson | undefined;
+                const usages = lesson?.usages ?? [];
+                const target = usages.find(u => u.id === usageId);
+                const known = (u: VocabUsage) => [u.meaning, ...u.acceptedAnswers].some(a => normaliseAnswer(a) === normaliseAnswer(answer));
+                // Already accepted somewhere: adding it again (or to a second usage) would make it ambiguous.
+                if (!target || usages.some(known)) return false;
+                tx.update(ref, { usages: usages.map(u => (u.id === usageId ? { ...u, acceptedAnswers: [...u.acceptedAnswers, answer] } : u)) });
+                return true;
+            });
+            if (!added) return undefined;
+            this.logger.log(`Added accepted answer "${answer}" to usage ${usageId} of lesson ${kuId}`);
+            return answer;
+        } catch (err) {
+            this.logger.error(`Failed to add accepted answer to usage ${usageId} of lesson ${kuId}`, err);
+            return undefined;
+        }
+    }
 
     /**
      * AI-Generated-Question answers live on the global Question doc (already app-mutated
@@ -573,9 +736,34 @@ export class ReviewsService {
             })
             .filter(item => item !== null);
 
-        this.logger.log(`Found ${reviewItems.length} due reviews for user ${uid}`);
-        return reviewItems;
+        const withForms = await this.addMeaningForms(reviewItems);
+        this.logger.log(`Found ${withForms.length} due reviews for user ${uid}`);
+        return withForms;
     } // END getDueReviews
+
+    /**
+     * Vocab meaning cards: decide whether each is shown as the bare word or as an AI question
+     * for one unproven usage (chooseMeaningForm). The card itself is unchanged; the item carries
+     * `presentAs`, `usageId` and `usageLabel`.
+     */
+    private async addMeaningForms<T extends { facet: ReviewFacet }>(items: T[]): Promise<(T & { presentAs?: 'AI-Generated-Question'; usageId?: string; usageLabel?: string })[]> {
+        const meaningKuIds = [...new Set(items.filter(i => i.facet.facetType === 'Content-to-Definition').map(i => i.facet.kuId))];
+        if (meaningKuIds.length === 0) return items;
+        const docs = await this.db.getAll(...meaningKuIds.map(id => this.db.collection(LESSONS_COLLECTION).doc(id)));
+        const usagesByKu = new Map<string, VocabUsage[]>();
+        docs.forEach(d => {
+            const lesson = d.data() as Lesson | undefined;
+            // Only built usages: a lesson still on its synthetic 'default' usage gets the bare word.
+            if (lesson?.type === 'Vocab' && (lesson.usages?.length ?? 0) > 0) usagesByKu.set(d.id, lesson.usages!);
+        });
+        return items.map(item => {
+            const usages = item.facet.facetType === 'Content-to-Definition' ? usagesByKu.get(item.facet.kuId) : undefined;
+            const form = usages ? chooseMeaningForm(item.facet.srsStage ?? 0, item.facet.provenUsageIds, usages.map(u => u.id)) : null;
+            if (!form) return item;
+            const usage = usages!.find(u => u.id === form.usageId)!;
+            return { ...item, ...form, usageLabel: usage.label || usage.meaning };
+        });
+    }
 
     async getAllFacets(uid: string) {
         const snapshot = await this.facetsBaseQuery(uid).get();

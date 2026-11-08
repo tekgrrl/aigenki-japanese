@@ -297,25 +297,57 @@ export function buildKanjiDetailsUserMessage(kanji: string): string {
 }
 
 /**
- * Labels the existing context examples of an already-generated Vocab lesson by usage,
- * without rewriting them (lazy backfill for lessons created before `usage` existed).
- * Source: lessons.service.ts:labelVocabUsages
+ * Builds a Vocab lesson's usages (senses) from its existing examples and definitions, without
+ * rewriting the examples: each usage gets a label, the literal answer a learner would type and
+ * other accepted answers, and each example is assigned to one usage.
+ * `fixedLabels`: an example's existing label, which MUST be kept verbatim (pictures match on it),
+ * or null if it has none. Source: lessons.service.ts:buildVocabUsages
  */
-export function buildUsageLabelMessage(
+export function buildUsageBuildMessage(
   vocab: string,
   definitions: string[],
   examples: { sentence: string; translation: string }[],
+  fixedLabels: (string | null)[],
   partOfSpeech?: string,
 ): string {
   const list = examples
-    .map((e, i) => `${i + 1}. ${e.sentence.replace(/\[[^\]]*\]/g, '')} — ${e.translation}`)
+    .map((e, i) => {
+      const label = fixedLabels[i];
+      return `${i + 1}. ${e.sentence.replace(/\[[^\]]*\]/g, '')} — ${e.translation}${label ? `  [FIXED LABEL: "${label}"]` : ''}`;
+    })
     .join('\n');
-  return `You are labelling example sentences for the Japanese word 「${vocab}」 (${partOfSpeech ? `part of speech: ${partOfSpeech}; ` : ''}definitions: ${definitions.join('; ')}).
+  const defs = definitions.map((d, i) => `${i + 1}. ${d}`).join('\n');
+  return `You are an expert Japanese lexicographer preparing quiz data for a learner of Japanese.
 
-For each example below, give a short label (a few English words) naming the usage or sense of 「${vocab}」 that the example shows, e.g. "asking why" vs "how come (surprise)". Examples that show the same usage MUST get the identical label; only use different labels for genuinely different usages, not for synonyms or different contexts. Usages are differences in MEANING, never in grammar: a change of grammatical role is not a new usage. For noun-suru words (nouns that also take する), the noun use and the する-verb use are ONE usage (e.g. 練習 "practice" and 練習する "to practise" share one label), unless the noun also names a distinct thing (e.g. 電話: "a telephone" vs "making a call"; 料理: "a dish / cuisine" vs "cooking"). Genuinely different meanings get different labels (e.g. 掛かる: "takes (time)" vs "costs (money)" vs "hangs").
+The word is 「${vocab}」${partOfSpeech ? ` (part of speech: ${partOfSpeech})` : ''}.
 
-Examples:
+Its definitions:
+${defs || '(none)'}
+
+Its example sentences:
 ${list}
 
-Return JSON: {"usages": ["label for example 1", "label for example 2", ...]} with exactly ${examples.length} labels, in order.`;
+Your task: list the word's distinct USAGES (senses) as shown by these examples, and say which usage each example shows. The learner will later be shown the bare word and asked what it means; their typed answer is matched against each usage's "meaning" and "acceptedAnswers".
+
+Rules:
+1. A usage is a difference in MEANING, never in grammar: a change of grammatical role is not a new usage. For noun-suru words (nouns that also take する), the noun use and the する-verb use are ONE usage (e.g. 練習 "practice" and 練習する "to practise"), unless the noun also names a distinct thing (e.g. 電話: "a telephone" vs "making a call"; 料理: "a dish / cuisine" vs "cooking"). Genuinely different meanings are different usages (e.g. 掛かる: "takes (time)" vs "costs (money)" vs "hangs").
+   Senses that a learner would answer with the SAME English word are ONE usage, even if a Japanese dictionary separates them: the learner's typed answer is the only way to tell usages apart. E.g. 子供 "a young person" and "one's own offspring" are both "child"; 人 "person" and "people" are one usage.
+2. Every usage MUST be shown by at least one example. NEVER invent a usage that no example shows.
+3. FIXED LABELS: an example marked [FIXED LABEL: "..."] already belongs to the usage with exactly that label. Use that label VERBATIM as the usage's "label" (same spelling, case and punctuation). Examples with the same fixed label share one usage. NEVER rename, merge or split fixed labels.
+4. An example without a fixed label goes to the usage it shows, creating a new usage only if no listed usage fits. A new usage's "label" is a few English words naming the sense.
+5. "meaning" is the single short English gloss a learner would most naturally type for that usage (e.g. "dark", "unfamiliar with", "to hang"). NEVER a description or a label with slashes.
+6. "acceptedAnswers" are the other short glosses a learner might type for the SAME usage. Split a definition that lists several glosses ("dark, gloomy, dim") into separate glosses, and put each where it belongs. For verbs give glosses with "to" ("to hang"); for adjectives and nouns, without. Do not repeat "meaning". NEVER include a gloss that belongs to a different usage.
+7. Account for EVERY definition: each gloss in it either appears in some usage's "meaning" or "acceptedAnswers", or the whole definition is copied verbatim into "setAside" because no example shows that sense.
+8. "exampleUsages" has exactly ${examples.length} entries, one per example in order: the 0-based index into "usages" of the usage that example shows.
+9. English only in "label", "meaning" and "acceptedAnswers". NEVER Romaji. NEVER rewrite the examples.
+
+Example A. 「暗い」, definitions: 1. dark  2. dark, gloomy, dim  3. depressed, cheerless, somber  4. unfamiliar with, ignorant of
+Examples: 1. この部屋は暗いですね。 [FIXED LABEL: "dark (lacking light)"]  2. 彼は暗い顔をしています。 [FIXED LABEL: "gloomy / depressed"]  3. コンピューターに暗いので… [FIXED LABEL: "unfamiliar with / ignorant of"]
+Output: {"usages": [{"label": "dark (lacking light)", "meaning": "dark", "acceptedAnswers": ["dim"]}, {"label": "gloomy / depressed", "meaning": "gloomy", "acceptedAnswers": ["depressed", "cheerless", "somber"]}, {"label": "unfamiliar with / ignorant of", "meaning": "unfamiliar with", "acceptedAnswers": ["ignorant of"]}], "exampleUsages": [0, 1, 2], "setAside": []}
+
+Example B. 「掛ける」, definitions: 1. to hang (something)  2. to put on (e.g. glasses)  3. to make (a phone call)  4. to spend (time, money)  5. to lock (a door)  6. to sit down
+Examples (no fixed labels): 1. 壁に絵を掛けました。  2. 友達に電話を掛けます。  3. どうぞお掛けください。  4. ドアに鍵を掛けてください。
+Output: {"usages": [{"label": "hanging something", "meaning": "to hang", "acceptedAnswers": []}, {"label": "making a phone call", "meaning": "to call", "acceptedAnswers": ["to make a phone call", "to make a call"]}, {"label": "sitting down", "meaning": "to sit", "acceptedAnswers": ["to sit down", "to take a seat"]}, {"label": "locking", "meaning": "to lock", "acceptedAnswers": ["to lock a door"]}], "exampleUsages": [0, 1, 2, 3], "setAside": ["to put on (e.g. glasses)", "to spend (time, money)"]}
+
+Return ONLY the JSON object, with no text before or after it.`;
 }

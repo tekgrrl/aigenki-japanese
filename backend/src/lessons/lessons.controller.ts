@@ -120,11 +120,11 @@ export class LessonsController {
     return this.lessonsService.getUserGrammarLessons(uid, kuId);
   }
 
-  /** Lazy usage labelling for a Vocab lesson's examples (used by the Start Learning slideshow). */
+  /** Lazy: build a Vocab lesson's usages (the Start Learning slideshow uses their labels). */
   @Post(':kuId/label-usages')
   async labelUsages(@Param('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
-    return this.lessonsService.labelVocabUsages(kuId);
+    return this.lessonsService.buildVocabUsages(kuId);
   }
 
   /** Lazy furigana for a Grammar lesson's examples (used by the Start Learning slideshow). */
@@ -134,12 +134,12 @@ export class LessonsController {
     return this.lessonsService.addGrammarFurigana(kuId);
   }
 
-  /** Admin: relabel a Vocab lesson's example usages even if already labelled. */
+  /** Admin: rebuild a Vocab lesson's usages from scratch, even if already built. */
   @Post(':kuId/relabel-usages')
   @UseGuards(AdminGuard)
   async relabelUsages(@Param('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
-    return this.lessonsService.labelVocabUsages(kuId, true);
+    return this.lessonsService.buildVocabUsages(kuId, true);
   }
 
   @Post('regenerate/:kuId')

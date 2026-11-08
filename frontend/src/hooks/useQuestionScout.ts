@@ -33,8 +33,10 @@ const belongsToKu = (item: ReviewItem, kuId: string) =>
 
 async function requestQuestion(item: ReviewItem): Promise<ScoutedQuestion> {
   const topic = item.facet.data?.topic || item.facet.data?.content || "";
+  // A Vocab meaning card shown as an AI question asks about one usage.
+  const usageId = item.facet.data?.usageId as string | undefined;
   const response = await apiFetch(
-    `/api/questions/generate?topic=${encodeURIComponent(topic)}&facetId=${item.facet.id}&kuId=${item.facet.kuId}`,
+    `/api/questions/generate?topic=${encodeURIComponent(topic)}&facetId=${item.facet.id}&kuId=${item.facet.kuId}${usageId ? `&usageId=${encodeURIComponent(usageId)}` : ""}`,
   );
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));

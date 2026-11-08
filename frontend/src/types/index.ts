@@ -118,6 +118,18 @@ export interface LessonValidation {
   violations?: Array<{ segment: string; detectedLevel: string; type: 'vocab' | 'grammar' }>;
 }
 
+/**
+ * One usage (sense) of a Vocab word. `id` is stable once written; `label` is display text and
+ * may be edited. `meaning` is the literal answer a learner would type; `acceptedAnswers` grows
+ * as the AI accepts other answers for this usage.
+ */
+export interface VocabUsage {
+  id: string;
+  label: string;
+  meaning: string;
+  acceptedAnswers: string[];
+}
+
 export interface VocabLesson {
   kuId?: string;
   type: "Vocab";
@@ -129,7 +141,9 @@ export interface VocabLesson {
   conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
-  context_examples?: { sentence: string; translation: string; usage?: string }[];
+  context_examples?: { sentence: string; translation: string; usage?: string; usageId?: string }[];
+  usages?: VocabUsage[];
+  usageSetAside?: string[];
   validation?: LessonValidation;
   /** When true, component_kanji must be empty — this word is never taught/queued with its kanji breakdown, regardless of how it's stored. Set by the AI at generation time or curated manually via the admin editor; enforced app-side, not just prompted for. */
   kanaOnly?: boolean;
@@ -204,7 +218,9 @@ export interface GlobalVocabLesson {
   conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
-  context_examples?: { sentence: string; translation: string; usage?: string }[];
+  context_examples?: { sentence: string; translation: string; usage?: string; usageId?: string }[];
+  usages?: VocabUsage[];
+  usageSetAside?: string[];
   kanaOnly?: boolean;
   component_kanji?: {
     kanji: string;
@@ -575,6 +591,8 @@ export interface ReviewFacet {
   /** @deprecated - failure tracking moved to UserQuestionState.consecutiveFailures */
   questionAttempts?: number;
   sequenceStage?: number;
+  /** Vocab meaning card: the usages proven correct at the current SRS stage (cleared when it moves up). */
+  provenUsageIds?: string[];
   data?: any;
   /** Which lesson's sequence this facet belongs to — differs from kuId for
    *  Kanji-Component-* facets, which target the component kanji's own kuId
@@ -587,6 +605,10 @@ export interface ReviewFacet {
 
 export interface ReviewItem {
   facet: ReviewFacet;
+  /** Vocab meaning card: shown as this type instead (an AI question about one usage). */
+  presentAs?: "AI-Generated-Question";
+  usageId?: string;
+  usageLabel?: string;
 }
 
 // This represents the structure of our old db.json

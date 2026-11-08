@@ -90,7 +90,7 @@ export default function PreviewLessonPage() {
       setNotice(
         saved
           ? `Relabelled: ${[...new Set(usages.filter(Boolean))].join(" · ")}`
-          : "Labels unchanged: labelling failed, the lesson has fewer than 2 examples, or its examples changed meanwhile (see backend log).",
+          : "Usages unchanged: building failed or was rejected, the lesson has no examples, or its examples changed meanwhile (see backend log).",
       );
       await load();
     } catch (e) {

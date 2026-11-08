@@ -3,6 +3,7 @@ import { VocabLesson } from "@/types";
 import { FuriganaText } from "@/components/FuriganaText";
 import RevealableText from "@/components/RevealableText";
 import EditableSection from "./EditableSection";
+import VocabUsageList, { hasUsages } from "./VocabUsageList";
 
 interface VocabLessonViewProps {
   lesson: VocabLesson;
@@ -30,26 +31,12 @@ export default function VocabLessonView({
         readOnly={readOnly}
       />
 
-      {/* Definitions Section */}
+      {/* Usages (what the meaning card tests), or the definitions for lessons without them */}
       <div className="bg-shodo-paper-dark p-6 rounded-lg shadow-lg mb-8 border border-shodo-ink/5">
         <h2 className="text-2xl font-semibold mb-4 text-shodo-ink">
-          Definitions
+          {hasUsages(lesson) ? "Meanings" : "Definitions"}
         </h2>
-        <ul className="list-disc list-inside space-y-2">
-          {(
-            lesson.definitions || (lesson.definition ? [lesson.definition] : [])
-          ).map((def, i) => (
-            <li key={i} className="text-lg text-shodo-ink-light">
-              {def}
-            </li>
-          ))}
-          {(!lesson.definitions || lesson.definitions.length === 0) &&
-            !lesson.definition && (
-              <p className="text-shodo-ink-faint italic">
-                No definitions available.
-              </p>
-            )}
-        </ul>
+        <VocabUsageList lesson={lesson} />
       </div>
 
       {/* --- Reading Section --- */}
