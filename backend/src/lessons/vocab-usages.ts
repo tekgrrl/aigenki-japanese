@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { usageKey } from '../pictures/pictures.service';
 import type { VocabLesson, VocabUsage } from '../types';
 
@@ -110,3 +110,24 @@ function dedupe(items: string[]): string[] {
     return true;
   });
 }
+
+/**
+ * Prompt rule 7, enforced: a definition none of whose glosses ended up in a usage (as its
+ * meaning or an accepted answer) is set aside, so it still shows under "Also" rather than
+ * silently disappearing.
+ */
+export function withUncoveredSetAside(built: BuiltUsages, definitions: string[]): BuiltUsages {
+  const covered = new Set(built.usages.flatMap(u => [u.meaning, ...u.acceptedAnswers]).map(a => a.toLowerCase()));
+  const aside = new Set(built.setAside.map(d => d.toLowerCase()));
+  const extra = definitions.filter(d => {
+    const glosses = glossesOf([d]);
+    return glosses.length > 0 && !glosses.some(g => covered.has(g.toLowerCase())) && !aside.has(d.toLowerCase());
+  });
+  return extra.length ? { ...built, setAside: [...built.setAside, ...extra] } : built;
+}
+
+/** Identifies a lesson's examples, so a rejected build isn't retried until they change. */
+export function examplesFingerprint(sentences: string[]): string {
+  return createHash('sha1').update(sentences.join('\n')).digest('hex').slice(0, 16);
+}
+

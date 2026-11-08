@@ -3,7 +3,7 @@ import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, P
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
-import { KnowledgeUnit, Lesson, VocabLesson, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson, UserRoot } from '../types';
+import { KnowledgeUnit, Lesson, VocabLesson, VocabUsage, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson, UserRoot } from '../types';
 import { performance } from 'perf_hooks';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ValidationService } from '../validation/validation.service';
@@ -11,8 +11,8 @@ import { buildVocabLessonMessage, buildVocabCacheContext } from '../prompts/voca
 import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { KanjiService } from '../kanji/kanji.service';
-import { isUsagePicture } from '../pictures/pictures.service';
-import { BuiltUsages, checkBuiltUsages, withUsageIds } from './vocab-usages';
+import { isUsagePicture, subjectOf, usageKey } from '../pictures/pictures.service';
+import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAside, withUsageIds } from './vocab-usages';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -51,6 +51,13 @@ export function splitComponentKanji<T extends { kanji?: string }>(
 
 /** Start Learning serves at most this many waiting items per session; the rest come next time. */
 const WAITING_PER_SESSION = 10;
+
+/** buildVocabUsages / saveBuiltUsages: one label per example, and the usages if they were written. */
+export type BuildUsagesResult = {
+  usages: (string | null)[];
+  saved: boolean;
+  built?: { usages: VocabUsage[]; usageSetAside: string[] };
+};
 
 @Injectable()
 export class LessonsService {
@@ -283,12 +290,14 @@ export class LessonsService {
   /**
    * Builds a Vocab lesson's usages (lazy backfill, and after generation): each usage gets a
    * stable id, a label, the literal answer and accepted answers, and each example points at its
-   * usage. Examples aren't rewritten. Existing labels are kept verbatim, because pictures match
-   * usages by label. A no-op if usages already exist, unless `force` (admin "Relabel usages"),
-   * which regroups from scratch and keeps the ids of usages whose label survives.
-   * Returns one label per example (the Start Learning slideshow uses them).
+   * usage. Examples aren't rewritten. A label that has a picture is kept verbatim, because
+   * pictures match usages by label; every other label may be merged or renamed. A no-op if
+   * usages already exist, unless `force` (admin "Relabel usages"), which regroups from scratch
+   * (pictured labels still kept) and keeps the ids of usages whose label survives. A lazy build
+   * isn't retried after a rejection until the examples change.
+   * Returns one label per example (the Start Learning slideshow uses them) and what was built.
    */
-  async buildVocabUsages(kuId: string, force = false): Promise<{ usages: (string | null)[]; saved: boolean }> {
+  async buildVocabUsages(kuId: string, force = false): Promise<BuildUsagesResult> {
     const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
     const doc = await lessonRef.get();
     if (!doc.exists) throw new NotFoundException('Lesson not found');
@@ -299,8 +308,10 @@ export class LessonsService {
     const current = examples.map(e => e.usage ?? null);
     const built = (lesson.usages?.length ?? 0) > 0 && examples.every(e => e.usageId);
     if (examples.length === 0 || (!force && built)) return { usages: current, saved: false };
+    const rejected = lesson.usageBuildRejected === examplesFingerprint(examples.map(e => e.sentence));
+    if (!force && rejected) return { usages: current, saved: false };
 
-    const fixedLabels = force ? examples.map(() => null) : current;
+    const fixedLabels = await this.pictureFixedLabels(kuId, current);
     const raw = await this.geminiService.buildExampleUsages(
       lesson.vocab,
       lesson.definitions ?? [],
@@ -311,6 +322,18 @@ export class LessonsService {
     );
     if (!raw) return { usages: current, saved: false };
     return this.saveBuiltUsages(kuId, raw, examples.map(e => e.sentence), fixedLabels);
+  }
+
+  /** Per example: its label if a (non-rejected) picture is attached to that label, else null. */
+  private async pictureFixedLabels(kuId: string, labels: (string | null)[]): Promise<(string | null)[]> {
+    const pics = await this.db.collection(PICTURES_COLLECTION).where('kuId', '==', kuId).get();
+    const pictured = new Set(
+      pics.docs
+        .map(d => d.data())
+        .filter(p => p.status !== 'rejected' && subjectOf(p).kind === 'ku-usage')
+        .map(p => usageKey(subjectOf(p).usage)),
+    );
+    return labels.map(l => (l && pictured.has(usageKey(l)) ? l : null));
   }
 
   /**
@@ -324,7 +347,7 @@ export class LessonsService {
     raw: unknown,
     sentences: string[],
     fixedLabels: (string | null)[],
-  ): Promise<{ usages: (string | null)[]; saved: boolean }> {
+  ): Promise<BuildUsagesResult> {
     const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
     const lesson = (await lessonRef.get()).data() as VocabLesson | undefined;
     const current = (lesson?.context_examples ?? []).map(e => e.usage ?? null);
@@ -332,12 +355,14 @@ export class LessonsService {
 
     let checked: BuiltUsages;
     try {
-      checked = checkBuiltUsages(raw, sentences.length, fixedLabels);
+      checked = withUncoveredSetAside(checkBuiltUsages(raw, sentences.length, fixedLabels), lesson.definitions ?? []);
     } catch (e) {
       this.logger.warn(`Usages for ${lesson.vocab} (${kuId}) rejected: ${(e as Error).message}`);
+      // Remembered so lazy builds don't call Gemini again for the same examples.
+      await lessonRef.update({ usageBuildRejected: examplesFingerprint(sentences) }).catch(() => undefined);
       return { usages: current, saved: false };
     }
-    const usages = withUsageIds(checked.usages, lesson.usages);
+    let usages: VocabUsage[] = [];
 
     // A regenerate or admin edit may have replaced the examples (or their labels) since the
     // prompt was given them. Only write if they're still the same.
@@ -347,9 +372,12 @@ export class LessonsService {
     const written = await this.db.runTransaction(async tx => {
       const fresh = (await tx.get(lessonRef)).data() as VocabLesson | undefined;
       if (!fresh || !unchanged(fresh.context_examples)) return false;
+      // Ids from what's stored now, so a concurrent build's ids are kept, not replaced.
+      usages = withUsageIds(checked.usages, fresh.usages);
       tx.update(lessonRef, {
         usages,
         usageSetAside: checked.setAside,
+        usageBuildRejected: FieldValue.delete(),
         context_examples: (fresh.context_examples ?? []).map((e, i) => {
           const u = usages[checked.exampleUsages[i]];
           return { ...e, usage: u.label, usageId: u.id };
@@ -362,7 +390,11 @@ export class LessonsService {
       return { usages: current, saved: false };
     }
     this.logger.log(`Built ${usages.length} usages for ${lesson.vocab} (${kuId}): ${usages.map(u => `${u.label} = ${u.meaning}`).join(' | ')}`);
-    return { usages: checked.exampleUsages.map(i => usages[i].label), saved: true };
+    return {
+      usages: checked.exampleUsages.map(i => usages[i].label),
+      saved: true,
+      built: { usages, usageSetAside: checked.setAside },
+    };
   }
 
   /**

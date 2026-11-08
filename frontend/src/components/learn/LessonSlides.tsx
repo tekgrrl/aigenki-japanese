@@ -106,29 +106,38 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
 }
 
 /**
- * Older Vocab lessons have unlabelled examples. Ask the backend to label them once (it
- * saves the labels on the lesson) so the slideshow can show one example per usage.
- * Best-effort: on any failure the slideshow just shows the first example.
+ * A Vocab lesson whose usages haven't been built yet (an older lesson, or a build after
+ * generation that failed): ask the backend to build them once (it saves them on the lesson),
+ * so the slideshow shows one example per usage and the Meanings list. Best-effort: on any
+ * failure the slideshow shows the definitions and the first example.
  */
 const LABEL_TIMEOUT_MS = 30_000;
 
 async function ensureUsageLabels(vl: VocabLesson, kuId: string) {
   const examples = vl.context_examples ?? [];
-  if (examples.length < 2 || examples.every((e) => e.usage)) return;
+  const built = (vl.usages?.length ?? 0) > 0 && examples.every((e) => e.usageId);
+  if (examples.length === 0 || built) return;
   try {
-    // Own timeout, not the lesson fetch's: a slow labelling call must never fail a lesson
-    // that has already loaded.
+    // Own timeout, not the lesson fetch's: a slow build must never fail a lesson that has
+    // already loaded.
     const res = await apiFetch(`/api/lessons/${kuId}/label-usages`, {
       method: "POST",
       signal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
     });
     if (!res.ok) return;
-    const { usages } = (await res.json()) as { usages: (string | null)[] };
-    if (Array.isArray(usages) && usages.length === examples.length) {
-      vl.context_examples = examples.map((e, i) => ({ ...e, usage: usages[i] ?? undefined }));
+    const body = (await res.json()) as {
+      usages: (string | null)[];
+      built?: { usages: NonNullable<VocabLesson["usages"]>; usageSetAside: string[] };
+    };
+    if (Array.isArray(body.usages) && body.usages.length === examples.length) {
+      vl.context_examples = examples.map((e, i) => ({ ...e, usage: body.usages[i] ?? undefined }));
+    }
+    if (body.built) {
+      vl.usages = body.built.usages;
+      vl.usageSetAside = body.built.usageSetAside;
     }
   } catch (e) {
-    console.warn(`[lesson-slides] usage labelling failed for ${vl.vocab}`, e);
+    console.warn(`[lesson-slides] building usages failed for ${vl.vocab}`, e);
   }
 }
 

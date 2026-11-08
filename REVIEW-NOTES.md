@@ -70,4 +70,9 @@ if a change actually breaks the stated intent. New decisions get added here as t
   card at its stage. For a one-usage word any correct answer promotes, as before.
 - **Existing Vocab `AI-Generated-Question` facets** on current accounts keep their own SRS. Accounts are
   being scrapped or migrated by script, so there's no data migration.
+- **Regenerating a Vocab lesson gives its usages new ids** (`set()` replaces the doc). Admin-only and
+  rare, and a regenerated lesson has new examples anyway; cards only lose that stage's proven usages
+  and questions get regenerated. Accepted.
+- **The Meanings list shows each usage's meaning and label, not its accepted answers** (the owner's
+  choice); accepted glosses still pass in reviews.
 

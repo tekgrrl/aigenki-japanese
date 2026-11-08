@@ -5,7 +5,9 @@
  *        --dry-run --out=<file.json>    call Gemini once per lesson, print the usages, save the
  *                                       results to <file.json>
  *        --from-logs --out=<file.json>  the same, but taken from the api-logs of an earlier run
- *                                       (no Gemini calls)
+ *                                       (no Gemini calls). CAUTION: it pairs each logged response
+ *                                       with the lesson's CURRENT examples; only use it if no
+ *                                       examples were edited or regenerated since that run.
  *   2. Apply a reviewed file:
  *        --apply=<file.json>            write it (no Gemini calls); a lesson whose examples have
  *                                       changed since is skipped

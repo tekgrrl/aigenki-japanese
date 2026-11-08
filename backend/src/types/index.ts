@@ -203,6 +203,8 @@ export interface VocabLesson {
   usages?: VocabUsage[];
   /** Definitions no example shows, so they aren't usages (shown to the admin). */
   usageSetAside?: string[];
+  /** Fingerprint of the examples whose usage build was rejected; lazy builds skip them until the examples change. */
+  usageBuildRejected?: string;
   validation?: LessonValidation;
   /** When true, component_kanji must be empty — this word is never taught/queued with its kanji breakdown, regardless of how it's stored. Set by the AI at generation time or curated manually via the admin editor; enforced app-side, not just prompted for. */
   kanaOnly?: boolean;
