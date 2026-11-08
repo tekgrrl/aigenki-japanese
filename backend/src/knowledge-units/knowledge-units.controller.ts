@@ -50,6 +50,25 @@ export class KnowledgeUnitsController {
         return this.knowledgeUnitsService.search(q.trim(), type, jlptLevel, excludeType);
     }
 
+    /** Admin KU list: search and/or filter the whole corpus, one page at a time, with the total. */
+    @Get('browse')
+    @UseGuards(AdminGuard)
+    async browse(
+        @Query('q') q?: string,
+        @Query('type') type?: string,
+        @Query('jlptLevel') jlptLevel?: string,
+        @Query('page') page?: string,
+        @Query('pageSize') pageSize?: string,
+    ) {
+        return this.knowledgeUnitsService.browse({
+            q,
+            type: type || undefined,
+            jlptLevel: jlptLevel || undefined,
+            page: page ? Number(page) || 1 : 1,
+            pageSize: pageSize ? Number(pageSize) || 50 : 50,
+        });
+    }
+
     @Get(':id')
     async findOne(@UserId() uid: string, @Param('id') id: string) {
         const ku = await this.knowledgeUnitsService.findOneById(id);

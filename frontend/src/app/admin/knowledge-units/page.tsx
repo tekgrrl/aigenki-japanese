@@ -9,13 +9,18 @@ import { apiFetch } from "@/lib/api-client";
 const TYPES = ["Vocab", "Kanji", "Grammar"] as const;
 const LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
 
+const PAGE_SIZE = 50;
+
+/** A KU as the admin list gets it: plus whether an approved picture is attached. */
+type ListedKu = KnowledgeUnit & { hasPicture?: boolean };
+
 const TYPE_COLOURS: Record<string, string> = {
   Vocab: "bg-blue-100 text-blue-800",
   Kanji: "bg-purple-100 text-purple-800",
   Grammar: "bg-green-100 text-green-800",
 };
 
-function KuRow({ ku, onEdit, onDelete }: { ku: KnowledgeUnit; onEdit: () => void; onDelete: () => void }) {
+function KuRow({ ku, onEdit, onDelete }: { ku: ListedKu; onEdit: () => void; onDelete: () => void }) {
   const data = ku.data as any;
   const level = data?.jlptLevel as string | undefined;
   const wk = data?.wanikaniLevel as number | undefined;
@@ -49,6 +54,18 @@ function KuRow({ ku, onEdit, onDelete }: { ku: KnowledgeUnit; onEdit: () => void
       {wk && (
         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 shrink-0">
           WK{wk}
+        </span>
+      )}
+
+      {ku.hasPicture && (
+        <span title="Has an approved picture" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 shrink-0">
+          Picture
+        </span>
+      )}
+
+      {ku.type === "Grammar" && data?.scenarioReady === true && (
+        <span title="Marked scenario-ready: starts a Flash card chain at SRS stage 3" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 shrink-0">
+          Scenario
         </span>
       )}
 
@@ -87,7 +104,11 @@ function KuRow({ ku, onEdit, onDelete }: { ku: KnowledgeUnit; onEdit: () => void
 }
 
 export default function AdminKnowledgeUnitsPage() {
-  const [kus, setKus] = useState<KnowledgeUnit[]>([]);
+  const [kus, setKus] = useState<ListedKu[]>([]);
+  // Paging: the server returns one page of the whole matching set, with its total.
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const latestRequest = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -156,34 +177,38 @@ export default function AdminKnowledgeUnitsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const hasCriteria = !!(searchQuery.trim() || filterType || filterLevel);
+
   const fetchKus = useCallback(async () => {
+    const q = searchQuery.trim();
+    // No search and no filters: an unfiltered list of the whole corpus is no use, so don't fetch.
+    if (!q && !filterType && !filterLevel) {
+      setKus([]);
+      setTotal(null);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
+    const requestId = ++latestRequest.current;
     try {
-      const q = searchQuery.trim();
-      let results: KnowledgeUnit[];
-      if (q) {
-        const searchParams = new URLSearchParams({ q });
-        if (filterType) searchParams.set("type", filterType);
-        if (filterLevel) searchParams.set("jlptLevel", filterLevel);
-        const res = await apiFetch(`/api/knowledge-units/search?${searchParams}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        results = await res.json();
-      } else {
-        const params = new URLSearchParams();
-        if (filterType) params.set("type", filterType);
-        if (filterLevel) params.set("jlptLevel", filterLevel);
-        const res = await apiFetch(`/api/knowledge-units/get-all?${params}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        results = await res.json();
-      }
-      setKus(results);
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (q) params.set("q", q);
+      if (filterType) params.set("type", filterType);
+      if (filterLevel) params.set("jlptLevel", filterLevel);
+      const res = await apiFetch(`/api/knowledge-units/browse?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { items: ListedKu[]; total: number; page: number };
+      if (requestId !== latestRequest.current) return; // a newer search or page has been asked for
+      setKus(body.items);
+      setTotal(body.total);
+      if (body.page !== page) setPage(body.page);
     } catch (e) {
-      setError((e as Error).message);
+      if (requestId === latestRequest.current) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) setLoading(false);
     }
-  }, [filterType, filterLevel, searchQuery]);
+  }, [filterType, filterLevel, searchQuery, page]);
 
   useEffect(() => {
     if (!filtersHydrated) return;
@@ -200,6 +225,7 @@ export default function AdminKnowledgeUnitsPage() {
       return;
     }
     setKus(prev => prev.filter(k => k.id !== ku.id));
+    setTotal(prev => (prev === null ? prev : Math.max(0, prev - 1)));
   };
 
   const handleSave = async (id: string, updates: Partial<KnowledgeUnit>) => {
@@ -237,24 +263,24 @@ export default function AdminKnowledgeUnitsPage() {
         <input
           type="text"
           value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
+          onChange={e => { setSearchQuery(e.target.value); setPage(1); }}
           placeholder="Search by content…"
           className="px-3 py-1.5 text-sm border border-shodo-mist rounded bg-white dark:bg-shodo-paper-warm text-shodo-ink placeholder-shodo-ink-light focus:outline-none focus:border-shodo-indigo w-64"
         />
 
-        <select value={filterType} onChange={e => setFilterType(e.target.value)} className={selectClass}>
+        <select value={filterType} onChange={e => { setFilterType(e.target.value); setPage(1); }} className={selectClass}>
           <option value="">All types</option>
           {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 
-        <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className={selectClass}>
+        <select value={filterLevel} onChange={e => { setFilterLevel(e.target.value); setPage(1); }} className={selectClass}>
           <option value="">All levels</option>
           {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
 
         {(filterType || filterLevel || searchQuery) && (
           <button
-            onClick={() => { setFilterType(""); setFilterLevel(""); setSearchQuery(""); }}
+            onClick={() => { setFilterType(""); setFilterLevel(""); setSearchQuery(""); setPage(1); }}
             className="text-xs text-shodo-ink-light hover:text-shodo-stamp-red transition-colors"
           >
             Clear
@@ -262,7 +288,7 @@ export default function AdminKnowledgeUnitsPage() {
         )}
 
         <span className="ml-auto text-xs text-shodo-ink-light">
-          {loading ? "Loading…" : `${kus.length} results`}
+          {loading ? "Loading…" : total === null ? "" : `${total} result${total === 1 ? "" : "s"}`}
         </span>
       </div>
 
@@ -272,7 +298,13 @@ export default function AdminKnowledgeUnitsPage() {
           <div className="px-4 py-3 text-sm text-red-700 bg-red-50">{error}</div>
         )}
 
-        {!loading && !error && kus.length === 0 && (
+        {!loading && !error && !hasCriteria && (
+          <div className="px-4 py-8 text-center text-shodo-ink-light text-sm">
+            Search, or choose a type or level, to browse knowledge units.
+          </div>
+        )}
+
+        {!loading && !error && hasCriteria && kus.length === 0 && (
           <div className="px-4 py-8 text-center text-shodo-ink-light text-sm">
             No results — try adjusting the filters.
           </div>
@@ -283,12 +315,56 @@ export default function AdminKnowledgeUnitsPage() {
         ))}
       </div>
 
+      {total !== null && total > PAGE_SIZE && (
+        <Pager page={page} total={total} pageSize={PAGE_SIZE} onPage={setPage} />
+      )}
+
       <EditKnowledgeUnitModal
         isOpen={editTarget !== null}
         knowledgeUnit={editTarget}
         onClose={() => setEditTarget(null)}
         onSave={handleSave}
       />
+    </div>
+  );
+}
+
+
+/** Prev / page x of y / Next, with the range shown. */
+function Pager({ page, total, pageSize, onPage }: { page: number; total: number; pageSize: number; onPage: (p: number) => void }) {
+  const last = Math.max(1, Math.ceil(total / pageSize));
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  const button = "px-3 py-1 text-xs font-semibold rounded border border-shodo-ink/20 text-shodo-ink disabled:opacity-40";
+  return (
+    <div className="flex items-center justify-between mt-3 text-xs text-shodo-ink-light">
+      <span>
+        {from}–{to} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button type="button" className={button} disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          Prev
+        </button>
+        <span>
+          Page{" "}
+          <input
+            type="number"
+            min={1}
+            max={last}
+            value={page}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isInteger(n) && n >= 1 && n <= last) onPage(n);
+            }}
+            className="w-14 px-1 py-0.5 border border-shodo-mist rounded bg-white dark:bg-shodo-paper-warm text-shodo-ink text-center"
+            aria-label="Page number"
+          />{" "}
+          of {last}
+        </span>
+        <button type="button" className={button} disabled={page >= last} onClick={() => onPage(page + 1)}>
+          Next
+        </button>
+      </div>
     </div>
   );
 }
