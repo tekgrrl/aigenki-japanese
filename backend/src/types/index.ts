@@ -174,6 +174,18 @@ export interface LessonValidation {
   violations?: Array<{ segment: string; detectedLevel: string; type: 'vocab' | 'grammar' }>;
 }
 
+/**
+ * One usage (sense) of a Vocab word. `id` is stable once written; `label` is display text and
+ * may be edited. `meaning` is the literal answer a learner would type; `acceptedAnswers` grows
+ * as the AI accepts other answers for this usage.
+ */
+export interface VocabUsage {
+  id: string;
+  label: string;
+  meaning: string;
+  acceptedAnswers: string[];
+}
+
 export interface VocabLesson {
   kuId?: string;
   type: "Vocab";
@@ -185,8 +197,12 @@ export interface VocabLesson {
   conjugationType?: 'godan' | 'ichidan' | 'irregular';
   meaning_explanation: string;
   reading_explanation: string;
-  /** `usage`: short label for the usage/sense the example shows (same label = same usage). Absent on older lessons until labelled. */
-  context_examples?: { sentence: string; translation: string; usage?: string }[];
+  /** `usage`: short label for the usage/sense the example shows (same label = same usage). Absent on older lessons until labelled. `usageId`: the VocabUsage it shows. */
+  context_examples?: { sentence: string; translation: string; usage?: string; usageId?: string }[];
+  /** The word's usages, built from its examples and definitions. Absent until built: see usagesOf(). */
+  usages?: VocabUsage[];
+  /** Definitions no example shows, so they aren't usages (shown to the admin). */
+  usageSetAside?: string[];
   validation?: LessonValidation;
   /** When true, component_kanji must be empty — this word is never taught/queued with its kanji breakdown, regardless of how it's stored. Set by the AI at generation time or curated manually via the admin editor; enforced app-side, not just prompted for. */
   kanaOnly?: boolean;

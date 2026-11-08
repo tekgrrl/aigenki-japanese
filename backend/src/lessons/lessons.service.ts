@@ -12,6 +12,7 @@ import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { KanjiService } from '../kanji/kanji.service';
 import { isUsagePicture } from '../pictures/pictures.service';
+import { BuiltUsages, checkBuiltUsages, withUsageIds } from './vocab-usages';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -222,6 +223,12 @@ export class LessonsService {
     // --- SAVE TO 'lessons' collection ---
     await lessonDbRef.set(lessonJson);
 
+    // Build the word's usages straight away. Not for batch runs: their BulkWriter rewrites the
+    // lesson (examples included) after this returns, which would drop the usage ids.
+    if (ku.type === 'Vocab' && !cachedContentName) {
+      void this.buildVocabUsages(kuId).catch(e => this.logger.error(`buildVocabUsages failed for ${kuId}`, e));
+    }
+
     void this.validateAndFlagLesson(uid, kuId, ku.type, ku.content, lessonJson, jlptLevel);
 
     // --- UPDATE KU WITH LESSON DATA ---
@@ -274,50 +281,88 @@ export class LessonsService {
   }
 
   /**
-   * Lazy backfill: label a Vocab lesson's existing context examples by usage so the
-   * Start Learning slideshow can show one example per distinct usage. Examples are not
-   * rewritten — only a `usage` field is added. Runs at most once per lesson (labels are
-   * saved on the global lesson); a no-op if already labelled or fewer than 2 examples.
+   * Builds a Vocab lesson's usages (lazy backfill, and after generation): each usage gets a
+   * stable id, a label, the literal answer and accepted answers, and each example points at its
+   * usage. Examples aren't rewritten. Existing labels are kept verbatim, because pictures match
+   * usages by label. A no-op if usages already exist, unless `force` (admin "Relabel usages"),
+   * which regroups from scratch and keeps the ids of usages whose label survives.
+   * Returns one label per example (the Start Learning slideshow uses them).
    */
-  /** `force` relabels even an already-labelled lesson (admin "Relabel usages"). */
-  async labelVocabUsages(kuId: string, force = false): Promise<{ usages: (string | null)[]; saved: boolean }> {
+  async buildVocabUsages(kuId: string, force = false): Promise<{ usages: (string | null)[]; saved: boolean }> {
     const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
     const doc = await lessonRef.get();
     if (!doc.exists) throw new NotFoundException('Lesson not found');
     const lesson = doc.data() as VocabLesson;
     const examples = lesson.context_examples ?? [];
-    if (lesson.type !== 'Vocab') throw new BadRequestException('Only Vocab lessons have usage labels');
+    if (lesson.type !== 'Vocab') throw new BadRequestException('Only Vocab lessons have usages');
 
     const current = examples.map(e => e.usage ?? null);
-    if (examples.length < 2 || (!force && current.every(u => u))) return { usages: current, saved: false };
+    const built = (lesson.usages?.length ?? 0) > 0 && examples.every(e => e.usageId);
+    if (examples.length === 0 || (!force && built)) return { usages: current, saved: false };
 
-    const usages = await this.geminiService.labelExampleUsages(
+    const fixedLabels = force ? examples.map(() => null) : current;
+    const raw = await this.geminiService.buildExampleUsages(
       lesson.vocab,
       lesson.definitions ?? [],
       examples.map(e => ({ sentence: e.sentence, translation: e.translation })),
+      fixedLabels,
       kuId,
       lesson.partOfSpeech,
     );
-    if (!usages) return { usages: current, saved: false };
+    if (!raw) return { usages: current, saved: false };
+    return this.saveBuiltUsages(kuId, raw, examples.map(e => e.sentence), fixedLabels);
+  }
 
-    // The Gemini call takes seconds; a regenerate or admin edit may have replaced the
-    // examples meanwhile. Only write if they're still the ones that were labelled.
-    const sameSentences = (a: { sentence: string }[] = [], b: { sentence: string }[] = []) =>
-      a.length === b.length && a.every((e, i) => e.sentence === b[i].sentence);
+  /**
+   * Checks the usage-building prompt's output and writes it: usage ids (kept for labels that
+   * survive), the usages, and each example's usage. `sentences` and `fixedLabels` are what the
+   * prompt was given; nothing is written if the lesson's examples have changed since. Used
+   * straight after the Gemini call, and by scripts/build-usages.ts to apply a reviewed dry run.
+   */
+  async saveBuiltUsages(
+    kuId: string,
+    raw: unknown,
+    sentences: string[],
+    fixedLabels: (string | null)[],
+  ): Promise<{ usages: (string | null)[]; saved: boolean }> {
+    const lessonRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
+    const lesson = (await lessonRef.get()).data() as VocabLesson | undefined;
+    const current = (lesson?.context_examples ?? []).map(e => e.usage ?? null);
+    if (!lesson) return { usages: current, saved: false };
+
+    let checked: BuiltUsages;
+    try {
+      checked = checkBuiltUsages(raw, sentences.length, fixedLabels);
+    } catch (e) {
+      this.logger.warn(`Usages for ${lesson.vocab} (${kuId}) rejected: ${(e as Error).message}`);
+      return { usages: current, saved: false };
+    }
+    const usages = withUsageIds(checked.usages, lesson.usages);
+
+    // A regenerate or admin edit may have replaced the examples (or their labels) since the
+    // prompt was given them. Only write if they're still the same.
+    const unchanged = (fresh: VocabLesson['context_examples'] = []) =>
+      fresh.length === sentences.length &&
+      fresh.every((e, i) => e.sentence === sentences[i] && (!fixedLabels[i] || e.usage === fixedLabels[i]));
     const written = await this.db.runTransaction(async tx => {
       const fresh = (await tx.get(lessonRef)).data() as VocabLesson | undefined;
-      if (!fresh || !sameSentences(fresh.context_examples, examples)) return false;
+      if (!fresh || !unchanged(fresh.context_examples)) return false;
       tx.update(lessonRef, {
-        context_examples: (fresh.context_examples ?? []).map((e, i) => ({ ...e, usage: usages[i] })),
+        usages,
+        usageSetAside: checked.setAside,
+        context_examples: (fresh.context_examples ?? []).map((e, i) => {
+          const u = usages[checked.exampleUsages[i]];
+          return { ...e, usage: u.label, usageId: u.id };
+        }),
       });
       return true;
     });
     if (!written) {
-      this.logger.warn(`Examples for ${lesson.vocab} (${kuId}) changed during labelling; labels not saved`);
+      this.logger.warn(`Examples for ${lesson.vocab} (${kuId}) changed since its usages were built; not saved`);
       return { usages: current, saved: false };
     }
-    this.logger.log(`Labelled ${usages.length} example usages for ${lesson.vocab} (${kuId}): ${[...new Set(usages)].join(' | ')}`);
-    return { usages, saved: true };
+    this.logger.log(`Built ${usages.length} usages for ${lesson.vocab} (${kuId}): ${usages.map(u => `${u.label} = ${u.meaning}`).join(' | ')}`);
+    return { usages: checked.exampleUsages.map(i => usages[i].label), saved: true };
   }
 
   /**

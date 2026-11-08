@@ -1,6 +1,7 @@
 "use client";
 
 import LessonNotes from "@/components/lessons/LessonNotes";
+import VocabUsageList, { hasUsages } from "@/components/lessons/VocabUsageList";
 import { useEffect, useRef, useCallback } from "react";
 import { VocabLesson, KanjiLesson, GrammarLesson, Lesson } from "@/types";
 import { apiFetch } from "@/lib/api-client";
@@ -333,19 +334,11 @@ function VocabMeaningSlide({ loaded }: { loaded: LoadedItem }) {
 
 function VocabDefinitionsSlide({ loaded }: { loaded: LoadedItem }) {
   const vl = loaded.lesson as VocabLesson;
-  const defs = vl.definitions?.length ? vl.definitions : vl.definition ? [vl.definition] : [];
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto">
-      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Definitions</span>
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">{hasUsages(vl) ? "Meanings" : "Definitions"}</span>
       <div className="text-4xl font-bold text-shodo-ink">{loaded.item.content}</div>
-      <ul className="space-y-3">
-        {defs.map((d, i) => (
-          <li key={i} className="flex items-start gap-3 text-lg text-shodo-ink-light">
-            <span className="text-shodo-ink-faint text-sm mt-1 w-5 shrink-0">{i + 1}.</span>
-            {d}
-          </li>
-        ))}
-      </ul>
+      <VocabUsageList lesson={vl} />
     </div>
   );
 }
