@@ -219,7 +219,7 @@ export default function LearnItemPage() {
         "Content-to-Definition",
         ...(hasReadingFacet ? ["Content-to-Reading"] : []),
         ...(hasAudio ? ["audio"] : []),
-        "AI-Generated-Question",
+        // No AI-Generated-Question: for Vocab it's a form of the meaning card, not a card of its own.
       ].filter(k => !existingFacetTypes.has(k));
     }
     if (lesson.type === "Kanji") {
@@ -486,7 +486,6 @@ export default function LearnItemPage() {
     const newVocabKeys = lesson?.type === "Vocab" ? (["Definition-to-Content", "Content-to-Definition",
       ...(hasReadingFacet ? ["Content-to-Reading"] : []),
       ...(hasAudio ? ["audio"] : []),
-      "AI-Generated-Question",
     ] as string[]).filter(k => !existingFacetTypes.has(k)) : [];
 
     const newKanjiKeys = lesson?.type === "Kanji" ? (["Kanji-Component-Meaning", "Kanji-Component-Reading"] as string[])
@@ -596,17 +595,6 @@ export default function LearnItemPage() {
                     onChange={() => handleCheckboxChange("audio")}
                   />
                   <span className="ml-3 text-lg text-gray-900 dark:text-white">Audio Comprehension</span>
-                </label>
-              )}
-              {!existingFacetTypes.has("AI-Generated-Question") && (
-                <label className="flex items-center p-4 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                    checked={!!selectedFacets["AI-Generated-Question"]}
-                    onChange={() => handleCheckboxChange("AI-Generated-Question")}
-                  />
-                  <span className="ml-3 text-lg text-gray-900 dark:text-white">General usage patterns</span>
                 </label>
               )}
 

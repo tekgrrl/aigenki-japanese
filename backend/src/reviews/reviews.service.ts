@@ -9,6 +9,7 @@ import { CollectionReference, FieldValue, Firestore, Query, Timestamp } from 'fi
 import {
     FIRESTORE_CONNECTION,
     LESSONS_COLLECTION,
+    QUESTIONS_COLLECTION,
     REVIEW_FACETS_COLLECTION,
     USER_STATS_COLLECTION,
 } from '../firebase/firebase.module';
@@ -26,7 +27,7 @@ import { KanjiService } from '../kanji/kanji.service';
 import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
 import { buildAnswerEvaluatorPrompt, buildMeaningEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { DEFAULT_USAGE_ID, usagesOf } from '../lessons/vocab-usages';
-import { chooseMeaningForm, matchUsageLocally, meaningOutcome, MeaningOutcome, normaliseAnswer } from './meaning-card';
+import { chooseMeaningForm, matchUsageLocally, meaningOutcome, MeaningOutcome, normaliseAnswer, stripTrailingPunctuation } from './meaning-card';
 import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
 
 /** A Grammar KU whose facet reaches this SRS stage gets its scenario chain (the user's rule, 2026-11-04; tunable). */
@@ -120,14 +121,18 @@ export class ReviewsService {
 
             const usageResult = meaning ? { provenUsageIds: meaning.proven, totalUsages: meaning.usageIds.length, outcome: meaning.outcome } : {};
             if (meaning?.outcome === 'free-fail') {
-                // Wrong while searching for another usage: no SRS effect at all.
-                this.logger.log(`SRS Update [${facetId}]: FAIL ignored (usages already proven at stage ${currentSrsStage})`);
+                // Wrong while searching for another usage: the stage and the proven usages are
+                // unchanged, but the card waits the stage's normal interval, as a hold does, so it
+                // doesn't come straight back every session.
+                const freeFailNext = new Date(Date.now() + this.INTERVALS[currentSrsStage] * 60 * 60 * 1000);
+                transaction.update(facetRef, { nextReviewAt: freeFailNext, lastReviewAt: new Date() });
+                this.logger.log(`SRS Update [${facetId}]: FAIL not counted (usages already proven at stage ${currentSrsStage}); due again at the stage interval`);
                 return {
                     success: true,
                     facetId,
                     prevStage: currentSrsStage,
                     newStage: currentSrsStage,
-                    nextReview: facetData.nextReviewAt,
+                    nextReview: freeFailNext,
                     kuId: facetData.source?.id ?? facetData.kuId,
                     targetKuId: facetData.kuId,
                     facetType: facetData.facetType,
@@ -370,14 +375,16 @@ export class ReviewsService {
         facetId?: string,
     ) {
         const out = await this.evaluateAnswerCore(uid, userAnswer, expectedAnswers, question, topic, questionId, kuId, facetType, facetId);
-        // A meaning card shown as an AI question: the answer proves the question's usage.
-        const usageId = 'usageId' in out && out.usageId
-            ? out.usageId
-            : facetType === 'AI-Generated-Question' && questionId
-                ? ((await this.db.collection('questions').doc(questionId).get()).data()?.usageId as string | undefined)
-                : undefined;
+        // Only meaning cards (bare word, or shown as an AI question) have a usage record to preview.
+        if (facetType !== 'Content-to-Definition' && facetType !== 'AI-Generated-Question') return out;
+        // A meaning card shown as an AI question proves the question's usage. Returned, so the
+        // SRS update credits the same usage the preview used.
+        const questionUsageId = facetType === 'AI-Generated-Question' && questionId
+            ? ((await this.db.collection(QUESTIONS_COLLECTION).doc(questionId).get()).data()?.usageId as string | undefined)
+            : undefined;
+        const usageId = 'usageId' in out && out.usageId ? out.usageId : questionUsageId;
         const usagePreview = await this.meaningPreview(uid, facetId, out.result === 'pass' ? 'pass' : 'fail', usageId);
-        return { ...out, ...(usagePreview ? { usagePreview } : {}) };
+        return { ...out, ...(questionUsageId ? { usageId: questionUsageId } : {}), ...(usagePreview ? { usagePreview } : {}) };
     }
 
     /**
@@ -496,7 +503,7 @@ export class ReviewsService {
 
         const usage = evalResult.result === 'pass' ? usages.find(u => u.id === evalResult.usageId) : undefined;
         let addedAlternative: string | undefined;
-        const answer = userAnswer.trim().replace(/[。、！？,.!?\s]+$/u, '').trim();
+        const answer = stripTrailingPunctuation(userAnswer); // stored as typed, case kept
         // A forgiven misspelling passes, but is never stored: it would then pass locally for everyone.
         if (usage && answer && usage.id !== DEFAULT_USAGE_ID && !evalResult.misspelled) {
             addedAlternative = await this.addUsageAnswer(kuId, usage.id, answer);
@@ -746,7 +753,8 @@ export class ReviewsService {
         const usagesByKu = new Map<string, VocabUsage[]>();
         docs.forEach(d => {
             const lesson = d.data() as Lesson | undefined;
-            if (lesson?.type === 'Vocab') usagesByKu.set(d.id, usagesOf(lesson));
+            // Only built usages: a lesson still on its synthetic 'default' usage gets the bare word.
+            if (lesson?.type === 'Vocab' && (lesson.usages?.length ?? 0) > 0) usagesByKu.set(d.id, lesson.usages!);
         });
         return items.map(item => {
             const usages = item.facet.facetType === 'Content-to-Definition' ? usagesByKu.get(item.facet.kuId) : undefined;

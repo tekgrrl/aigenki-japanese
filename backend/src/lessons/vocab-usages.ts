@@ -83,7 +83,8 @@ export function checkBuiltUsages(raw: unknown, exampleCount: number, fixedLabels
   r.exampleUsages.forEach((idx, i) => {
     if (!Number.isInteger(idx) || idx < 0 || idx >= usages.length) throw new Error(`Example ${i + 1} has a bad usage index ${idx}`);
     const fixed = fixedLabels[i];
-    if (fixed && usages[idx].label !== fixed.trim()) {
+    // Compared the way pictures match labels (usageKey), so "Dark" and "dark" are one fixed label.
+    if (fixed && usageKey(usages[idx].label) !== usageKey(fixed)) {
       throw new Error(`Example ${i + 1}'s fixed label "${fixed}" became "${usages[idx].label}"`);
     }
   });
@@ -95,10 +96,25 @@ export function checkBuiltUsages(raw: unknown, exampleCount: number, fixedLabels
   return { usages, exampleUsages: r.exampleUsages, setAside };
 }
 
-/** Gives each built usage an id, keeping the id of an existing usage with the same label. */
+/**
+ * Gives each built usage an id, keeping the id of an existing usage with the same label. A kept
+ * usage also keeps the answers it had learned (AI-accepted in reviews), unless another usage
+ * now claims them.
+ */
 export function withUsageIds(built: BuiltUsages['usages'], previous: VocabUsage[] | undefined): VocabUsage[] {
-  const byLabel = new Map((previous ?? []).map(u => [usageKey(u.label), u.id]));
-  return built.map(u => ({ id: byLabel.get(usageKey(u.label)) ?? newUsageId(), ...u }));
+  const byLabel = new Map((previous ?? []).map(u => [usageKey(u.label), u]));
+  const claimed = new Set(built.flatMap(u => [u.meaning, ...u.acceptedAnswers]).map(a => a.toLowerCase()));
+  return built.map(u => {
+    const prev = byLabel.get(usageKey(u.label));
+    if (!prev) return { id: newUsageId(), ...u };
+    const learned = [prev.meaning, ...prev.acceptedAnswers].filter(a => {
+      const k = a.toLowerCase();
+      if (claimed.has(k)) return false;
+      claimed.add(k);
+      return true;
+    });
+    return { id: prev.id, ...u, acceptedAnswers: [...u.acceptedAnswers, ...learned] };
+  });
 }
 
 function dedupe(items: string[]): string[] {

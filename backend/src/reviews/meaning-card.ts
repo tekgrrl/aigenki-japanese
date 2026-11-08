@@ -6,9 +6,14 @@ import type { VocabUsage } from '../types';
  * every usage is proven.
  */
 
+/** An answer without surrounding space or trailing Japanese/ASCII punctuation (case kept). */
+export function stripTrailingPunctuation(s: string): string {
+  return s.trim().replace(/[。、！？,.!?\s]+$/u, '').trim();
+}
+
 /** The answer normalisation evaluateAnswer uses: case, surrounding space, trailing punctuation. */
 export function normaliseAnswer(s: string): string {
-  return s.toLowerCase().trim().replace(/[。、！？,.!?\s]+$/u, '').trim();
+  return stripTrailingPunctuation(s.toLowerCase());
 }
 
 /** The usage whose meaning or accepted answers match the answer exactly (after normalising). */

@@ -230,10 +230,25 @@ export class LessonsService {
     // --- SAVE TO 'lessons' collection ---
     await lessonDbRef.set(lessonJson);
 
-    // Build the word's usages straight away. Not for batch runs: their BulkWriter rewrites the
+    // Build the word's usages before returning, so the lesson comes back with them (and Start
+    // Learning's lazy build has nothing to do). Not for batch runs: their BulkWriter rewrites the
     // lesson (examples included) after this returns, which would drop the usage ids.
     if (ku.type === 'Vocab' && !cachedContentName) {
-      void this.buildVocabUsages(kuId).catch(e => this.logger.error(`buildVocabUsages failed for ${kuId}`, e));
+      try {
+        const r = await this.buildVocabUsages(kuId);
+        if (r.built) {
+          const vl = lessonJson as VocabLesson;
+          vl.usages = r.built.usages;
+          vl.usageSetAside = r.built.usageSetAside;
+          vl.context_examples = (vl.context_examples ?? []).map((e, i) => {
+            const label = r.usages[i];
+            const usage = r.built!.usages.find(u => u.label === label);
+            return usage ? { ...e, usage: usage.label, usageId: usage.id } : e;
+          });
+        }
+      } catch (e) {
+        this.logger.error(`buildVocabUsages failed for ${kuId}`, e);
+      }
     }
 
     void this.validateAndFlagLesson(uid, kuId, ku.type, ku.content, lessonJson, jlptLevel);
@@ -368,7 +383,7 @@ export class LessonsService {
     // prompt was given them. Only write if they're still the same.
     const unchanged = (fresh: VocabLesson['context_examples'] = []) =>
       fresh.length === sentences.length &&
-      fresh.every((e, i) => e.sentence === sentences[i] && (!fixedLabels[i] || e.usage === fixedLabels[i]));
+      fresh.every((e, i) => e.sentence === sentences[i] && (!fixedLabels[i] || usageKey(e.usage) === usageKey(fixedLabels[i])));
     const written = await this.db.runTransaction(async tx => {
       const fresh = (await tx.get(lessonRef)).data() as VocabLesson | undefined;
       if (!fresh || !unchanged(fresh.context_examples)) return false;

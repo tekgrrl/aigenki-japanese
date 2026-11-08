@@ -46,12 +46,12 @@ describe('updateFacetSrs: the Vocab meaning card', () => {
     expect(facet().consecutiveFailures).toBe(1);
   });
 
-  it('a wrong answer after a usage is proven changes nothing', async () => {
+  it('a wrong answer after a usage is proven keeps the stage and record, and waits the stage interval', async () => {
     const { service, facet } = setup(4, ['dark']);
-    const before = facet();
     const r = await service.updateFacetSrs('u', 'f', 'fail');
     expect(r).toMatchObject({ newStage: 4, outcome: 'free-fail', provenUsageIds: ['dark'] });
-    expect(facet()).toEqual(before);
+    expect(facet()).toMatchObject({ srsStage: 4, provenUsageIds: ['dark'], consecutiveFailures: 0 });
+    expect(new Date(facet().nextReviewAt).getTime()).toBeGreaterThan(Date.now() + 60 * 60 * 1000);
   });
 
   it('a one-usage word moves up on any pass, as before', async () => {

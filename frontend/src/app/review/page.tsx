@@ -477,7 +477,11 @@ export default function ReviewPage() {
     const topic = currentItem.facet.data?.content || '';
     const questionType = getQuestionType(currentItem); // Get the question type
     // Use dynamicQuestionId if available (for AI questions), otherwise fallback to facet's currentQuestionId (though that might be stale)
-    const questionId = dynamicQuestionId || currentItem.facet.currentQuestionId;
+    // Only an AI question has a question to record against. A Vocab meaning card shown as the bare
+    // word may still carry the currentQuestionId of an earlier AI form; it must not be sent.
+    const questionId = currentItem.facet.facetType === "AI-Generated-Question"
+      ? dynamicQuestionId || currentItem.facet.currentQuestionId
+      : undefined;
 
     // TODO This shouldn't work
     if (
@@ -521,8 +525,8 @@ export default function ReviewPage() {
       if (usagePreview) {
         setUsageProgress({ proven: usagePreview.provenCount, total: usagePreview.totalUsages, outcome: usagePreview.outcome });
       }
-      // The bare-word meaning card is told the usage by the evaluator; an AI question shown for
-      // a meaning card already knows which usage it asks about.
+      // The evaluator returns the usage the answer proves (for an AI question, the question's own
+      // usage, the same one its preview used); the item's usage is only a fallback.
       const usage = usageId
         ? { id: usageId as string, label: usageLabel as string | undefined }
         : currentItem.facet.data?.usageId

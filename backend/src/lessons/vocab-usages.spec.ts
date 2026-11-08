@@ -63,6 +63,11 @@ describe('checkBuiltUsages', () => {
     expect(() => checkBuiltUsages(renamed, 2, fixed)).toThrow(/fixed label/);
   });
 
+  it('treats fixed labels that differ only in case as one', () => {
+    const r = checkBuiltUsages({ usages: [{ label: 'dark', meaning: 'dark', acceptedAnswers: [] }], exampleUsages: [0, 0], setAside: [] }, 2, ['Dark', 'dark']);
+    expect(r.usages).toHaveLength(1);
+  });
+
   it('rejects the wrong number of examples', () => {
     expect(() => checkBuiltUsages(kurai, 3, [...fixed, null])).toThrow(/Expected 3/);
   });
@@ -91,3 +96,19 @@ describe('withUsageIds', () => {
     expect(result[1].id).toMatch(/^[0-9a-f]{8}$/);
   });
 });
+
+describe('withUsageIds keeps learned answers', () => {
+  it('a kept usage keeps answers it learned, unless another usage now claims them', () => {
+    const previous = [{ id: 'keep01', label: 'and then', meaning: 'and then', acceptedAnswers: ['afterwards', 'also'] }];
+    const result = withUsageIds(
+      [
+        { label: 'and then', meaning: 'and then', acceptedAnswers: ['then'] },
+        { label: 'in addition', meaning: 'in addition', acceptedAnswers: ['also'] },
+      ],
+      previous,
+    );
+    expect(result[0]).toMatchObject({ id: 'keep01', acceptedAnswers: ['then', 'afterwards'] });
+    expect(result[1].acceptedAnswers).toEqual(['also']);
+  });
+});
+

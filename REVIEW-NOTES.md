@@ -75,4 +75,11 @@ if a change actually breaks the stated intent. New decisions get added here as t
   and questions get regenerated. Accepted.
 - **The Meanings list shows each usage's meaning and label, not its accepted answers** (the owner's
   choice); accepted glosses still pass in reviews.
+- **AI-accepted answers are written onto the global lesson's usage** (`addUsageAnswer`), an agreed
+  exception to "global data changes only via the admin dashboard": it's the owner's design, so the
+  next attempt matches locally. AI questions already store accepted alternatives on the shared
+  Question doc. Forgiven misspellings are never stored.
+- **A wrong meaning-card answer after a usage is proven** ("free fail") keeps the stage and the proven
+  usages but reschedules at the stage's normal interval (the owner's choice), so the card doesn't come
+  straight back. Stats forecasts aren't adjusted for it (they're a cache).
 
