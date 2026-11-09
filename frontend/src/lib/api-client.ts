@@ -34,8 +34,15 @@ export async function apiFetch(
     }
   }
 
-  return fetch(input, {
+  const res = await fetch(input, {
     ...init,
     headers,
   });
+  // Safety net for the profile gate: the API refuses everything but the profile until a level is
+  // chosen. AuthProvider normally redirects first; if a request slips through, go to /profile.
+  if (res.status === 403 && typeof window !== "undefined" && window.location.pathname !== "/profile") {
+    const body = await res.clone().json().catch(() => null);
+    if (body?.code === "PROFILE_INCOMPLETE") window.location.assign("/profile");
+  }
+  return res;
 }

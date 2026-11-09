@@ -5,6 +5,8 @@ import { KnowledgeUnit, UserKnowledgeUnit } from '../types';
 import { StatsService } from '../stats/stats.service';
 import { isAboveLevel } from '../lib/jlpt';
 import { UserService } from '../users/user.service';
+import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
+import { enrolledKuId } from './enrolled-ku-id';
 
 @Injectable()
 export class UserKnowledgeUnitsService {
@@ -14,6 +16,7 @@ export class UserKnowledgeUnitsService {
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly statsService: StatsService,
     private readonly userService: UserService,
+    private readonly knowledgeUnitsService: KnowledgeUnitsService,
   ) {}
 
   private userKusRef(uid: string) {
@@ -148,5 +151,24 @@ export class UserKnowledgeUnitsService {
     })();
 
     return { id: ref.id, ...payload };
+  }
+
+  /**
+   * After the learner's level changes: re-derives `aboveLevel` on every enrolment from its KU's
+   * level (also fills it on older enrolments that never had it). Returns how many flags changed.
+   */
+  async recomputeAboveLevel(uid: string, userLevel: string): Promise<number> {
+    const ukus = (await this.userKusRef(uid).get()).docs;
+    const kus = new Map((await this.knowledgeUnitsService.getManyCached(ukus.map(enrolledKuId))).map(k => [k.id, k]));
+    const changes = ukus
+      .map(d => ({ ref: d.ref, current: d.data().aboveLevel, next: isAboveLevel((kus.get(enrolledKuId(d))?.data as Record<string, any> | undefined)?.jlptLevel, userLevel) }))
+      .filter(c => c.current !== c.next);
+    for (let i = 0; i < changes.length; i += 450) {
+      const batch = this.db.batch();
+      changes.slice(i, i + 450).forEach(c => batch.update(c.ref, { aboveLevel: c.next }));
+      await batch.commit();
+    }
+    this.logger.log(`recomputeAboveLevel uid=${uid} level=${userLevel}: ${changes.length} of ${ukus.length} enrolments changed`);
+    return changes.length;
   }
 }

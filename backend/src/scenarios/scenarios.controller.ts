@@ -19,6 +19,7 @@ import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { UserId } from '../auth/user-id.decorator';
 import { ALLOWED_USER_ROLES, ALLOWED_AI_ROLES } from '../prompts/scenario.prompts';
+import { AllowIncompleteProfile } from '../auth/allow-incomplete-profile.decorator';
 
 @Controller('scenarios')
 @UseGuards(FirebaseAuthGuard)
@@ -31,6 +32,7 @@ export class ScenariosController {
   }
 
   @Get('roles')
+  @AllowIncompleteProfile() // the /profile page loads these for its role dropdown
   getRoles() {
     return { userRoles: ALLOWED_USER_ROLES, aiRoles: ALLOWED_AI_ROLES };
   }

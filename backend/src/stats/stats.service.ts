@@ -11,6 +11,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { isAboveLevel } from '../lib/jlpt';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
+import { enrolledKuId } from '../user-knowledge-units/enrolled-ku-id';
 
 @Injectable()
 export class StatsService {
@@ -459,21 +460,29 @@ export class StatsService {
     }
 
     /**
-     * One-off per user: rebuild the id list from the Grammar KUs they've actually enrolled
-     * (not above level) — the legacy text list can't be mapped back reliably after renames.
+     * The Grammar KU ids that belong in a user's allowed grammar: enrolled and not above their level.
+     * `level`: the level to judge by (a level change passes the one it's applying); default the stored one.
+     */
+    private async selectAllowedGrammarKuIds(uid: string, level?: string): Promise<string[]> {
+        const userRef = this.db.collection('users').doc(uid);
+        const [userLevel, ukus] = await Promise.all([level ?? this.userService.getJlptLevel(uid), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
+        const candidateIds = ukus.docs
+            .filter(d => d.data().aboveLevel !== true)
+            .map(enrolledKuId);
+        // Re-check the level against the KU itself: legacy UKUs have no aboveLevel flag, and a
+        // fresh enrolment's flag is written after the UKU, so the flag alone can let N3+ through.
+        return (await this.knowledgeUnitsService.getManyCached(candidateIds))
+            .filter(k => k.type === 'Grammar' && !isAboveLevel((k.data as Record<string, any>)?.jlptLevel, userLevel))
+            .map(k => k.id);
+    }
+
+    /**
+     * One-off per user: build the id list the first time it's read (see getAllowedGrammarKuIds).
+     * The legacy text list can't be mapped back reliably after renames.
      */
     private async backfillAllowedGrammarKuIds(uid: string): Promise<string[]> {
         const userRef = this.db.collection('users').doc(uid);
-        const [prefs, ukus] = await Promise.all([this.userService.getPreferences(uid), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
-        const userLevel = prefs.jlptLevel;
-        const candidateIds = ukus.docs
-            .filter(d => d.data().aboveLevel !== true)
-            .map(d => (d.data().kuId as string | undefined) ?? d.id);
-        // Re-check the level against the KU itself: legacy UKUs have no aboveLevel flag, and a
-        // fresh enrolment's flag is written after the UKU, so the flag alone can let N3+ through.
-        const grammarIds = (await this.knowledgeUnitsService.getManyCached(candidateIds))
-            .filter(k => k.type === 'Grammar' && !isAboveLevel((k.data as Record<string, any>)?.jlptLevel, userLevel))
-            .map(k => k.id);
+        const grammarIds = await this.selectAllowedGrammarKuIds(uid);
         // arrayUnion, not a plain set: an enrolment's addToAllowedGrammar can land mid-backfill.
         // arrayUnion() with no elements throws, so with nothing to add just create the empty
         // list (only if still absent) so the backfill doesn't rerun on every call.
@@ -488,6 +497,24 @@ export class StatsService {
             });
         }
         this.logger.log(`Backfilled allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
+        return grammarIds;
+    }
+
+    /**
+     * After the learner's level changes to `level` (and recomputeAboveLevel has run): updates the id list,
+     * so grammar now above their level drops out and grammar now within it comes in.
+     */
+    async rebuildAllowedGrammarKuIds(uid: string, level: string): Promise<string[]> {
+        const userRef = this.db.collection('users').doc(uid);
+        const [grammarIds, userDoc] = await Promise.all([this.selectAllowedGrammarKuIds(uid, level), userRef.get()]);
+        const current: string[] = userDoc.data()?.tutorContext?.allowedGrammarKuIds ?? [];
+        const add = grammarIds.filter(id => !current.includes(id));
+        const remove = current.filter(id => !grammarIds.includes(id));
+        // arrayUnion / arrayRemove of just the difference, not a plain set: a grammar point enrolled
+        // during the rebuild (addToAllowedGrammar) must not be overwritten. Each call needs elements.
+        if (add.length > 0) await userRef.set({ tutorContext: { allowedGrammarKuIds: FieldValue.arrayUnion(...add) } }, { merge: true });
+        if (remove.length > 0) await userRef.update({ 'tutorContext.allowedGrammarKuIds': FieldValue.arrayRemove(...remove) });
+        this.logger.log(`Rebuilt allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs (+${add.length} -${remove.length})`);
         return grammarIds;
     }
 

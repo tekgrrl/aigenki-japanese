@@ -15,7 +15,11 @@ import DailyCheckInDialog from "./DailyCheckInDialog";
  * Hidden entirely when there is no authenticated user (e.g. on the login page).
  */
 export default function Header() {
-  const { user } = useAuth();
+  // Until the profile is complete (a level chosen), only the logo and avatar menu show: every
+  // other page redirects to /profile and the API refuses stats and the daily plan. Unknown (null,
+  // e.g. /users/me failed) shows the full header.
+  const { user, profileComplete: completeFlag } = useAuth();
+  const profileComplete = completeFlag !== false;
   const pathname = usePathname();
   const [stats, setStats] = useState({ learnCount: 0, reviewingCount: 0, reviewsDue: 0, simulateCount: 0 });
   const [showDailyNudge, setShowDailyNudge] = useState(false);
@@ -44,6 +48,7 @@ export default function Header() {
   }, []);
 
   const fetchStats = useCallback(async () => {
+    if (!profileComplete) return;
     try {
       const response = await apiFetch("/api/stats");
       if (response.ok) {
@@ -53,7 +58,7 @@ export default function Header() {
     } catch (error) {
       console.error("Failed to fetch stats:", error);
     }
-  }, []);
+  }, [profileComplete]);
 
   useEffect(() => {
     if (user) fetchStats();
@@ -139,7 +144,7 @@ export default function Header() {
           className="relative text-2xl font-bold text-shodo-ink hover:text-shodo-accent transition-colors duration-200 mr-auto"
         >
           AIGENKI
-          {showDailyNudge && (
+          {showDailyNudge && profileComplete && (
             <span
               className="absolute -top-1 -right-3 flex h-2.5 w-2.5"
               title="Visit the dashboard for your daily check-in"
@@ -150,6 +155,7 @@ export default function Header() {
           )}
         </Link>
 
+        {profileComplete && (<>
         {/* Primary navigation */}
         <div className="flex items-center space-x-2 sm:space-x-4">
           <Link
@@ -200,6 +206,7 @@ export default function Header() {
             <path d="m9 14 2 2 4-4" />
           </svg>
         </button>
+        </>)}
 
         {/* Avatar menu — profile, library, manage, sign out */}
         <div className="ml-4">
