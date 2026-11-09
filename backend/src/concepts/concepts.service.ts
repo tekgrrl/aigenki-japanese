@@ -3,6 +3,7 @@ import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION, CONCEPTS_COLLECTION, USER_CONCEPTS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { GeminiService } from '../gemini/gemini.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { FacetStore } from '../facets/facet-store';
 import { ConceptKnowledgeUnit, UserConcept, ReviewFacet } from '../types';
 import { buildConceptPrompt } from '../prompts/concept.prompts';
 
@@ -19,6 +20,7 @@ export class ConceptsService {
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly geminiService: GeminiService,
     private readonly reviewsService: ReviewsService,
+    private readonly facetStore: FacetStore,
   ) { }
 
   private userConceptsRef(uid: string) {
@@ -82,7 +84,7 @@ export class ConceptsService {
   }
 
   async getFacets(uid: string, conceptId: string): Promise<ReviewFacet[]> {
-    return this.reviewsService.getFacetsByKuId(uid, conceptId);
+    return this.facetStore.byKuId(uid, conceptId);
   }
 
   async createFacets(uid: string, conceptId: string, mechanicIndices: number[], includeAiQuestion = false): Promise<{ created: number }> {

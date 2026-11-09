@@ -549,7 +549,7 @@ export class ReviewsService {
         selfCertifiedFacets: string[] = [],
     ) {
         // Pre-fetch existing facets for the parent KU to prevent duplicates on re-submission
-        const existingParentFacets = await this.getFacetsByKuId(uid, kuId);
+        const existingParentFacets = await this.facetStore.byKuId(uid, kuId);
         const existingParentTypes = new Set<string>(existingParentFacets.map(f => f.facetType));
 
         const batch = this.db.batch();
@@ -575,7 +575,7 @@ export class ReviewsService {
                     await this.userKnowledgeUnitsService.create(uid, kanjiKuId, { type: 'lesson', id: kuId });
 
                     // Dedup: only create facets that don't already exist on the Kanji KU
-                    const existingKanjiFacets = await this.getFacetsByKuId(uid, kanjiKuId);
+                    const existingKanjiFacets = await this.facetStore.byKuId(uid, kanjiKuId);
                     const existingKanjiTypes = new Set(existingKanjiFacets.map(f => f.facetType));
                     let newFacetCount = 0;
 
@@ -758,10 +758,6 @@ export class ReviewsService {
                 createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt,
             };
         });
-    }
-
-    async getFacetsByKuId(uid: string, kuId: string): Promise<ReviewFacet[]> {
-        return this.facetStore.byKuId(uid, kuId);
     }
 
     async createFacetBatch(

@@ -62,6 +62,15 @@ describe('FacetStore', () => {
     expect(snap.docs.map((d: any) => d.id)).toEqual(['mine']);
   });
 
+  it('forKu returns the facets testing a KU and those in its sequence, once each', async () => {
+    const col = db.collection('users').doc('u1').collection('review-facets');
+    await col.doc('own').set({ kuId: 'word', source: { id: 'word' } });
+    await col.doc('kanji').set({ kuId: 'kanji', source: { id: 'word' } });
+    await col.doc('other').set({ kuId: 'x', source: { id: 'x' } });
+    expect((await store.forKu('u1', 'word')).map(f => f.id).sort()).toEqual(['kanji', 'own']);
+    expect((await store.forKu('u1', 'kanji')).map(f => f.id)).toEqual(['kanji']);
+  });
+
   it("records a facet's current question", async () => {
     await db.collection('users').doc('u1').collection('review-facets').doc('f').set({ kuId: 'k1' });
     await store.updateQuestion('u1', 'f', 'q9');

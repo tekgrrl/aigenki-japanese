@@ -19,24 +19,6 @@ export class LearningProgressService {
     ) {}
 
     /**
-     * Every facet that counts toward a KU's status: those targeting it (kuId) and those in
-     * its own sequence (source.id). They differ for Kanji-Component-* facets, which target
-     * the component kanji's KU while belonging to the word's sequence, so a word whose
-     * first stage is only kanji components would otherwise look like it has no facets.
-     */
-    private async getFacetsForKu(uid: string, kuId: string): Promise<ReviewFacet[]> {
-        const [byTarget, bySequence] = await Promise.all([
-            this.facetStore.query(uid).where('kuId', '==', kuId).get(),
-            this.facetStore.query(uid).where('source.id', '==', kuId).get(),
-        ]);
-        const byId = new Map<string, ReviewFacet>();
-        for (const doc of [...byTarget.docs, ...bySequence.docs]) {
-            byId.set(doc.id, { id: doc.id, ...doc.data() } as ReviewFacet);
-        }
-        return [...byId.values()];
-    }
-
-    /**
      * Derives UKU status from facet SRS data and writes it back to the UKU document.
      * This is the single place that determines and caches UKU status.
      *
@@ -47,7 +29,7 @@ export class LearningProgressService {
      */
     async recomputeAndCache(uid: string, kuId: string): Promise<void> {
         const [facets, currentUku] = await Promise.all([
-            this.getFacetsForKu(uid, kuId),
+            this.facetStore.forKu(uid, kuId),
             this.userKnowledgeUnitsService.findByKuId(uid, kuId),
         ]);
 

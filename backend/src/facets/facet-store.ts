@@ -80,6 +80,21 @@ export class FacetStore {
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as ReviewFacet));
   }
 
+  /**
+   * Every facet that belongs to a KU: those testing it (`kuId`) and those in its own sequence
+   * (`source.id`), de-duplicated. They differ for Kanji-Component-* facets, which test the
+   * component kanji's KU but sit in the word's sequence, so each counts for both KUs.
+   */
+  async forKu(uid: string, kuId: string): Promise<ReviewFacet[]> {
+    const [byTarget, bySequence] = await Promise.all([
+      this.query(uid).where('kuId', '==', kuId).get(),
+      this.query(uid).where('source.id', '==', kuId).get(),
+    ]);
+    const byId = new Map<string, ReviewFacet>();
+    for (const d of [...byTarget.docs, ...bySequence.docs]) byId.set(d.id, { id: d.id, ...d.data() } as ReviewFacet);
+    return [...byId.values()];
+  }
+
   /** Points the facet at the AI question it should show (reused on its next review). */
   async updateQuestion(uid: string, facetId: string, questionId: string): Promise<void> {
     await this.doc(uid, facetId).update({ currentQuestionId: questionId });

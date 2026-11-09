@@ -144,11 +144,10 @@ export class ScenarioFlashService {
 
   /** The user has seen the card: hide it for SEEN_SNOOZE_HOURS (sync replaces it sooner if its step gets done). */
   async acknowledge(uid: string, facetId: string): Promise<void> {
-    const ref = this.facetStore.doc(uid, facetId);
-    const doc = await ref.get();
-    if (!doc.exists) throw new NotFoundException('Card not found');
-    if (doc.data()!.facetType !== 'flash') throw new BadRequestException('Not a Flash card');
-    await ref.update({ nextReviewAt: Timestamp.fromMillis(Date.now() + SEEN_SNOOZE_HOURS * 60 * 60 * 1000) });
+    const card = await this.facetStore.get(uid, facetId);
+    if (!card) throw new NotFoundException('Card not found');
+    if (card.facetType !== 'flash') throw new BadRequestException('Not a Flash card');
+    await this.facetStore.doc(uid, facetId).update({ nextReviewAt: Timestamp.fromMillis(Date.now() + SEEN_SNOOZE_HOURS * 60 * 60 * 1000) });
   }
 
   /** The first step of the chain the scenario hasn't completed yet, or null when it's all done. */
