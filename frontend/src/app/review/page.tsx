@@ -910,6 +910,17 @@ export default function ReviewPage() {
     );
   }
 
+  // An AI card whose question isn't ready is parked by the effect above straight after this
+  // render (same condition). Don't draw it, or it flashes up and is swapped for the next card.
+  if (
+    currentItem.facet.facetType === "AI-Generated-Question" &&
+    scout.isPending(currentItem.facet.id) &&
+    answerState === "unanswered" &&
+    currentIndex + 1 < reviewQueue.length
+  ) {
+    return <main className="container mx-auto max-w-2xl p-8" />;
+  }
+
   const questionType = getQuestionType(currentItem);
   const questionText = getQuestion(currentItem);
   const isDynamicLoading =
