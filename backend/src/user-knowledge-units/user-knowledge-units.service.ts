@@ -3,6 +3,7 @@ import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { KnowledgeUnit, UserKnowledgeUnit } from '../types';
 import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { isAboveLevel } from '../lib/jlpt';
 import { UserService } from '../users/user.service';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
@@ -17,6 +18,7 @@ export class UserKnowledgeUnitsService {
     private readonly statsService: StatsService,
     private readonly userService: UserService,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
+    private readonly tutorContext: TutorContextService,
   ) {}
 
   private userKusRef(uid: string) {
@@ -140,10 +142,10 @@ export class UserKnowledgeUnitsService {
 
         if (jlptLevel && !aboveLevel) {
           await this.statsService.recordKuEnrolled(uid, jlptLevel);
-          await this.statsService.updateCurriculumNode(uid, jlptLevel);
+          await this.tutorContext.updateCurriculumNode(uid, jlptLevel);
         }
         if (kuData?.type === 'Grammar' && kuData?.content && !aboveLevel) {
-          await this.statsService.addToAllowedGrammar(uid, kuData.content, kuId);
+          await this.tutorContext.addToAllowedGrammar(uid, kuData.content, kuId);
         }
       } catch (e) {
         this.logger.error(`Failed to record KU enrolled stats uid=${uid} kuId=${kuId}`, e);

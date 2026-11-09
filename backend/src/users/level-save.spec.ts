@@ -8,15 +8,15 @@ describe('level save: LevelSyncService', () => {
     const db = new FakeFirestore();
     const users = new UserService(db as any);
     const ukus = { recomputeAboveLevel: recompute };
-    const stats = { rebuildAllowedGrammarKuIds: jest.fn().mockResolvedValue([]) };
-    const sync = new LevelSyncService(db as any, ukus as any, stats as any);
+    const tutorContext = { rebuildAllowedGrammarKuIds: jest.fn().mockResolvedValue([]) };
+    const sync = new LevelSyncService(db as any, ukus as any, tutorContext as any);
     const controller = new UserController(users, sync);
     const computedFor = () => db.store('users').get('u1')?.aboveLevelComputedFor;
-    return { db, users, ukus, stats, sync, controller, computedFor };
+    return { db, users, ukus, tutorContext, sync, controller, computedFor };
   }
 
   it('recomputes for a new level and records it; the same level again is skipped', async () => {
-    const { controller, ukus, stats, computedFor } = setup();
+    const { controller, ukus, tutorContext, computedFor } = setup();
     await controller.updatePreferences('u1', { jlptLevel: 'N5' });
     expect(computedFor()).toBe('N5');
     await controller.updatePreferences('u1', { jlptLevel: 'N5' });
@@ -24,7 +24,7 @@ describe('level save: LevelSyncService', () => {
     expect(ukus.recomputeAboveLevel).toHaveBeenCalledTimes(1);
     await controller.updatePreferences('u1', { jlptLevel: 'N4' });
     expect(ukus.recomputeAboveLevel).toHaveBeenLastCalledWith('u1', 'N4');
-    expect(stats.rebuildAllowedGrammarKuIds).toHaveBeenLastCalledWith('u1', 'N4');
+    expect(tutorContext.rebuildAllowedGrammarKuIds).toHaveBeenLastCalledWith('u1', 'N4');
     expect(computedFor()).toBe('N4');
   });
 

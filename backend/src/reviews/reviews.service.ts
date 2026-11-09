@@ -19,6 +19,8 @@ import { FacetType, Lesson, ReviewFacet, VocabLesson, VocabUsage } from '@/types
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
+import { DailyPlanService } from '../daily-plan/daily-plan.service';
 import { ScenariosService, VOCAB_READY_MIN_STAGE } from '../scenarios/scenarios.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
@@ -63,6 +65,8 @@ export class ReviewsService {
         private readonly reviewProgressService: ReviewProgressService,
         private readonly kanjiService: KanjiService,
         private readonly scenarioFlashService: ScenarioFlashService,
+        private readonly tutorContext: TutorContextService,
+        private readonly dailyPlanService: DailyPlanService,
     ) { }
 
     /** `usageId`: on a Vocab meaning card, the usage a correct answer matched (from evaluateAnswer). */
@@ -250,14 +254,14 @@ export class ReviewsService {
                     // tutor context (leechVocab, like frontierVocab) and the daily plan's promotions.
                     if (facetType === 'picture-choice') return;
                     if (newConsecutiveFailures >= LEECH_THRESHOLD) {
-                        await this.statsService.addToLeechVocab(uid, ku.content, facetType);
-                        if (isGrammar) await this.statsService.addToWeakGrammarPoints(uid, ku.content, facetType);
+                        await this.tutorContext.addToLeechVocab(uid, ku.content, facetType);
+                        if (isGrammar) await this.tutorContext.addToWeakGrammarPoints(uid, ku.content, facetType);
                     } else if (result === 'pass' && prevConsecutiveFailures > 0) {
-                        await this.statsService.removeFromLeechVocab(uid, ku.content, facetType);
-                        if (isGrammar) await this.statsService.removeFromWeakGrammarPoints(uid, ku.content, facetType);
+                        await this.tutorContext.removeFromLeechVocab(uid, ku.content, facetType);
+                        if (isGrammar) await this.tutorContext.removeFromWeakGrammarPoints(uid, ku.content, facetType);
                     }
                     if (result === 'pass' && newStage > prevStage) {
-                        await this.statsService.recordPromotion(uid, {
+                        await this.dailyPlanService.recordPromotion(uid, {
                             kuId,
                             content: ku.content,
                             type: ku.type,
@@ -282,7 +286,7 @@ export class ReviewsService {
                             );
                         }
                         if (ku.type === 'Grammar' && !flashChain && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
-                            await this.statsService.recordScenarioOpportunity(uid, {
+                            await this.dailyPlanService.recordScenarioOpportunity(uid, {
                                 kuId,
                                 content: ku.content,
                                 type: ku.type,

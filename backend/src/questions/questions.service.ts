@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { Firestore } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
@@ -62,7 +62,7 @@ export class QuestionsService {
     private readonly geminiService: GeminiService,
     private readonly facetStore: FacetStore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
-    private readonly statsService: StatsService,
+    private readonly tutorContext: TutorContextService,
   ) {}
 
   private questionStatesRef(uid: string) {
@@ -238,7 +238,7 @@ export class QuestionsService {
         const userData = userDoc.data() as any;
         const level = jlptLevelOf(userData);
         // Resolved from enrolled KU ids at call time — always current content + title.
-        const allowedGrammar = await this.statsService.getAllowedGrammar(uid, userData);
+        const allowedGrammar = await this.tutorContext.getAllowedGrammar(uid, userData);
         const excludedVocab: string[] = userData?.tutorContext?.excludedVocab ?? [];
         const excludedGrammar: string[] = userData?.tutorContext?.excludedGrammar ?? [];
         return { jlptLevel: level, allowedGrammar, excludedVocab, excludedGrammar };

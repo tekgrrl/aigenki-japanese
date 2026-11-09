@@ -27,7 +27,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
-import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
 
@@ -58,7 +58,7 @@ export class ReviewProgressService {
     private readonly lessonsService: LessonsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
     private readonly learningProgressService: LearningProgressService,
-    private readonly statsService: StatsService,
+    private readonly tutorContext: TutorContextService,
     private readonly userService: UserService,
   ) {}
 
@@ -269,7 +269,7 @@ export class ReviewProgressService {
     // them), but this one may have been added while it was standard: Gemini would keep
     // writing it in kanji. Drop it from both lists.
     const ku = await this.knowledgeUnitsService.findOneById(kuId);
-    if (ku?.content) await this.statsService.removeFromTutorVocab(uid, ku.content);
+    if (ku?.content) await this.tutorContext.removeFromTutorVocab(uid, ku.content);
 
     this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, handed ${rehome.size} kanji facets to other words, back in lessons`);
     return { facetsDeleted };

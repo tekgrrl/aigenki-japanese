@@ -2,7 +2,6 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { PromotedEntry, ReviewFacet, ScenarioOpportunity, UserRoot } from '../types';
-import { StatsService } from '../stats/stats.service';
 import { FacetStore } from '../facets/facet-store';
 
 export interface LeechEntry {
@@ -30,8 +29,53 @@ export class DailyPlanService {
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly facetStore: FacetStore,
-    private readonly statsService: StatsService,
   ) {}
+
+  async recordPromotion(uid: string, entry: Omit<PromotedEntry, 'promotedAt'>): Promise<void> {
+    const userRef = this.db.collection('users').doc(uid);
+    await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(userRef);
+      const existing: PromotedEntry[] = doc.data()?.stats?.recentlyPromoted ?? [];
+      const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
+      // Prune stale entries and remove any existing entry for this kuId (we'll re-add with latest data)
+      const pruned = existing.filter(
+        e => (e.promotedAt as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId,
+      );
+      pruned.push({ ...entry, promotedAt: Timestamp.now() });
+      transaction.update(userRef, { 'stats.recentlyPromoted': pruned });
+    });
+  }
+
+  /**
+   * Records a dismissible "practice this in a Scenario" opportunity, surfaced in the
+   * daily plan. Purely a suggestion — never read by SRS/facet logic. Pruned after 7
+   * days (longer than recordPromotion's 48h window since this is meant to be acted on
+   * at leisure, not urgently) and de-duped by kuId.
+   */
+  async recordScenarioOpportunity(uid: string, entry: Omit<ScenarioOpportunity, 'createdAt'>): Promise<void> {
+    const userRef = this.db.collection('users').doc(uid);
+    await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(userRef);
+      const existing: ScenarioOpportunity[] = doc.data()?.stats?.scenarioOpportunities ?? [];
+      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const pruned = existing.filter(
+        e => (e.createdAt as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId,
+      );
+      pruned.push({ ...entry, createdAt: Timestamp.now() });
+      transaction.update(userRef, { 'stats.scenarioOpportunities': pruned });
+    });
+  }
+
+  /** Removes a single scenario opportunity by kuId — called when the user dismisses it. */
+  async removeScenarioOpportunity(uid: string, kuId: string): Promise<void> {
+    const userRef = this.db.collection('users').doc(uid);
+    await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(userRef);
+      const existing: ScenarioOpportunity[] = doc.data()?.stats?.scenarioOpportunities ?? [];
+      const remaining = existing.filter(e => e.kuId !== kuId);
+      transaction.update(userRef, { 'stats.scenarioOpportunities': remaining });
+    });
+  }
 
   /**
    * Dismisses a single scenario-practice opportunity. Removes it from stats (so future
@@ -39,7 +83,7 @@ export class DailyPlanService {
    * since check() serves that cached doc for the rest of the day otherwise.
    */
   async dismissOpportunity(uid: string, kuId: string): Promise<void> {
-    await this.statsService.removeScenarioOpportunity(uid, kuId);
+    await this.removeScenarioOpportunity(uid, kuId);
     const planRef = this.db.collection('daily-plans').doc(uid);
     const planDoc = await planRef.get();
     if (planDoc.exists) {

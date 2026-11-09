@@ -20,8 +20,8 @@ function setup() {
     remove: jest.fn(async (_uid: string, kuId: string) => ukus.delete(kuId)),
   };
   const learningProgress = { recomputeAndCache: jest.fn() };
-  const stats = { removeFromTutorVocab: jest.fn() };
-  const service = new ReviewProgressService(db as any, new FacetStore(db as any), knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, stats as any, new UserService(db as any));
+  const tutorContext = { removeFromTutorVocab: jest.fn() };
+  const service = new ReviewProgressService(db as any, new FacetStore(db as any), knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, tutorContext as any, new UserService(db as any));
 
   const facets = db.collection('users').doc(UID).collection('review-facets');
   const ukuCol = db.collection('users').doc(UID).collection('user-kus');
@@ -44,7 +44,7 @@ function setup() {
     await ukuCol.doc('word2').set({ kuId: 'word2', createdAt: { seconds: 5 } });
     ukus.set('word2', { kuId: 'word2', facet_count: 4 });
   };
-  return { db, service, ukus, facets, seed, stats, shareKanji, learningProgress };
+  return { db, service, ukus, facets, seed, tutorContext, shareKanji, learningProgress };
 }
 
 describe('audioFirstStatus', () => {
@@ -82,12 +82,12 @@ describe('audioFirstStatus', () => {
 
 describe('returnToLessonsAsAudioFirst', () => {
   it('deletes the facets, resets the word to stage 0 with no variant, and drops its orphaned kanji', async () => {
-    const { service, seed, ukus, db, stats } = setup();
+    const { service, seed, ukus, db, tutorContext } = setup();
     await seed();
     expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 2 });
     expect(db.store(`users/${UID}/review-facets`).size).toBe(0);
     expect(ukus.get(WORD)).toMatchObject({ status: 'learning', currentStage: 0, facet_count: 0 });
-    expect(stats.removeFromTutorVocab).toHaveBeenCalledWith(UID, '川');
+    expect(tutorContext.removeFromTutorVocab).toHaveBeenCalledWith(UID, '川');
     expect(ukus.get(WORD)).toHaveProperty('sequenceVariant'); // FieldValue.delete() sentinel, applied by Firestore
     expect(ukus.has(KANJI)).toBe(false);
   });

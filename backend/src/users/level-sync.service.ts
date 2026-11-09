@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Firestore } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION } from '../firebase/firebase.module';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { UserRoot } from '../types';
 import { storedJlptLevel } from './user.service';
 
@@ -25,7 +25,7 @@ export class LevelSyncService {
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
-    private readonly statsService: StatsService,
+    private readonly tutorContext: TutorContextService,
   ) {}
 
   /** Brings the account's level-dependent data up to its stored level. Never throws: failures are logged. */
@@ -45,7 +45,7 @@ export class LevelSyncService {
     const level = storedJlptLevel(user);
     if (!level || user?.aboveLevelComputedFor === level) return;
     await this.userKnowledgeUnitsService.recomputeAboveLevel(uid, level);
-    await this.statsService.rebuildAllowedGrammarKuIds(uid, level);
+    await this.tutorContext.rebuildAllowedGrammarKuIds(uid, level);
     await userRef.set({ aboveLevelComputedFor: level }, { merge: true });
   }
 }

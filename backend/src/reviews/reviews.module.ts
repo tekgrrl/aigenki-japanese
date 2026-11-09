@@ -12,6 +12,7 @@ import { ReviewProgressModule } from '../review-progress/review-progress.module'
 import { AuthModule } from '../auth/auth.module';
 import { KanjiModule } from '../kanji/kanji.module';
 import { ScenarioFlashModule } from '../scenario-flash/scenario-flash.module';
+import { DailyPlanModule } from '../daily-plan/daily-plan.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { ScenarioFlashModule } from '../scenario-flash/scenario-flash.module';
     AuthModule,
     KanjiModule,
     ScenarioFlashModule,
+    DailyPlanModule,
   ],
   controllers: [ReviewsController],
   providers: [ReviewsService],

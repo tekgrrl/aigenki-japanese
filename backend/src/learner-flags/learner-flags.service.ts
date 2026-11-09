@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 
 export type LearnerFlagKuType = 'Vocab' | 'Grammar';
 export type LearnerFlagChoice = 'exclude' | 'enroll';
@@ -13,7 +13,7 @@ export class LearnerFlagsService {
   constructor(
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
-    private readonly statsService: StatsService,
+    private readonly tutorContext: TutorContextService,
   ) {}
 
   /**
@@ -36,9 +36,9 @@ export class LearnerFlagsService {
 
     if (choice === 'exclude') {
       if (kuType === 'Vocab') {
-        await this.statsService.addToExcludedVocab(uid, content);
+        await this.tutorContext.addToExcludedVocab(uid, content);
       } else {
-        await this.statsService.addToExcludedGrammar(uid, content);
+        await this.tutorContext.addToExcludedGrammar(uid, content);
       }
       this.logger.log(`Excluded ${kuType} "${content}" for uid=${uid} (context=${context ?? 'unknown'})`);
       return { status: 'excluded' };
