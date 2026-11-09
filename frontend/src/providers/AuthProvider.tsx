@@ -14,8 +14,12 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
-  /** A level has been chosen. Until then every page but /profile redirects there (and the API refuses). */
-  profileComplete: boolean;
+  /**
+   * true: a level has been chosen. false: not yet, so only /profile renders and everything else
+   * redirects there (the API refuses too). null: unknown (signed out, or /users/me failed), so the
+   * app isn't held back on the frontend; the API still enforces the gate.
+   */
+  profileComplete: boolean | null;
   /** Called by /profile once the level is saved, so the app opens without a reload. */
   markProfileComplete: () => void;
   signOut: () => Promise<void>;
@@ -25,7 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   isAdmin: false,
-  profileComplete: false,
+  profileComplete: null,
   markProfileComplete: () => {},
   signOut: async () => {},
 });
@@ -38,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [profileComplete, setProfileComplete] = useState(false);
+  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -58,20 +62,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        setUser(currentUser);
-        // Idempotent — creates the UserRoot doc on first login, no-ops thereafter.
+        // Idempotent — creates the UserRoot doc on first login, no-ops thereafter. Read it before
+        // setting the user, so the redirect never runs with this user but an old or default flag.
+        let admin = false;
+        let complete: boolean | null = null; // unknown if /users/me fails
         try {
           const res = await apiFetch("/api/users/me");
           if (res.ok) {
             const data = await res.json();
-            setIsAdmin(data.isAdmin ?? false);
-            setProfileComplete(data.profileComplete === true);
+            admin = data.isAdmin ?? false;
+            complete = data.profileComplete === true;
           }
         } catch (e) {
           console.error("[AuthProvider] Failed to initialize user doc:", e);
         }
+        setIsAdmin(admin);
+        setProfileComplete(complete);
+        setUser(currentUser);
       } else {
         setUser(null);
+        setIsAdmin(false);
+        setProfileComplete(null);
       }
       setLoading(false);
     });
@@ -88,8 +99,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.push("/login");
     } else if (user && isPublic) {
       // Same sign-in link for everyone; an incomplete profile (no level chosen) goes to /profile.
-      router.push(profileComplete ? "/" : "/profile");
-    } else if (user && !profileComplete && pathname !== "/profile") {
+      router.push(profileComplete === false ? "/profile" : "/");
+    } else if (user && profileComplete === false && pathname !== "/profile") {
       router.push("/profile");
     }
   }, [user, loading, profileComplete, pathname, router]);
@@ -104,9 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // • Loading  → spinner
   // • No user, not on /login → null (redirect is in-flight, avoid flash)
   // • No user, on /login  → login page
-  // • User authenticated   → full app
+  // • User authenticated   → full app, except: an incomplete profile renders only /profile
+  //   (other pages would mount and fire requests the API refuses; the redirect is in flight)
   const isPublic = pathname === "/login" || pathname === "/auth/callback";
-  const shouldRender = !loading && (!!user || isPublic);
+  const heldAtProfile = !!user && profileComplete === false && pathname !== "/profile" && !isPublic;
+  const shouldRender = !loading && (!!user || isPublic) && !heldAtProfile;
 
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin, profileComplete, markProfileComplete: () => setProfileComplete(true), signOut }}>

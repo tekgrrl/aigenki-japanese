@@ -48,10 +48,18 @@ export class UserController {
     @UserId() uid: string,
     @Body() body: { showFurigana?: boolean; jlptLevel?: string; preferredUserRole?: string; audioFirstExperiment?: boolean },
   ) {
+    // The level as stored before this save (not getJlptLevel: "unset" must count as a change).
+    const previousLevel = body.jlptLevel ? (await this.userService.findById(uid))?.preferences?.jlptLevel : undefined;
     await this.userService.updatePreferences(uid, body);
-    if (body.jlptLevel) {
-      await this.userKnowledgeUnitsService.recomputeAboveLevel(uid, body.jlptLevel);
-      await this.statsService.rebuildAllowedGrammarKuIds(uid);
+    if (body.jlptLevel && body.jlptLevel !== previousLevel) {
+      // The level is saved and the profile complete either way; a failure here leaves some flags
+      // stale until the next level change, which is better than reporting the save as failed.
+      try {
+        await this.userKnowledgeUnitsService.recomputeAboveLevel(uid, body.jlptLevel);
+        await this.statsService.rebuildAllowedGrammarKuIds(uid);
+      } catch (e) {
+        this.logger.error(`Level saved for uid=${uid}, but recomputing aboveLevel / allowed grammar failed`, e);
+      }
     }
     return { ok: true };
   }

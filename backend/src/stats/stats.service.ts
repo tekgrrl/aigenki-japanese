@@ -502,9 +502,16 @@ export class StatsService {
      * so grammar now above their level drops out and grammar now within it comes in.
      */
     async rebuildAllowedGrammarKuIds(uid: string): Promise<string[]> {
-        const grammarIds = await this.selectAllowedGrammarKuIds(uid);
-        await this.db.collection('users').doc(uid).set({ tutorContext: { allowedGrammarKuIds: grammarIds } }, { merge: true });
-        this.logger.log(`Rebuilt allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
+        const userRef = this.db.collection('users').doc(uid);
+        const [grammarIds, userDoc] = await Promise.all([this.selectAllowedGrammarKuIds(uid), userRef.get()]);
+        const current: string[] = userDoc.data()?.tutorContext?.allowedGrammarKuIds ?? [];
+        const add = grammarIds.filter(id => !current.includes(id));
+        const remove = current.filter(id => !grammarIds.includes(id));
+        // arrayUnion / arrayRemove of just the difference, not a plain set: a grammar point enrolled
+        // during the rebuild (addToAllowedGrammar) must not be overwritten. Each call needs elements.
+        if (add.length > 0) await userRef.set({ tutorContext: { allowedGrammarKuIds: FieldValue.arrayUnion(...add) } }, { merge: true });
+        if (remove.length > 0) await userRef.update({ 'tutorContext.allowedGrammarKuIds': FieldValue.arrayRemove(...remove) });
+        this.logger.log(`Rebuilt allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs (+${add.length} -${remove.length})`);
         return grammarIds;
     }
 

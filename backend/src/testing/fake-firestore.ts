@@ -1,16 +1,34 @@
 /**
  * Minimal in-memory Firestore for unit specs: collections, sub-collections, doc get/set/
  * update (dotted paths), delete, add, getAll, batch, runTransaction, and where() with ==, in and
- * array-contains on (possibly nested) fields. select()/limit() are accepted and ignored.
+ * array-contains on (possibly nested) fields. FieldValue arrayUnion / arrayRemove / increment are
+ * applied on update and merge-set. select()/limit() are accepted and ignored.
  */
 type Data = Record<string, any>;
 type Op = '==' | 'in' | 'array-contains';
 
 const getPath = (d: Data, path: string) => path.split('.').reduce<any>((o, k) => (o == null ? undefined : o[k]), d);
 
+/**
+ * Applies a FieldValue.arrayUnion / arrayRemove / increment to the field's current value, as
+ * Firestore does; any other value is written as it is.
+ */
+function resolveTransform(current: unknown, value: any): unknown {
+  const kind = value?.constructor?.name;
+  const elements: unknown[] = value?.elements ?? [];
+  if (kind === 'ArrayUnionTransform') {
+    const arr = Array.isArray(current) ? [...current] : [];
+    for (const e of elements) if (!arr.includes(e)) arr.push(e);
+    return arr;
+  }
+  if (kind === 'ArrayRemoveTransform') return Array.isArray(current) ? current.filter(e => !elements.includes(e)) : [];
+  if (kind === 'NumericIncrementTransform') return (typeof current === 'number' ? current : 0) + value.operand;
+  return value;
+}
+
 function setPath(d: Data, path: string, value: unknown): Data {
   const [head, ...rest] = path.split('.');
-  if (rest.length === 0) return { ...d, [head]: value };
+  if (rest.length === 0) return { ...d, [head]: resolveTransform(d[head], value) };
   return { ...d, [head]: setPath(d[head] ?? {}, rest.join('.'), value) };
 }
 
@@ -78,7 +96,8 @@ class FakeDocRef {
 function deepMerge(a: Data, b: Data): Data {
   const out: Data = { ...a };
   for (const [k, v] of Object.entries(b)) {
-    out[k] = v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object' ? deepMerge(a[k], v) : v;
+    const isPlainMap = v && typeof v === 'object' && !Array.isArray(v) && v.constructor === Object;
+    out[k] = isPlainMap && a[k] && typeof a[k] === 'object' ? deepMerge(a[k], v) : resolveTransform(a[k], v);
   }
   return out;
 }

@@ -158,9 +158,11 @@ export class UserKnowledgeUnitsService {
    */
   async recomputeAboveLevel(uid: string, userLevel: string): Promise<number> {
     const ukus = (await this.userKusRef(uid).get()).docs;
-    const kus = new Map((await this.knowledgeUnitsService.getManyCached(ukus.map(d => d.data().kuId as string).filter(Boolean))).map(k => [k.id, k]));
+    // Older enrolment docs have no kuId field: their doc id is the KU id.
+    const kuIdOf = (d: FirebaseFirestore.QueryDocumentSnapshot) => (d.data().kuId as string | undefined) ?? d.id;
+    const kus = new Map((await this.knowledgeUnitsService.getManyCached(ukus.map(kuIdOf))).map(k => [k.id, k]));
     const changes = ukus
-      .map(d => ({ ref: d.ref, current: d.data().aboveLevel, next: isAboveLevel((kus.get(d.data().kuId)?.data as Record<string, any> | undefined)?.jlptLevel, userLevel) }))
+      .map(d => ({ ref: d.ref, current: d.data().aboveLevel, next: isAboveLevel((kus.get(kuIdOf(d))?.data as Record<string, any> | undefined)?.jlptLevel, userLevel) }))
       .filter(c => c.current !== c.next);
     for (let i = 0; i < changes.length; i += 450) {
       const batch = this.db.batch();

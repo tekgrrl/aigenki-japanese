@@ -20,7 +20,7 @@ export default function ProfilePage() {
   const router = useRouter();
   // The profile was incomplete when this page opened: show the banner and, once a level is
   // saved, the Continue button (it stays for the visit, even after markProfileComplete).
-  const [completing] = useState(!profileComplete);
+  const [completing] = useState(profileComplete === false);
   const [showFurigana, setShowFurigana] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>("system");
   // Required. "" = never chosen (the backend treats that as N5); shown as a placeholder to pick from.
@@ -118,7 +118,7 @@ export default function ProfilePage() {
       {completing && (
         <div className="mb-10 rounded-lg border border-shodo-ink/15 bg-shodo-paper-warm px-5 py-4">
           <p className="font-medium text-shodo-ink">Complete your profile</p>
-          {profileComplete ? (
+          {profileComplete === true ? (
             <div className="mt-2 flex items-center justify-between gap-4">
               <p className="text-sm text-shodo-ink/70">You're all set. You can change any of these later.</p>
               <button

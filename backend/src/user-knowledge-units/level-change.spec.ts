@@ -37,6 +37,13 @@ describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () =>
     expect(db.store('users').get('u1')!.tutorContext.leechVocab).toEqual([]); // siblings kept
   });
 
+  it('older enrolment docs with no kuId field are judged by their doc id', async () => {
+    const { db, ukuService } = await setup();
+    await db.collection('users').doc('u1').collection('user-kus').doc('g3').set({ status: 'reviewing' }); // doc id = KU id
+    await ukuService.recomputeAboveLevel('u1', 'N5');
+    expect(db.store('users/u1/user-kus').get('g3')!.aboveLevel).toBe(true);
+  });
+
   it('at N3: nothing is above level and both grammar points are allowed', async () => {
     const { ukuService, stats, users, flags, allowed } = await setup();
     await users.updatePreferences('u1', { jlptLevel: 'N3' });

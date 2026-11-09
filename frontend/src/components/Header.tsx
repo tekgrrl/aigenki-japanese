@@ -16,8 +16,10 @@ import DailyCheckInDialog from "./DailyCheckInDialog";
  */
 export default function Header() {
   // Until the profile is complete (a level chosen), only the logo and avatar menu show: every
-  // other page redirects to /profile and the API refuses stats and the daily plan.
-  const { user, profileComplete } = useAuth();
+  // other page redirects to /profile and the API refuses stats and the daily plan. Unknown (null,
+  // e.g. /users/me failed) shows the full header.
+  const { user, profileComplete: completeFlag } = useAuth();
+  const profileComplete = completeFlag !== false;
   const pathname = usePathname();
   const [stats, setStats] = useState({ learnCount: 0, reviewingCount: 0, reviewsDue: 0, simulateCount: 0 });
   const [showDailyNudge, setShowDailyNudge] = useState(false);
