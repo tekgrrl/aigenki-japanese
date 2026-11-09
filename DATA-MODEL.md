@@ -72,7 +72,7 @@ erDiagram
         string title         "Grammar: overridden with KU.data.title at read time"
         string meaning       "Grammar and Kanji"
         string formation     "Grammar: string or string[]"
-        string notes         "Grammar: editable; admin writes the global doc, users their overlay"
+        string notes         "Grammar: edited in the admin editor only (learners can't edit lessons)"
         array  examples      "Grammar: japanese, english, fragments, furigana, learnableTerms"
         string kanji         "Kanji: plus onyomi, kunyomi, strokes, radical, mnemonics, relatedVocab"
     }
@@ -225,12 +225,6 @@ erDiagram
         object contextExample "japanese, english, fragments, accepted_alternatives"
     }
 
-    UserLessonOverlay {
-        string kuId PK       "= KnowledgeUnit.id (subcollection user-lessons); merged on top of Lesson at read time"
-        string any_section   "any lesson section a non-admin user edited, e.g. notes, meaning_explanation"
-        string personalMnemonic "Kanji"
-    }
-
     UserQuestionState {
         string questionId PK "FK → Question.id (subcollection question-states)"
         boolean rejected
@@ -251,7 +245,6 @@ erDiagram
     KnowledgeUnit ||--o| Lesson : "generates (keyed by kuId)"
     Lesson o|--o{ ContentFlag : "flagged by validation"
     Scenario o|--o{ ContentFlag : "flagged by validation"
-    KnowledgeUnit ||--o| UserLessonOverlay : "overlay (keyed by kuId)"
     KnowledgeUnit ||--o{ UserKnowledgeUnit : "enrolled as"
     KnowledgeUnit ||--o{ ReviewFacet : "drilled by (Vocab/Kanji/Grammar facets)"
     KnowledgeUnit ||--o{ Question : "questions drawn from"

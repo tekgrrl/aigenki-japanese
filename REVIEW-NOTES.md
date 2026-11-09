@@ -45,6 +45,16 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Corpus data drift** (`lesson.vocab` vs KU content, missing `kanaOnly`) is fixed by hand as one-off
   data. It's re-audited when the Vocab corpus reaches 800+, and code safeguards are added only then.
 
+## Lessons shown to learners
+- **Lessons are shown as the Start Learning slides, all on one page** (the lesson page, the Review Lesson
+  panel and the library lesson page; the owner's decision). So a Vocab lesson shows one example per
+  usage, not every example, and a Grammar point shows no "where you met it" card. That's intended.
+  (The slides do include the Vocab reading explanation and the Kanji radical and meaning mnemonic.)
+- **In the stacked view nothing plays by itself**: every slide opens at once, so the learner taps play.
+- **`user-grammar-lessons` is written but unread** (kept for a future "where you met it" card).
+- **Learners can't edit lessons or choose their card types.** The per-user overlay (`user-lessons`) is
+  retired, and the old docs are left in place, unread.
+
 ## Start Learning and audio-first
 - **When items are waiting** (user-knowledge-unit `status: 'learning'` with no facets), Start
   Learning serves **only** those, at most 10 per session, oldest first, with **no** grammar/vocab

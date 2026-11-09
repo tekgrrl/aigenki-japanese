@@ -87,18 +87,6 @@ export class ReviewsController {
     return this.reviewsService.updateFacetSrs(uid, id, body.result, body.usageId);
   }
 
-  @Post('generate')
-  async generateReviewFacets(
-    @UserId() uid: string,
-    @Body() body: { kuId: string; facetsToCreate: { key: string; data?: any }[]; selfCertifiedFacets?: string[] }
-  ) {
-    if (!body.kuId || !body.facetsToCreate || body.facetsToCreate.length === 0) {
-      throw new BadRequestException('Missing kuId or facetsToCreate');
-    }
-
-    return this.reviewsService.generateReviewFacets(uid, body.kuId, body.facetsToCreate, body.selfCertifiedFacets ?? []);
-  }
-
   @Post('initialize-sequence')
   async initializeSequence(
     @UserId() uid: string,

@@ -92,7 +92,7 @@ export class ReviewProgressService {
       return { stage: 0, facetsCreated: 0 };
     }
 
-    const lesson = await this.lessonsService.findByKuId(uid, kuId);
+    const lesson = await this.lessonsService.lessonForSequence(uid, ku);
     if (!lesson) {
       this.logger.warn(`initializeSequence: no lesson found for kuId=${kuId}`);
       return { stage: 0, facetsCreated: 0 };
@@ -424,7 +424,7 @@ export class ReviewProgressService {
     );
     if (!allReady) return; // not every facet ready yet — normal, the common case, not logged
 
-    const lesson = await this.lessonsService.findByKuId(uid, kuId);
+    const lesson = await this.lessonsService.lessonForSequence(uid, ku);
     if (!lesson) {
       this.logger.warn(`checkAndAdvanceStage: no lesson found for kuId=${kuId} (uid=${uid}) despite having facets — can't determine next stage`);
       return;
