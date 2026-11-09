@@ -31,7 +31,7 @@ export class KnowledgeUnitsController {
         if (status === 'user') {
             return this.userKnowledgeUnitsService.findAllAsKUs(uid);
         }
-        return this.knowledgeUnitsService.findAll({ status, type, content, jlptLevel });
+        return this.knowledgeUnitsService.findAll({ type, content, jlptLevel });
     }
 
     @Put(':id')

@@ -14,6 +14,7 @@ import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAsi
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
 import { stripFurigana } from '../lib/furigana-text';
+import { adminForAllUsers } from '../users/user.service';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -482,8 +483,9 @@ export class LessonsService {
   }
 
   async updateLesson(uid: string, kuId: string, section: string, content: string) {
-    // The admin user and anyone AdminGuard lets in edit the global lesson; others get a personal overlay.
-    const isAdmin = uid === ADMIN_USER_ID || await this.userService.isAdmin(uid);
+    // Learner route (no AdminGuard): only the admin user, or everyone under the ADMIN_ALL dev
+    // switch, edits the global lesson. Others get a personal overlay.
+    const isAdmin = uid === ADMIN_USER_ID || adminForAllUsers();
     if (isAdmin) {
       await this.writeGlobalLesson(kuId, { [section]: content });
     } else {
@@ -560,7 +562,7 @@ export class LessonsService {
     if (waiting.length > 0) return waiting;
 
     const prefs = await this.userService.getPreferences(uid);
-    const jlptLevel = prefs.jlptLevel ?? 'N5';
+    const jlptLevel = prefs.jlptLevel;
 
     const facetsCol = this.facetStore.query(uid);
 

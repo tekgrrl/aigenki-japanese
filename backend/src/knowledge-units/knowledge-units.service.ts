@@ -102,13 +102,9 @@ export class KnowledgeUnitsService {
         this.searchCache = this.searchCache.filter(k => k.id !== id);
     }
 
-    async findAll({ status, type, content, jlptLevel }: { status?: string, type?: string, content?: string[], jlptLevel?: string }) {
+    async findAll({ type, content, jlptLevel }: { type?: string, content?: string[], jlptLevel?: string }) {
         try {
             let query: Query = this.db.collection(KNOWLEDGE_UNITS_COLLECTION) as unknown as Query;
-
-            if (status) {
-                query = query.where("status", "==", status);
-            }
 
             if (type) {
                 query = query.where("type", "==", type);

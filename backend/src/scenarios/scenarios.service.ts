@@ -27,6 +27,7 @@ import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { FacetStore } from '../facets/facet-store';
 import { stripFurigana } from '../lib/furigana-text';
+import { jlptLevelOf } from '../users/user.service';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
@@ -75,7 +76,7 @@ export class ScenariosService {
   private buildGrammarToolHandlers(uid: string) {
     return {
       get_grammar_patterns: async (args: Record<string, unknown>) => {
-        const jlptLevel = (args.jlptLevel as string) || 'N4';
+        const jlptLevel = (args.jlptLevel as string) || await this.userService.getJlptLevel(uid);
 
         // Fetch only grammar KUs the user has enrolled (and are not above their level)
         const ukuSnap = await this.db
@@ -287,9 +288,9 @@ export class ScenariosService {
     const userPrefs = user?.preferences;
     const resolvedDto: GenerateScenarioDto = {
       ...dto,
-      difficulty: dto.difficulty ?? userPrefs?.jlptLevel ?? 'N4',
+      difficulty: dto.difficulty ?? jlptLevelOf(user ?? undefined),
       userRole: dto.userRole ?? userPrefs?.preferredUserRole,
-      sourceContextSentence: (dto.sourceContextSentence ? stripFurigana(dto.sourceContextSentence).trim() : undefined),
+      sourceContextSentence: dto.sourceContextSentence == null ? undefined : stripFurigana(dto.sourceContextSentence).trim(),
     };
 
     const grammarSection = resolvedDto.sourceType === 'grammar-pattern' && resolvedDto.sourceSectionId
@@ -492,7 +493,7 @@ export class ScenariosService {
     const prompt = buildImportPrompt({
       ...dto,
       aiRoles: resolvedAiRoles,
-      difficulty: dto.difficulty ?? 'N4',
+      difficulty: dto.difficulty ?? await this.userService.getJlptLevel(uid),
     });
 
     try {

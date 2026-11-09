@@ -18,7 +18,8 @@ export default function ProfilePage() {
   const { user } = useAuth();
   const [showFurigana, setShowFurigana] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>("system");
-  const [jlptLevel, setJlptLevel] = useState<string>("");
+  // Required: an account that never chose a level is treated as N5 everywhere (backend default).
+  const [jlptLevel, setJlptLevel] = useState<string>("N5");
   const [preferredUserRole, setPreferredUserRole] = useState<string>("");
   const [audioFirst, setAudioFirst] = useState(false);
   const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -80,7 +81,7 @@ export default function ProfilePage() {
 
   const handleJlptLevel = useCallback(async (val: string) => {
     setJlptLevel(val);
-    await patchPreferences({ jlptLevel: val || null });
+    await patchPreferences({ jlptLevel: val });
   }, [patchPreferences]);
 
   const handlePreferredUserRole = useCallback(async (val: string) => {
@@ -204,7 +205,7 @@ export default function ProfilePage() {
             <div>
               <p className="text-sm font-medium text-shodo-ink">Current JLPT Level</p>
               <p className="text-xs text-shodo-ink/50 mt-0.5">
-                Used as the default difficulty when generating scenarios
+                Sets the level of your lessons, questions and scenarios
               </p>
             </div>
             <select
@@ -212,7 +213,6 @@ export default function ProfilePage() {
               onChange={(e) => handleJlptLevel(e.target.value)}
               className="ml-4 shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
             >
-              <option value="">Not set</option>
               {JLPT_LEVELS.map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}
