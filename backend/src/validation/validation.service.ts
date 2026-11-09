@@ -6,6 +6,7 @@ import { FIRESTORE_CONNECTION, CONTENT_FLAGS_COLLECTION, LESSONS_COLLECTION, KNO
 import { ApilogService } from '../apilog/apilog.service';
 import { ValidationResult, ContentFlag } from '../types';
 import { buildValidationPrompt } from '../prompts/validation.prompts';
+import { UserService } from '../users/user.service';
 
 @Injectable()
 export class ValidationService implements OnModuleInit {
@@ -17,6 +18,7 @@ export class ValidationService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly apilogService: ApilogService,
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly userService: UserService,
   ) {}
 
   onModuleInit() {
@@ -158,8 +160,7 @@ export class ValidationService implements OnModuleInit {
     }
     let userLevel = params.userLevel;
     if (!userLevel) {
-      const userDoc = await this.db.collection('users').doc(uid).get();
-      userLevel = (userDoc.data()?.preferences?.jlptLevel as string | undefined) ?? 'N5';
+      userLevel = await this.userService.getJlptLevel(uid);
     }
 
     const flag: Omit<ContentFlag, 'id'> = {

@@ -29,6 +29,7 @@ import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledg
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { StatsService } from '../stats/stats.service';
 import { FacetStore } from '../facets/facet-store';
+import { UserService } from '../users/user.service';
 
 /** A picture card needs the word plus three distractor words, or it can't record a result. */
 const MIN_PICTURED_WORDS = 4;
@@ -58,6 +59,7 @@ export class ReviewProgressService {
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
     private readonly learningProgressService: LearningProgressService,
     private readonly statsService: StatsService,
+    private readonly userService: UserService,
   ) {}
 
   /**
@@ -215,8 +217,7 @@ export class ReviewProgressService {
    */
   private async audioFirstBlocker(uid: string, kuId: string, { checkFlag }: { checkFlag: boolean }): Promise<string | null> {
     if (checkFlag) {
-      const user = await this.db.collection('users').doc(uid).get();
-      if (user.data()?.preferences?.audioFirstExperiment !== true) return 'The audio-first experiment is off in your profile';
+      if ((await this.userService.getPreferences(uid)).audioFirstExperiment !== true) return 'The audio-first experiment is off in your profile';
     }
     if ((await this.approvedPictures(kuId)).length === 0) {
       // Whole-KU pictures aren't shown to learners yet (no card, slide or distractor uses them).

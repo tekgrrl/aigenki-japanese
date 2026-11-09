@@ -6,6 +6,7 @@ import { ReviewsService } from '../reviews/reviews.service';
 import { FacetStore } from '../facets/facet-store';
 import { ConceptKnowledgeUnit, UserConcept, ReviewFacet } from '../types';
 import { buildConceptPrompt } from '../prompts/concept.prompts';
+import { UserService } from '../users/user.service';
 
 
 export type UserConceptWithData = UserConcept & {
@@ -21,6 +22,7 @@ export class ConceptsService {
     private readonly geminiService: GeminiService,
     private readonly reviewsService: ReviewsService,
     private readonly facetStore: FacetStore,
+    private readonly userService: UserService,
   ) { }
 
   private userConceptsRef(uid: string) {
@@ -142,8 +144,7 @@ export class ConceptsService {
   async generate(uid: string, topic: string, notes?: string): Promise<ConceptKnowledgeUnit & { id: string }> {
     this.logger.log(`Generating concept for topic="${topic}" uid=${uid}`);
 
-    const userDoc = await this.db.collection('users').doc(uid).get();
-    const jlptLevel: string = (userDoc.data() as any)?.preferences?.jlptLevel ?? 'N5';
+    const jlptLevel = await this.userService.getJlptLevel(uid);
 
     const prompt = buildConceptPrompt(topic, jlptLevel, notes);
     this.logger.log(`Prompt length: ${prompt.length} chars`);

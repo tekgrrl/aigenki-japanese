@@ -26,6 +26,7 @@ import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
 import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { FacetStore } from '../facets/facet-store';
+import { stripFurigana } from '../lib/furigana-text';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
@@ -288,7 +289,7 @@ export class ScenariosService {
       ...dto,
       difficulty: dto.difficulty ?? userPrefs?.jlptLevel ?? 'N4',
       userRole: dto.userRole ?? userPrefs?.preferredUserRole,
-      sourceContextSentence: dto.sourceContextSentence?.replace(/\[[^\]]*\]/g, '').trim(),
+      sourceContextSentence: (dto.sourceContextSentence ? stripFurigana(dto.sourceContextSentence).trim() : undefined),
     };
 
     const grammarSection = resolvedDto.sourceType === 'grammar-pattern' && resolvedDto.sourceSectionId

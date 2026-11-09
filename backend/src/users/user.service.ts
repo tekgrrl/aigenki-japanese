@@ -1,7 +1,16 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Firestore, Timestamp } from 'firebase-admin/firestore';
+import { Firestore } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION } from '../firebase/firebase.module';
 import { UserRoot } from '../types';
+import { JlptLevel } from '../prompts/curriculum';
+
+export type UserPreferences = NonNullable<UserRoot['preferences']>;
+
+/** The study level from an already-read user doc: their choice, or 'N5' if they never chose. */
+export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel => user?.preferences?.jlptLevel ?? 'N5';
+
+/** The dev switch that makes every user an admin (`.env`, never set in production). */
+const adminForAll = () => process.env.ADMIN_ALL === 'true';
 
 @Injectable()
 export class UserService {
@@ -16,7 +25,7 @@ export class UserService {
   private buildDefaultUserRoot(uid: string): UserRoot {
     return {
       id: uid,
-      isAdmin: process.env.ADMIN_ALL === 'true',
+      isAdmin: adminForAll(),
       stats: {
         reviewForecast: {},
         hourlyForecast: {},
@@ -64,7 +73,7 @@ export class UserService {
         void userRef.update({ email });
         data.email = email;
       }
-      return { id: uid, ...data, isAdmin: data.isAdmin ?? (process.env.ADMIN_ALL === 'true') } as UserRoot;
+      return { id: uid, ...data, isAdmin: data.isAdmin ?? adminForAll() } as UserRoot;
     }
 
     this.logger.log(`UserRoot not found for uid: ${uid}. Creating default document.`);
@@ -87,6 +96,26 @@ export class UserService {
       return null;
     }
     return { id: uid, ...userDoc.data() } as UserRoot;
+  }
+
+  /**
+   * The user's preferences as stored (`{}` if none): unset fields stay unset. Services read
+   * preferences here rather than digging them out of the user doc. For the study level with
+   * its default, use `getJlptLevel`.
+   */
+  async getPreferences(uid: string): Promise<UserPreferences> {
+    return ((await this.db.collection('users').doc(uid).get()).data()?.preferences as UserPreferences | undefined) ?? {};
+  }
+
+  /** The level the user studies at, for generation and queues: their choice, or 'N5' if they never chose. */
+  async getJlptLevel(uid: string): Promise<JlptLevel> {
+    return jlptLevelOf({ preferences: await this.getPreferences(uid) });
+  }
+
+  /** Whether the user may use admin tools: everyone when ADMIN_ALL is on, else `isAdmin: true` on their doc. */
+  async isAdmin(uid: string): Promise<boolean> {
+    if (adminForAll()) return true;
+    return (await this.db.collection('users').doc(uid).get()).data()?.isAdmin === true;
   }
 
   async updatePreferences(uid: string, prefs: { showFurigana?: boolean; jlptLevel?: string; preferredUserRole?: string; audioFirstExperiment?: boolean }): Promise<void> {

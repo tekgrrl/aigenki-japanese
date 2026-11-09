@@ -21,6 +21,7 @@ import {
   VocabLesson,
 } from '../types';
 import { IMAGE_EXT, PictureRenderer, TextCheck } from './picture-renderer';
+import { stripFurigana } from '../lib/furigana-text';
 
 // The picture types live in src/types; re-exported for this module's existing importers.
 export type { AdminPicture, Picture, PictureSource, PictureStatus, PictureSubject, PictureSubjectKind };
@@ -740,11 +741,10 @@ export function usagesLabelled(lesson: VocabLesson): boolean {
 export function usageSources(lesson: VocabLesson): PictureSource[] {
   const examples = lesson.context_examples ?? [];
   const definition = (lesson.definitions ?? [])[0] ?? lesson.definition ?? '';
-  const strip = (s: string) => s.replace(/\[[^\]]*\]/g, '');
   if (!examples.length) return [{ usage: definition, definition, sentence: '', translation: '' }];
   if (!examples.every(e => e.usage)) {
     const e = examples[0];
-    return [{ usage: definition, definition, sentence: strip(e.sentence), translation: e.translation }];
+    return [{ usage: definition, definition, sentence: stripFurigana(e.sentence), translation: e.translation }];
   }
   const seen = new Set<string>();
   const sources: PictureSource[] = [];
@@ -752,7 +752,7 @@ export function usageSources(lesson: VocabLesson): PictureSource[] {
     const key = usageKey(e.usage);
     if (seen.has(key)) continue;
     seen.add(key);
-    sources.push({ usage: e.usage!.trim(), definition, sentence: strip(e.sentence), translation: e.translation });
+    sources.push({ usage: e.usage!.trim(), definition, sentence: stripFurigana(e.sentence), translation: e.translation });
   }
   return sources;
 }

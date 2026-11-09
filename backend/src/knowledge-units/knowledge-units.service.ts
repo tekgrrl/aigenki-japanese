@@ -299,7 +299,6 @@ export class KnowledgeUnitsService {
                 kanji: kanjiIn(content),
                 ...(hint?.jlptLevel ? { jlptLevel: hint.jlptLevel } : {}),
             },
-            status: 'learning',
             createdAt: Timestamp.now(),
             relatedUnits: [],
         });
@@ -349,7 +348,6 @@ export class KnowledgeUnitsService {
             relatedUnits: body.relatedUnits || [],
             data: body.type === 'Vocab' ? { ...(body.data || {}), kanji: kanjiIn(body.content) } : (body.data || {}),
             createdAt: Timestamp.now(),
-            status: "learning",
         };
         delete newKuData.userId; // KUs are global; no user ownership
 
@@ -472,7 +470,6 @@ export class KnowledgeUnitsService {
                     type: item.type,
                     data: item.type === 'Vocab' ? { ...(item.data || {}), kanji: kanjiIn(item.content) } : (item.data || {}),
                     relatedUnits: item.relatedUnits || [],
-                    status: 'learning',
                     createdAt: Timestamp.now(),
                 },
             });

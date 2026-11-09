@@ -171,6 +171,8 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 
 **Sub-collection routing** — per-user data routes `ADMIN_USER_ID` (`user_default`) to the legacy top-level collection and everyone else to `users/{uid}/<collection>`. For review facets this lives in one place, `FacetStore` (`backend/src/facets/facet-store.ts`, a global provider): `query(uid)` for reads of several facets (adds the admin's `userId` filter), `get(uid, id)` for one, `doc()` / `newDoc()` refs for writes, transactions and batches, `ownerTag(uid)` spread into new facets. `forKu(uid, kuId)` for every facet belonging to a KU (testing it, or in its sequence). The raw collection is private. Never build a `review-facets` path by hand. Scenarios use `ScenariosService.scenariosColRef`, except for a hand-written copy in `StatsService.getDashboardStats` (to be moved).
 
+**User preferences and admin** — read through `UserService` (global): `getPreferences(uid)` (as stored), `getJlptLevel(uid)` (with the `'N5'` default; `jlptLevelOf(userDoc)` when the doc is already read), `isAdmin(uid)` (`ADMIN_ALL` or `isAdmin: true`; used by `AdminGuard`). Don't read `preferences` or `ADMIN_ALL` directly.
+
 **Global collections** (`knowledge-units`, `concepts`, `questions`, `lessons/{kuId}`) have no `userId` on new documents. `createdBy` is used for audit only where present.
 
 **Exceptions still using `userId` field scoping:**
