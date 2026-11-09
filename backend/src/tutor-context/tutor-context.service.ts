@@ -33,14 +33,7 @@ export class TutorContextService {
         await this.db.runTransaction(async (transaction) => {
             const doc = await transaction.get(userRef);
             const entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
-            const idx = entries.findIndex(e => e.content === content);
-            if (idx >= 0) {
-                const merged = Array.from(new Set([...entries[idx].facetTypes, ...facetTypes]));
-                entries[idx] = { content, facetTypes: merged };
-            } else {
-                entries.push({ content, facetTypes });
-            }
-            transaction.update(userRef, { [`tutorContext.${field}`]: entries });
+            transaction.update(userRef, { [`tutorContext.${field}`]: withFacetTypes(entries, content, facetTypes) });
         });
     }
 
@@ -55,21 +48,8 @@ export class TutorContextService {
         const userRef = this.db.collection('users').doc(uid);
         await this.db.runTransaction(async (transaction) => {
             const doc = await transaction.get(userRef);
-            let entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
-            if (facetType === undefined) {
-                entries = entries.filter(e => e.content !== content);
-            } else {
-                const idx = entries.findIndex(e => e.content === content);
-                if (idx >= 0) {
-                    const remaining = entries[idx].facetTypes.filter(t => t !== facetType);
-                    if (remaining.length === 0) {
-                        entries.splice(idx, 1);
-                    } else {
-                        entries[idx] = { content, facetTypes: remaining };
-                    }
-                }
-            }
-            transaction.update(userRef, { [`tutorContext.${field}`]: entries });
+            const entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
+            transaction.update(userRef, { [`tutorContext.${field}`]: withoutFacetType(entries, content, facetType) });
         });
     }
 
@@ -94,12 +74,21 @@ export class TutorContextService {
         });
     }
 
-    async addToLeechVocab(uid: string, content: string, facetType: FacetType): Promise<void> {
-        await this.mergeTutorVocabEntry(uid, 'leechVocab', content, [facetType]);
-    }
-
-    async removeFromLeechVocab(uid: string, content: string, facetType: FacetType): Promise<void> {
-        await this.removeTutorVocabFacetType(uid, 'leechVocab', content, facetType);
+    /**
+     * After a review: a facet that became a leech ('add') or was passed after failures ('remove').
+     * Updates leechVocab and, for a Grammar point, weakGrammarPoints, in one transaction.
+     */
+    async updateLeech(uid: string, content: string, facetType: FacetType, change: 'add' | 'remove', isGrammar: boolean): Promise<void> {
+        const userRef = this.db.collection('users').doc(uid);
+        const apply = (entries: TutorVocabEntry[] = []) =>
+            change === 'add' ? withFacetTypes(entries, content, [facetType]) : withoutFacetType(entries, content, facetType);
+        await this.db.runTransaction(async (transaction) => {
+            const ctx = (await transaction.get(userRef)).data()?.tutorContext ?? {};
+            transaction.update(userRef, {
+                'tutorContext.leechVocab': apply(ctx.leechVocab),
+                ...(isGrammar ? { 'tutorContext.weakGrammarPoints': apply(ctx.weakGrammarPoints) } : {}),
+            });
+        });
     }
 
     /**
@@ -212,17 +201,28 @@ export class TutorContextService {
         });
     }
 
-    async addToWeakGrammarPoints(uid: string, pattern: string, facetType: FacetType): Promise<void> {
-        await this.mergeTutorVocabEntry(uid, 'weakGrammarPoints', pattern, [facetType]);
-    }
-
-    async removeFromWeakGrammarPoints(uid: string, pattern: string, facetType: FacetType): Promise<void> {
-        await this.removeTutorVocabFacetType(uid, 'weakGrammarPoints', pattern, facetType);
-    }
-
     async updateCurriculumNode(uid: string, jlptLevel: string): Promise<void> {
         await this.db.collection('users').doc(uid).update({
             'tutorContext.currentCurriculumNode': jlptLevel,
         });
     }
+}
+
+/** `entries` with facetTypes merged into the entry for `content` (added if missing). */
+function withFacetTypes(entries: TutorVocabEntry[], content: string, facetTypes: FacetType[]): TutorVocabEntry[] {
+    const out = [...entries];
+    const idx = out.findIndex(e => e.content === content);
+    if (idx >= 0) out[idx] = { content, facetTypes: Array.from(new Set([...out[idx].facetTypes, ...facetTypes])) };
+    else out.push({ content, facetTypes });
+    return out;
+}
+
+/** `entries` without `facetType` on the entry for `content` (the entry goes when none remain; undefined = the whole entry). */
+function withoutFacetType(entries: TutorVocabEntry[], content: string, facetType?: FacetType): TutorVocabEntry[] {
+    if (facetType === undefined) return entries.filter(e => e.content !== content);
+    return entries.flatMap(e => {
+        if (e.content !== content) return [e];
+        const remaining = e.facetTypes.filter(t => t !== facetType);
+        return remaining.length > 0 ? [{ content, facetTypes: remaining }] : [];
+    });
 }

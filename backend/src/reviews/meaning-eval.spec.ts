@@ -1,6 +1,6 @@
 import { ReviewsService } from './reviews.service';
 import { FakeFirestore } from '../testing/fake-firestore';
-import { FacetStore } from '../facets/facet-store';
+import { makeReviewsService } from '../testing/make-reviews-service';
 
 const kurai = {
   type: 'Vocab',
@@ -16,8 +16,7 @@ function makeService(ai: { result: 'pass' | 'fail'; usageId?: string; misspelled
   const db = new FakeFirestore();
   db.store('lessons').set('k', structuredClone(kurai));
   const gemini = { evaluateAnswer: jest.fn().mockResolvedValue({ explanation: '', ...ai }) };
-  const none = {} as any;
-  const service = new ReviewsService(db as any, new FacetStore(db as any), gemini as any, none, none, none, none, none, none, none, none, none, none, none);
+  const service = makeReviewsService(db, { gemini });
   return { service, gemini, db };
 }
 

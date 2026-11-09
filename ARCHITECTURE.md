@@ -341,7 +341,7 @@ Written in `ScenariosService.writeProgressUpdate` (called from the `advanceState
 
 Once all vocab KUs linked to a `drill`-state scenario have `minSrsStage >= 1`, `vocabReady: true` is written to the scenario document.
 
-Trigger: post-transaction block in `ReviewsService.updateFacetSrs` — after a successful SRS stage increment, looks up the UKU by `kuId`; if `uku.source.type === 'scenario'`, calls `ScenariosService.checkAndSetVocabReady(uid, scenarioId)`. That method early-exits if already `true` or `state !== 'drill'`, then uses `getKuStatus` to check all linked KU facets. Errors are caught and logged (non-blocking). Constant `VOCAB_READY_MIN_STAGE = 1` in `scenarios.service.ts`.
+Trigger: `ReviewOutcomeService.onGraded` (run after `ReviewsService.updateFacetSrs`'s transaction) — after a successful SRS stage increment, looks up the UKU by `kuId`; if `uku.source.type === 'scenario'`, calls `ScenariosService.checkAndSetVocabReady(uid, scenarioId)`. That method early-exits if already `true` or `state !== 'drill'`, then uses `getKuStatus` to check all linked KU facets. Errors are caught and logged (non-blocking). Constant `VOCAB_READY_MIN_STAGE = 1` in `scenarios.service.ts`.
 
 Intended use: dashboard queries such as `where('state','==','drill').where('vocabReady','==',true)`. Requires a Firestore composite index on `users/{uid}/scenarios`.
 
@@ -427,8 +427,8 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 | `stats.totalReviews` / `stats.passedReviews` | same | same |
 | `stats.levelProgress.{n5\|n4\|...}.total` | `StatsService.recordKuEnrolled` | `UserKnowledgeUnitsService.create` (non-blocking) |
 | `stats.levelProgress.{n5\|n4\|...}.mastered` | `StatsService.recordKuMastered` | `LearningProgressService.recomputeAndCache` on mastered transition |
-| `stats.recentlyPromoted` | `DailyPlanService.recordPromotion` | `ReviewsService.updateFacetSrs` on a promotion (post-transaction, non-blocking); pruned after 48h |
-| `stats.scenarioOpportunities` | `DailyPlanService.recordScenarioOpportunity` | same, when a Grammar point crosses an SRS level without a Flash chain; pruned after 7 days, removed on dismiss |
+| `stats.recentlyPromoted` | `DailyPlanService.recordPromotion` | `ReviewOutcomeService.onGraded` on a promotion (after the SRS transaction, non-blocking); pruned after 48h |
+| `stats.scenarioOpportunities` | `DailyPlanService.recordPromotion` (same transaction) | same, when a Grammar point crosses an SRS level without a Flash chain; pruned after 7 days, removed on dismiss |
 
 `stats.lastReviewDate` is optional on the document — the default user doc omits it so the first-ever review correctly sets the streak to 1.
 
@@ -453,7 +453,7 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 | Field | Hook | Trigger |
 |---|---|---|
 | `frontierVocab` | `LearningProgressService.recomputeAndCache` | Added on `learning→reviewing`; removed on `→mastered`. `AI-Generated-Question` excluded from `facetTypes` (it's a question format, not a knowledge dimension). |
-| `leechVocab` / `weakGrammarPoints` | `ReviewsService.updateFacetSrs` (post-transaction, non-blocking) | Added when `ReviewFacet.consecutiveFailures` crosses 3; removed when user passes after prior failures. |
+| `leechVocab` / `weakGrammarPoints` | `ReviewOutcomeService.onGraded` → `TutorContextService.updateLeech` (one transaction, non-blocking) | Added when `ReviewFacet.consecutiveFailures` crosses 3; removed when user passes after prior failures. |
 | `allowedGrammar` | `UserKnowledgeUnitsService.create` (non-blocking) | Added when a Grammar KU is enrolled. |
 | `currentCurriculumNode` | `UserKnowledgeUnitsService.create` (non-blocking) | Set to jlptLevel of the enrolled KU. |
 
@@ -464,6 +464,17 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 `FieldValue.arrayUnion/arrayRemove` cannot merge nested objects, so all mutations use Firestore transaction-based read-modify-write helpers in `TutorContextService`: `mergeTutorVocabEntry` (add/merge) and `removeTutorVocabFacetType` (remove one facet type, drop entry if none remain).
 
 `allowedGrammar` stays as `string[]` — no per-facet granularity needed.
+
+#### After a review is graded
+
+`ReviewsService.updateFacetSrs` answers once its SRS transaction commits, then hands what changed to
+`ReviewOutcomeService.onGraded` (`backend/src/reviews/review-outcome.service.ts`, not awaited). It runs
+in a fixed order, each step catching and logging its own failure so one failure doesn't skip the rest:
+(1) learning progress: `checkAndAdvanceStage` on a promotion, *then* `recomputeAndCache` (so the last
+status write sees the advanced stage; F-001), and the component kanji's status for a Kanji-Component facet;
+(2) scenario `vocabReady`; (3) leech / weak grammar (`TutorContextService.updateLeech`); (4) daily plan
+(`DailyPlanService.recordPromotion`, with a scenario opportunity) or the scenario Flash chain. Picture-choice
+facets stop after (2). New "react to a review" behaviour goes in `ReviewOutcomeService`, not `ReviewsService`.
 
 #### Leech detection: why `updateFacetSrs` not `recordAnswer`
 

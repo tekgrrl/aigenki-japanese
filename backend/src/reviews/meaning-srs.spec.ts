@@ -1,6 +1,5 @@
-import { ReviewsService } from './reviews.service';
 import { FakeFirestore } from '../testing/fake-firestore';
-import { FacetStore } from '../facets/facet-store';
+import { makeReviewsService } from '../testing/make-reviews-service';
 
 const usages = ['dark', 'gloom', 'unfam'].map(id => ({ id, label: id, meaning: id, acceptedAnswers: [] }));
 
@@ -12,7 +11,7 @@ function setup(srsStage: number, provenUsageIds: string[] = [], lessonUsages = u
     kuId: 'k', facetType: 'Content-to-Definition', srsStage, provenUsageIds, nextReviewAt: new Date(0), consecutiveFailures: 0,
   });
   const quiet = new Proxy({}, { get: () => jest.fn().mockResolvedValue(undefined) }) as any;
-  const service = new ReviewsService(db as any, new FacetStore(db as any), quiet, quiet, quiet, quiet, quiet, quiet, quiet, quiet, quiet, quiet, quiet, quiet);
+  const service = makeReviewsService(db, {}, quiet);
   const facet = () => db.store('users/u/review-facets').get('f')!;
   return { service, facet };
 }

@@ -4,6 +4,17 @@ import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/fi
 import { PromotedEntry, ReviewFacet, ScenarioOpportunity, UserRoot } from '../types';
 import { FacetStore } from '../facets/facet-store';
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/** `existing` without entries older than `windowMs` or for the same kuId, plus `entry`. */
+function withRecent<T extends { kuId: string }>(existing: T[] | undefined, entry: T, tsKey: keyof T, windowMs: number): T[] {
+  const cutoffMs = Date.now() - windowMs;
+  return [
+    ...(existing ?? []).filter(e => (e[tsKey] as unknown as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId),
+    entry,
+  ];
+}
+
 export interface LeechEntry {
   kuId: string;
   content: string;
@@ -31,38 +42,27 @@ export class DailyPlanService {
     private readonly facetStore: FacetStore,
   ) {}
 
-  async recordPromotion(uid: string, entry: Omit<PromotedEntry, 'promotedAt'>): Promise<void> {
-    const userRef = this.db.collection('users').doc(uid);
-    await this.db.runTransaction(async (transaction) => {
-      const doc = await transaction.get(userRef);
-      const existing: PromotedEntry[] = doc.data()?.stats?.recentlyPromoted ?? [];
-      const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
-      // Prune stale entries and remove any existing entry for this kuId (we'll re-add with latest data)
-      const pruned = existing.filter(
-        e => (e.promotedAt as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId,
-      );
-      pruned.push({ ...entry, promotedAt: Timestamp.now() });
-      transaction.update(userRef, { 'stats.recentlyPromoted': pruned });
-    });
-  }
-
   /**
-   * Records a dismissible "practice this in a Scenario" opportunity, surfaced in the
-   * daily plan. Purely a suggestion — never read by SRS/facet logic. Pruned after 7
-   * days (longer than recordPromotion's 48h window since this is meant to be acted on
-   * at leisure, not urgently) and de-duped by kuId.
+   * After a review promoted a KU: records it in `stats.recentlyPromoted` (kept 48h) and, when given,
+   * a dismissible "practice this in a Scenario" opportunity in `stats.scenarioOpportunities` (kept
+   * 7 days, since it's acted on at leisure). Both lists are de-duped by kuId, in one transaction.
+   * Purely daily-plan suggestions: never read by SRS/facet logic.
    */
-  async recordScenarioOpportunity(uid: string, entry: Omit<ScenarioOpportunity, 'createdAt'>): Promise<void> {
+  async recordPromotion(
+    uid: string,
+    entry: Omit<PromotedEntry, 'promotedAt'>,
+    opportunity?: Omit<ScenarioOpportunity, 'createdAt'>,
+  ): Promise<void> {
     const userRef = this.db.collection('users').doc(uid);
     await this.db.runTransaction(async (transaction) => {
-      const doc = await transaction.get(userRef);
-      const existing: ScenarioOpportunity[] = doc.data()?.stats?.scenarioOpportunities ?? [];
-      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const pruned = existing.filter(
-        e => (e.createdAt as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId,
-      );
-      pruned.push({ ...entry, createdAt: Timestamp.now() });
-      transaction.update(userRef, { 'stats.scenarioOpportunities': pruned });
+      const stats = (await transaction.get(userRef)).data()?.stats ?? {};
+      const now = Timestamp.now();
+      transaction.update(userRef, {
+        'stats.recentlyPromoted': withRecent<PromotedEntry>(stats.recentlyPromoted, { ...entry, promotedAt: now }, 'promotedAt', 48 * HOUR_MS),
+        ...(opportunity ? {
+          'stats.scenarioOpportunities': withRecent<ScenarioOpportunity>(stats.scenarioOpportunities, { ...opportunity, createdAt: now }, 'createdAt', 7 * 24 * HOUR_MS),
+        } : {}),
+      });
     });
   }
 
@@ -137,7 +137,7 @@ export class DailyPlanService {
       .sort((a, b) => b.srsStage - a.srsStage);
 
     // No additional time-window filter — already pruned to 7 days at storage time
-    // (recordScenarioOpportunity), and dismissal (not display-window expiry) is the
+    // (recordPromotion), and dismissal (not display-window expiry) is the
     // intended removal mechanism so these stay visible until acted on.
     const practiceOpportunities: ScenarioOpportunity[] = (userData?.stats?.scenarioOpportunities ?? []) as ScenarioOpportunity[];
 
