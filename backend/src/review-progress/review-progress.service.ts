@@ -382,24 +382,26 @@ export class ReviewProgressService {
    *    enough context to diagnose without needing ad-hoc data digging —
    *    exactly what this function couldn't tell us the first time this class
    *    of bug showed up.
+   *
+   * Returns true when it advanced the sequence (and so already recomputed the UKU status).
    */
-  async checkAndAdvanceStage(uid: string, kuId: string, startAtSrsStage = 0): Promise<void> {
+  async checkAndAdvanceStage(uid: string, kuId: string, startAtSrsStage = 0): Promise<boolean> {
     const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     if (!uku?.currentStage) {
       this.logger.warn(`checkAndAdvanceStage: no UKU or currentStage for uid=${uid} kuId=${kuId} — sequence not initialized, or called with the wrong kuId`);
-      return;
+      return false;
     }
 
     const ku = await this.knowledgeUnitsService.findOne(kuId);
     if (!ku) {
       this.logger.warn(`checkAndAdvanceStage: UKU exists but KU ${kuId} not found (uid=${uid}) — orphaned UKU`);
-      return;
+      return false;
     }
 
     const sequence = this.sequenceFor(ku.type, uku.sequenceVariant);
     if (!sequence) {
       this.logger.warn(`checkAndAdvanceStage: no FACET_SEQUENCES entry for kuType=${ku.type} (kuId=${kuId})`);
-      return;
+      return false;
     }
 
     // A stage removed from the sequence (Vocab's old AI-question stage 6) has no readiness rule:
@@ -407,33 +409,33 @@ export class ReviewProgressService {
     const currentStageDef = sequence.stages.find(s => s.stage === uku.currentStage);
     if (!currentStageDef && !sequence.stages.some(s => s.stage > (uku.currentStage ?? 0))) {
       this.logger.warn(`checkAndAdvanceStage: UKU.currentStage=${uku.currentStage} for kuId=${kuId} doesn't match any defined stage in the ${ku.type} sequence`);
-      return;
+      return false;
     }
-    if (currentStageDef?.unlockAtSrsStage === null) return; // terminal stage — normal, common, not logged
+    if (currentStageDef?.unlockAtSrsStage === null) return false; // terminal stage — normal, common, not logged
 
     // One read serves both the readiness check and isStillKnown below.
     const kuFacets = await this.getSequenceFacets(uid, kuId);
     const stageFacets = kuFacets.filter(f => f.sequenceStage === uku.currentStage);
     if (stageFacets.length === 0) {
       this.logger.warn(`checkAndAdvanceStage: UKU says currentStage=${uku.currentStage} for kuId=${kuId} but zero facets exist at that stage — sequence is stuck with nothing left to review`);
-      return;
+      return false;
     }
 
     const allReady = !currentStageDef || stageFacets.every(
       f => (f.srsStage ?? 0) >= currentStageDef.unlockAtSrsStage!,
     );
-    if (!allReady) return; // not every facet ready yet — normal, the common case, not logged
+    if (!allReady) return false; // not every facet ready yet — normal, the common case, not logged
 
     const lesson = await this.lessonsService.lessonForSequence(uid, ku);
     if (!lesson) {
       this.logger.warn(`checkAndAdvanceStage: no lesson found for kuId=${kuId} (uid=${uid}) despite having facets — can't determine next stage`);
-      return;
+      return false;
     }
 
     const nextStage = this.findNextApplicableStage(sequence, lesson, uku.currentStage);
     if (!nextStage) {
       this.logger.debug(`checkAndAdvanceStage: no further applicable stage for kuId=${kuId} after stage ${uku.currentStage} — remaining stages not applicable to this lesson's content`);
-      return;
+      return false;
     }
 
     // Guard against concurrent calls (e.g. two sentence-assembly facets reviewed in quick
@@ -441,7 +443,7 @@ export class ReviewProgressService {
     const alreadyCreated = await this.getFacetsAtStage(uid, kuId, nextStage.stage);
     if (alreadyCreated.length > 0) {
       this.logger.log(`Stage ${nextStage.stage} facets already exist for kuId=${kuId}, skipping duplicate advance`);
-      return;
+      return false;
     }
 
     this.logger.log(
@@ -458,7 +460,7 @@ export class ReviewProgressService {
     );
     if (!result) {
       this.logger.warn(`checkAndAdvanceStage: every remaining stage fully deduped for kuId=${kuId} (uid=${uid}), no facets created`);
-      return;
+      return false;
     }
 
     await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: result.stage.stage });
@@ -467,6 +469,7 @@ export class ReviewProgressService {
     if (startAtSrsStage > 0) {
       await this.checkAndAdvanceStage(uid, kuId, startAtSrsStage);
     }
+    return true;
   }
 
   /**

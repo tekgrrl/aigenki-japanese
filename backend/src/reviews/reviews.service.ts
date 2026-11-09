@@ -16,23 +16,13 @@ import { GeminiService } from '../gemini/gemini.service';
 import { FacetStore } from '../facets/facet-store';
 import { QuestionsService } from '../questions/questions.service';
 import { FacetType, Lesson, ReviewFacet, VocabLesson, VocabUsage } from '@/types';
-import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
-import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
-import { TutorContextService } from '../tutor-context/tutor-context.service';
-import { DailyPlanService } from '../daily-plan/daily-plan.service';
-import { ScenariosService, VOCAB_READY_MIN_STAGE } from '../scenarios/scenarios.service';
-import { LearningProgressService } from '../learning-progress/learning-progress.service';
-import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { KanjiService } from '../kanji/kanji.service';
 import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
 import { buildAnswerEvaluatorPrompt, buildMeaningEvaluatorPrompt } from '../prompts/evaluation.prompts';
 import { DEFAULT_USAGE_ID, usagesOf } from '../lessons/vocab-usages';
 import { chooseMeaningForm, matchUsageLocally, meaningOutcome, MeaningOutcome, normaliseAnswer, stripTrailingPunctuation } from './meaning-card';
-import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
-
-/** A Grammar KU whose facet reaches this SRS stage gets its scenario chain (the user's rule, 2026-11-04; tunable). */
-const SCENARIO_FLASH_STAGE = 3;
+import { ReviewOutcomeService } from './review-outcome.service';
 
 /**
  * Resolves which Firestore collection a ReviewFacet's kuId points to.
@@ -57,16 +47,10 @@ export class ReviewsService {
         private readonly facetStore: FacetStore,
         private readonly geminiService: GeminiService,
         private readonly questionsService: QuestionsService,
-        private readonly knowledgeUnitsService: KnowledgeUnitsService,
-        private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
         private readonly statsService: StatsService,
-        private readonly scenariosService: ScenariosService,
-        private readonly learningProgressService: LearningProgressService,
-        private readonly reviewProgressService: ReviewProgressService,
         private readonly kanjiService: KanjiService,
         private readonly scenarioFlashService: ScenarioFlashService,
-        private readonly tutorContext: TutorContextService,
-        private readonly dailyPlanService: DailyPlanService,
+        private readonly reviewOutcome: ReviewOutcomeService,
     ) { }
 
     /** `usageId`: on a Vocab meaning card, the usage a correct answer matched (from evaluateAnswer). */
@@ -197,108 +181,20 @@ export class ReviewsService {
             };
         });
 
-        // Post-transaction side effects below are not needed for the caller's immediate
-        // response (only success/facetId/newStage/nextReview are used by the review UI),
-        // so none of them block the response — each was previously awaited in sequence,
-        // turning one review answer into 4-7 serial Firestore round trips.
-
-        // Recompute and cache UKU status from facet SRS data
-        if (txResult.kuId) {
-            void (async () => {
-                try {
-                    await this.learningProgressService.recomputeAndCache(uid, txResult.kuId);
-                    // A Kanji-Component facet also counts toward the component kanji's own status.
-                    if (txResult.targetKuId && txResult.targetKuId !== txResult.kuId) {
-                        await this.learningProgressService.recomputeAndCache(uid, txResult.targetKuId);
-                    }
-                } catch (e) {
-                    this.logger.error(`recomputeAndCache failed uid=${uid} kuId=${txResult.kuId}`, e);
-                }
-            })();
-        }
-
-        // Check if this SRS update unlocks the next facet stage
-        if (txResult.kuId && txResult.newStage > txResult.prevStage) {
-            void (async () => {
-                try {
-                    await this.reviewProgressService.checkAndAdvanceStage(uid, txResult.kuId);
-                } catch (e) {
-                    this.logger.error(`checkAndAdvanceStage failed uid=${uid} kuId=${txResult.kuId}`, e);
-                }
-            })();
-        }
-
-        // Check if a linked scenario's vocab is now all drill-ready
-        if (txResult.newStage >= VOCAB_READY_MIN_STAGE && txResult.kuId) {
-            void (async () => {
-                try {
-                    const uku = await this.userKnowledgeUnitsService.findByKuId(uid, txResult.kuId);
-                    if (uku?.source?.type === 'scenario') {
-                        await this.scenariosService.checkAndSetVocabReady(uid, uku.source.id);
-                    }
-                } catch (e) {
-                    this.logger.error(`Failed to check vocabReady for uid=${uid} kuId=${txResult.kuId}`, e);
-                }
-            })();
-        }
-
-        // Post-transaction: update tutorContext leech/weak-grammar tracking + record promotions
-        if (txResult.kuId && txResult.facetType) {
-            const { kuId, facetType, prevConsecutiveFailures, newConsecutiveFailures, prevStage, newStage } = txResult;
-            const LEECH_THRESHOLD = 3;
-            void (async () => {
-                try {
-                    const ku = await this.knowledgeUnitsService.findOne(kuId);
-                    const isGrammar = ku.type === 'Grammar';
-                    // Audio-first (picture-choice) words are never shown written: keep them out of the
-                    // tutor context (leechVocab, like frontierVocab) and the daily plan's promotions.
-                    if (facetType === 'picture-choice') return;
-                    if (newConsecutiveFailures >= LEECH_THRESHOLD) {
-                        await this.tutorContext.addToLeechVocab(uid, ku.content, facetType);
-                        if (isGrammar) await this.tutorContext.addToWeakGrammarPoints(uid, ku.content, facetType);
-                    } else if (result === 'pass' && prevConsecutiveFailures > 0) {
-                        await this.tutorContext.removeFromLeechVocab(uid, ku.content, facetType);
-                        if (isGrammar) await this.tutorContext.removeFromWeakGrammarPoints(uid, ku.content, facetType);
-                    }
-                    if (result === 'pass' && newStage > prevStage) {
-                        await this.dailyPlanService.recordPromotion(uid, {
-                            kuId,
-                            content: ku.content,
-                            type: ku.type,
-                            srsStage: newStage,
-                        });
-                        // Crossing into a new SRS level (not just a stage bump) — surface an
-                        // optional "practice this in a Scenario" opportunity in the daily plan.
-                        // Never touches SRS/facet state; purely a suggestion. Grammar only:
-                        // Vocab's "Already Known" fast-track seeds facets at ALREADY_KNOWN_STAGE
-                        // (one stage below the first level boundary), so a bulk-marked Vocab
-                        // item's very first-ever review can cross a level immediately — surfacing
-                        // "go practice this!" before any real spaced-repetition has happened.
-                        // A Grammar point promoted to SRS stage 3 or above starts its scenario chain
-                        // (Flash cards: Get to Drill → Graduate → Get to Simulate → Complete). Every
-                        // learner is promoted through stage 3, so this fires once per learner; later
-                        // promotions are cheap no-ops (start() dedupes on an existing chain and reuses
-                        // an existing scenario). The chain replaces the "Ready to practice" suggestion.
-                        const flashChain = ku.type === 'Grammar' && newStage >= SCENARIO_FLASH_STAGE && ku.data?.scenarioReady === true;
-                        if (flashChain) {
-                            void this.scenarioFlashService.start(uid, kuId).catch(e =>
-                                this.logger.error(`Failed to start scenario Flash chain uid=${uid} kuId=${kuId}`, e),
-                            );
-                        }
-                        if (ku.type === 'Grammar' && !flashChain && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)) {
-                            await this.dailyPlanService.recordScenarioOpportunity(uid, {
-                                kuId,
-                                content: ku.content,
-                                type: ku.type,
-                                newLevel: getSrsLevelName(newStage),
-                            });
-                        }
-                    }
-                } catch (e) {
-                    this.logger.error(`Failed to update tutorContext leech for uid=${uid} facetId=${facetId}`, e);
-                }
-            })();
-        }
+        // Everything that reacts to the grade (UKU status, sequence advance, scenarios, tutor context,
+        // daily plan) runs after the response, in ReviewOutcomeService's fixed order. Only
+        // success/facetId/newStage/nextReview (and the usage record) are in the response.
+        void this.reviewOutcome.onGraded(uid, {
+            result,
+            facetId,
+            facetType: txResult.facetType,
+            kuId: txResult.kuId,
+            targetKuId: txResult.targetKuId,
+            prevStage: txResult.prevStage,
+            newStage: txResult.newStage,
+            prevConsecutiveFailures: txResult.prevConsecutiveFailures,
+            newConsecutiveFailures: txResult.newConsecutiveFailures,
+        }).catch(e => this.logger.error(`onGraded failed uid=${uid} facetId=${facetId}`, e));
 
         return {
             success: txResult.success,

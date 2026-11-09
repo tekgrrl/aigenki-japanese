@@ -3,7 +3,7 @@
  * test account, since generating them organically via real reviews would
  * require failing the same facet 3x among hundreds of other due items.
  *
- * Uses the real TutorContextService.addToLeechVocab path (same write shape a genuine
+ * Uses the real TutorContextService.updateLeech path (same write shape a genuine
  * 3x-failure would produce) and also bumps consecutiveFailures on the backing
  * review-facet so the data stays internally consistent.
  *
@@ -48,7 +48,7 @@ async function main() {
       continue;
     }
 
-    await tutorContext.addToLeechVocab(TEST_UID, content, facet.facetType);
+    await tutorContext.updateLeech(TEST_UID, content, facet.facetType, 'add', false);
 
     await facetStore.doc(TEST_UID, facet.id).update({ consecutiveFailures: 3 });
 
