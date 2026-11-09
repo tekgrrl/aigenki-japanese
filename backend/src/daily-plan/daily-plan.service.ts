@@ -66,8 +66,8 @@ export class DailyPlanService {
     });
   }
 
-  /** Removes a single scenario opportunity by kuId — called when the user dismisses it. */
-  async removeScenarioOpportunity(uid: string, kuId: string): Promise<void> {
+  /** Removes a single scenario opportunity by kuId from stats. Only via dismissOpportunity, which also patches today's cached plan. */
+  private async removeScenarioOpportunity(uid: string, kuId: string): Promise<void> {
     const userRef = this.db.collection('users').doc(uid);
     await this.db.runTransaction(async (transaction) => {
       const doc = await transaction.get(userRef);
