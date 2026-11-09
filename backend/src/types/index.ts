@@ -121,7 +121,7 @@ export interface UserRoot {
 
     /**
      * @deprecated Text snapshot taken at enrollment; goes stale when KUs are renamed. Still
-     * appended but no longer read — use allowedGrammarKuIds via StatsService.getAllowedGrammar().
+     * appended but no longer read — use allowedGrammarKuIds via TutorContextService.getAllowedGrammar().
      */
     allowedGrammar: string[];
 

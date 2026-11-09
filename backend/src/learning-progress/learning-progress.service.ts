@@ -4,6 +4,7 @@ import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/fi
 import { MASTERED_STAGE } from '../lib/constants';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { ReviewFacet } from '../types';
 import { FacetStore } from '../facets/facet-store';
 
@@ -16,6 +17,7 @@ export class LearningProgressService {
         private readonly facetStore: FacetStore,
         private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
         private readonly statsService: StatsService,
+        private readonly tutorContext: TutorContextService,
     ) {}
 
     /**
@@ -64,7 +66,7 @@ export class LearningProgressService {
                         // of the tutor context, or Gemini writes them in kanji as reinforcement.
                         .filter(t => t !== 'AI-Generated-Question' && t !== 'picture-choice');
                     if (facetTypes.length > 0) {
-                        void this.statsService.addToFrontierVocab(uid, kuContent, facetTypes).catch(e =>
+                        void this.tutorContext.addToFrontierVocab(uid, kuContent, facetTypes).catch(e =>
                             this.logger.error(`Failed to add frontierVocab uid=${uid} kuId=${kuId}`, e),
                         );
                     }
@@ -76,7 +78,7 @@ export class LearningProgressService {
                         this.logger.log(`Mastered KU uid=${uid} kuId=${kuId} jlptLevel=${jlptLevel}`);
                     }
                     if (kuContent) {
-                        void this.statsService.removeFromFrontierVocab(uid, kuContent).catch(e =>
+                        void this.tutorContext.removeFromFrontierVocab(uid, kuContent).catch(e =>
                             this.logger.error(`Failed to remove frontierVocab uid=${uid} kuId=${kuId}`, e),
                         );
                     }

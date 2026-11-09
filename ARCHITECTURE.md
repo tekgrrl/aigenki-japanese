@@ -173,7 +173,7 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 
 **User preferences and admin** — read through `UserService` (global). The JLPT level is required: the learner chooses it on their profile (no "Not set"; the API refuses to clear it). Until they do, nothing is stored and they count as N5 everywhere; `/users/me` returns that as `effectiveJlptLevel` (response only). `getPreferences(uid)` (level filled in), `getJlptLevel(uid)`, `jlptLevelOf(userDoc)` when the doc is already read (an invalid stored value also counts as N5); `isAdmin(uid)` (`ADMIN_ALL` or `isAdmin: true`; used by `AdminGuard` and `/users/me`). `ADMIN_ALL` is applied when read, never stored. Don't read `preferences` or `ADMIN_ALL` directly.
 
-**Profile gate** — a signed-in account with no valid level stored has an incomplete profile (`isProfileComplete`). `FirebaseAuthGuard` answers 403 `{ code: 'PROFILE_INCOMPLETE' }` to everything except routes marked `@AllowIncompleteProfile()` (`/users/me`, the preferences save, `/scenarios/roles`); the frontend (`AuthProvider`) sends such accounts to `/profile` and the header hides the nav. Saving the level (`PATCH /users/me/preferences`) completes the profile, then `LevelSyncService` brings `aboveLevel` (`UserKnowledgeUnitsService.recomputeAboveLevel`) and allowed grammar (`StatsService.rebuildAllowedGrammarKuIds`) up to the stored level before answering: one run at a time per account, skipped when `aboveLevelComputedFor` already matches, retried on the next level save after a failure. A new route the profile page needs must carry `@AllowIncompleteProfile()`.
+**Profile gate** — a signed-in account with no valid level stored has an incomplete profile (`isProfileComplete`). `FirebaseAuthGuard` answers 403 `{ code: 'PROFILE_INCOMPLETE' }` to everything except routes marked `@AllowIncompleteProfile()` (`/users/me`, the preferences save, `/scenarios/roles`); the frontend (`AuthProvider`) sends such accounts to `/profile` and the header hides the nav. Saving the level (`PATCH /users/me/preferences`) completes the profile, then `LevelSyncService` brings `aboveLevel` (`UserKnowledgeUnitsService.recomputeAboveLevel`) and allowed grammar (`TutorContextService.rebuildAllowedGrammarKuIds`) up to the stored level before answering: one run at a time per account, skipped when `aboveLevelComputedFor` already matches, retried on the next level save after a failure. A new route the profile page needs must carry `@AllowIncompleteProfile()`.
 
 **Global collections** (`knowledge-units`, `concepts`, `questions`, `lessons/{kuId}`) have no `userId` on new documents. `createdBy` is used for audit only where present.
 
@@ -208,8 +208,8 @@ Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collect
 ### Key Types
 
 - **`UserRoot`** (`backend/src/types/index.ts` ~line 34) — stored at `users/{uid}`. Three top-level groups:
-  - `stats` — review forecasts, streak, totals, levelProgress. Written exclusively by `StatsService` via dot-notation Firestore updates inside the SRS transaction.
-  - `tutorContext` — AI personalisation data. Mechanical fields written by `StatsService` helpers; AI-inferred fields not yet implemented. See **UserRoot Stats & AI Tutor Context** section.
+  - `stats` — review forecasts, streak, totals, levelProgress (written by `StatsService`), plus the daily plan's recent promotions and scenario opportunities (written by `DailyPlanService`). Dot-notation Firestore updates.
+  - `tutorContext` — AI personalisation data. Mechanical fields written by `TutorContextService`; AI-inferred fields not yet implemented. See **UserRoot Stats & AI Tutor Context** section.
   - `preferences` — top-level user-facing prefs (`showFurigana`, `jlptLevel`, `preferredUserRole`). Written via `PATCH /api/users/me/preferences`.
   - `tutorContext.preferences` — feed-engine tuning (`dailyMaxNew`, `dailyMaxTotal`). Separate from top-level `preferences`.
 - **`TutorVocabEntry`** — `{ content: string; facetTypes: FacetType[] }`. Used for `frontierVocab`, `leechVocab`, and `weakGrammarPoints` arrays so per-facet-type granularity is preserved (e.g. a word can be frontier for meaning but a leech for reading).
@@ -418,7 +418,7 @@ A user who claims to know all linked vocab can proceed to roleplay immediately. 
 
 ### Stats
 
-All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level collection is abandoned. `StatsService` is the only writer; all updates use Firestore dot-notation so sibling fields are never clobbered.
+All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level collection is abandoned. `StatsService` writes the dashboard fields and `DailyPlanService` the daily plan's lists (table below); all updates use Firestore dot-notation so sibling fields are never clobbered.
 
 | Field | Written by | Trigger |
 |---|---|---|
@@ -427,6 +427,8 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 | `stats.totalReviews` / `stats.passedReviews` | same | same |
 | `stats.levelProgress.{n5\|n4\|...}.total` | `StatsService.recordKuEnrolled` | `UserKnowledgeUnitsService.create` (non-blocking) |
 | `stats.levelProgress.{n5\|n4\|...}.mastered` | `StatsService.recordKuMastered` | `LearningProgressService.recomputeAndCache` on mastered transition |
+| `stats.recentlyPromoted` | `DailyPlanService.recordPromotion` | `ReviewsService.updateFacetSrs` on a promotion (post-transaction, non-blocking); pruned after 48h |
+| `stats.scenarioOpportunities` | `DailyPlanService.recordScenarioOpportunity` | same, when a Grammar point crosses an SRS level without a Flash chain; pruned after 7 days, removed on dismiss |
 
 `stats.lastReviewDate` is optional on the document — the default user doc omits it so the first-ever review correctly sets the streak to 1.
 
@@ -434,7 +436,7 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 
 ### AI Tutor Context
 
-`tutorContext` fields provide the AI with a real-time picture of where the user is in their learning. Five fields are mechanically derivable; the remaining fields (`communicationStyle`, `semanticWeaknesses`, `suggestedThemes`) require AI inference and are not yet implemented.
+`tutorContext` fields provide the AI with a real-time picture of where the user is in their learning. They're owned by `TutorContextService` (`backend/src/tutor-context/`, a global provider): every write and the allowed-grammar read go through it. Five fields are mechanically derivable; the remaining fields (`communicationStyle`, `semanticWeaknesses`, `suggestedThemes`) require AI inference and are not yet implemented.
 
 #### Mechanical fields
 
@@ -459,7 +461,7 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 
 `frontierVocab`, `leechVocab`, and `weakGrammarPoints` use `TutorVocabEntry[]` (`{ content, facetTypes }`) rather than `string[]`. This allows the same KU to appear in both arrays with different facet-type sets — e.g. 入れる can be frontier for `Content-to-Definition` and a leech for `Reading-to-Content` simultaneously.
 
-`FieldValue.arrayUnion/arrayRemove` cannot merge nested objects, so all mutations use Firestore transaction-based read-modify-write helpers in `StatsService`: `mergeTutorVocabEntry` (add/merge) and `removeTutorVocabFacetType` (remove one facet type, drop entry if none remain).
+`FieldValue.arrayUnion/arrayRemove` cannot merge nested objects, so all mutations use Firestore transaction-based read-modify-write helpers in `TutorContextService`: `mergeTutorVocabEntry` (add/merge) and `removeTutorVocabFacetType` (remove one facet type, drop entry if none remain).
 
 `allowedGrammar` stays as `string[]` — no per-facet granularity needed.
 

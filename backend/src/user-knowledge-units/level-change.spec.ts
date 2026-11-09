@@ -3,6 +3,7 @@ import { FacetStore } from '../facets/facet-store';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserService } from '../users/user.service';
 import { StatsService } from '../stats/stats.service';
+import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { UserKnowledgeUnitsService } from './user-knowledge-units.service';
 
 describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () => {
@@ -10,8 +11,9 @@ describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () =>
     const db = new FakeFirestore();
     const kus = new KnowledgeUnitsService(db as any, new FacetStore(db as any));
     const users = new UserService(db as any);
-    const stats = new StatsService(db as any, new FacetStore(db as any), kus, users);
-    const ukuService = new UserKnowledgeUnitsService(db as any, stats, users, kus);
+    const stats = new StatsService(db as any, new FacetStore(db as any));
+    const tutorContext = new TutorContextService(db as any, kus, users);
+    const ukuService = new UserKnowledgeUnitsService(db as any, stats, users, kus, tutorContext);
     const ku = db.collection('knowledge-units');
     await ku.doc('g5').set({ type: 'Grammar', content: 'です', data: { jlptLevel: 'N5' } });
     await ku.doc('g3').set({ type: 'Grammar', content: 'ようにする', data: { jlptLevel: 'N3' } });
@@ -24,15 +26,15 @@ describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () =>
     await db.collection('users').doc('u1').set({ tutorContext: { allowedGrammarKuIds: ['g5', 'g3'], leechVocab: [] } });
     const flags = () => Object.fromEntries([...db.store('users/u1/user-kus').values()].map(d => [d.kuId, d.aboveLevel]));
     const allowed = () => db.store('users').get('u1')!.tutorContext.allowedGrammarKuIds;
-    return { db, ukuService, stats, users, flags, allowed };
+    return { db, ukuService, tutorContext, users, flags, allowed };
   }
 
   it('at N5: N4 and N3 items become above level, the flagless one gets a flag, N3 grammar leaves allowed grammar', async () => {
-    const { ukuService, stats, users, flags, allowed, db } = await setup();
+    const { ukuService, tutorContext, users, flags, allowed, db } = await setup();
     await users.updatePreferences('u1', { jlptLevel: 'N5' });
     expect(await ukuService.recomputeAboveLevel('u1', 'N5')).toBe(2);
     expect(flags()).toEqual({ g5: false, g3: true, v4: true });
-    await stats.rebuildAllowedGrammarKuIds('u1', 'N5');
+    await tutorContext.rebuildAllowedGrammarKuIds('u1', 'N5');
     expect(allowed()).toEqual(['g5']);
     expect(db.store('users').get('u1')!.tutorContext.leechVocab).toEqual([]); // siblings kept
   });
@@ -45,11 +47,11 @@ describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () =>
   });
 
   it('at N3: nothing is above level and both grammar points are allowed', async () => {
-    const { ukuService, stats, users, flags, allowed } = await setup();
+    const { ukuService, tutorContext, users, flags, allowed } = await setup();
     await users.updatePreferences('u1', { jlptLevel: 'N3' });
     await ukuService.recomputeAboveLevel('u1', 'N3');
     expect(flags()).toEqual({ g5: false, g3: false, v4: false });
-    await stats.rebuildAllowedGrammarKuIds('u1', 'N3');
+    await tutorContext.rebuildAllowedGrammarKuIds('u1', 'N3');
     expect([...allowed()].sort()).toEqual(['g3', 'g5']);
   });
 });

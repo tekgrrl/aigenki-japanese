@@ -8,7 +8,7 @@ function makeService(kanjiAlive: string[], aiResult: 'pass' | 'fail' = 'fail') {
   const kanji = { getKanjiAliveMeanings: jest.fn().mockResolvedValue(kanjiAlive) };
   const none = {} as any;
   const fdb = new FakeFirestore();
-  const service = new ReviewsService(fdb as any, new FacetStore(fdb as any), gemini as any, none, none, none, none, none, none, none, kanji as any, none);
+  const service = new ReviewsService(fdb as any, new FacetStore(fdb as any), gemini as any, none, none, none, none, none, none, none, kanji as any, none, none, none);
   return { service, gemini, kanji };
 }
 
