@@ -40,15 +40,23 @@ describe('UserService preferences and admin', () => {
     expect(await users.getJlptLevel('u1')).toBe('N3');
   });
 
-  it('a new account starts at N5 and has no admin flag stored (ADMIN_ALL applies when read)', async () => {
+  it('a new account has no level or admin flag stored: it must choose a level, and counts as N5 until then', async () => {
     process.env.ADMIN_ALL = 'true';
     const created = await users.findOrCreate('new');
     expect(created.isAdmin).toBe(true);
+    expect(created.effectiveJlptLevel).toBe('N5');
     const stored = db.store('users').get('new')!;
-    expect(stored.preferences).toEqual({ jlptLevel: 'N5' });
+    expect(stored.preferences?.jlptLevel).toBeUndefined();
     expect(stored.isAdmin).toBeUndefined();
     delete process.env.ADMIN_ALL;
     expect((await users.findOrCreate('new')).isAdmin).toBe(false);
+  });
+
+  it('a stored value that is not a level counts as N5', async () => {
+    await db.collection('users').doc('odd').set({ preferences: { jlptLevel: 'n4' } });
+    expect(await users.getJlptLevel('odd')).toBe('N5');
+    expect((await users.findOrCreate('odd')).effectiveJlptLevel).toBe('N5');
+    expect(jlptLevelOf({ preferences: { jlptLevel: '' as any } })).toBe('N5');
   });
 
   it('/users/me (findOrCreate) uses the same admin rule as isAdmin()', async () => {

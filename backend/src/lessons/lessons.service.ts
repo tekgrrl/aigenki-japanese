@@ -12,9 +12,8 @@ import { KanjiService } from '../kanji/kanji.service';
 import { isUsagePicture, subjectOf, usageKey } from '../pictures/pictures.service';
 import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAside, withUsageIds } from './vocab-usages';
 import { FacetStore } from '../facets/facet-store';
-import { UserService } from '../users/user.service';
 import { stripFurigana } from '../lib/furigana-text';
-import { adminForAllUsers } from '../users/user.service';
+import { UserService, adminForAllUsers } from '../users/user.service';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;

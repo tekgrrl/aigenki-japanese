@@ -2,20 +2,20 @@ import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common'
 import { Firestore } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION } from '../firebase/firebase.module';
 import { UserRoot } from '../types';
-import { JlptLevel } from '../prompts/curriculum';
+import { DEFAULT_JLPT_LEVEL, JLPT_LEVEL_ORDER, JlptLevel } from '../prompts/curriculum';
 
 /** A user's preferences, with the study level always filled in. */
 export type UserPreferences = NonNullable<UserRoot['preferences']> & { jlptLevel: JlptLevel };
 
 /**
- * The study level is required. New accounts are created at N5, and an older account that never
- * chose one counts as N5 everywhere (generation, queues, enrolment's aboveLevel, scenarios).
+ * The study level is required: the learner chooses it on their profile. Until they do (nothing
+ * stored, or a stored value that isn't a level) they count as DEFAULT_JLPT_LEVEL (N5) everywhere:
+ * generation, queues, enrolment's aboveLevel, scenarios. This is the one place that rule lives.
  */
-export const DEFAULT_JLPT_LEVEL: JlptLevel = 'N5';
-const JLPT_LEVELS: readonly JlptLevel[] = ['N5', 'N4', 'N3', 'N2', 'N1'];
-
-/** The study level from an already-read user doc (DEFAULT_JLPT_LEVEL if it was never set). */
-export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel => user?.preferences?.jlptLevel ?? DEFAULT_JLPT_LEVEL;
+export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel => {
+  const stored = user?.preferences?.jlptLevel;
+  return stored && JLPT_LEVEL_ORDER.includes(stored) ? stored : DEFAULT_JLPT_LEVEL;
+};
 
 /**
  * The dev switch that makes every user an admin (`.env`, never set in production). Applied when
@@ -36,7 +36,6 @@ export class UserService {
   private buildDefaultUserRoot(uid: string): UserRoot {
     return {
       id: uid,
-      preferences: { jlptLevel: DEFAULT_JLPT_LEVEL },
       stats: {
         reviewForecast: {},
         hourlyForecast: {},
@@ -84,7 +83,7 @@ export class UserService {
         void userRef.update({ email });
         data.email = email;
       }
-      return { id: uid, ...data, isAdmin: data.isAdmin === true || adminForAllUsers() } as UserRoot;
+      return { id: uid, ...data, isAdmin: data.isAdmin === true || adminForAllUsers(), effectiveJlptLevel: jlptLevelOf(data) } as UserRoot;
     }
 
     this.logger.log(`UserRoot not found for uid: ${uid}. Creating default document.`);
@@ -94,7 +93,7 @@ export class UserService {
     await userRef.set(defaultUser);
 
     this.logger.log(`Default UserRoot created for uid: ${uid}`);
-    return { ...defaultUser, isAdmin: adminForAllUsers() };
+    return { ...defaultUser, isAdmin: adminForAllUsers(), effectiveJlptLevel: DEFAULT_JLPT_LEVEL };
   }
 
   /**
@@ -131,8 +130,8 @@ export class UserService {
 
   /** Saves the preferences given (merged). The study level is required, so it can be changed but not cleared. */
   async updatePreferences(uid: string, prefs: { showFurigana?: boolean; jlptLevel?: string; preferredUserRole?: string; audioFirstExperiment?: boolean }): Promise<void> {
-    if ('jlptLevel' in prefs && !JLPT_LEVELS.includes(prefs.jlptLevel as JlptLevel)) {
-      throw new BadRequestException(`jlptLevel must be one of ${JLPT_LEVELS.join(', ')}`);
+    if ('jlptLevel' in prefs && !JLPT_LEVEL_ORDER.includes(prefs.jlptLevel as JlptLevel)) {
+      throw new BadRequestException(`jlptLevel must be one of ${JLPT_LEVEL_ORDER.join(', ')}`);
     }
     await this.db.collection('users').doc(uid).set({ preferences: prefs }, { merge: true });
   }

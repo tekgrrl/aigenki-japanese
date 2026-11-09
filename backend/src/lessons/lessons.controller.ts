@@ -6,6 +6,7 @@ import { UserId } from '../auth/user-id.decorator';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { GrammarKnowledgeUnit } from '../types';
+import { UserService } from '../users/user.service';
 
 @Controller('lessons')
 @UseGuards(FirebaseAuthGuard)
@@ -14,7 +15,8 @@ export class LessonsController {
 
   constructor(
     private readonly lessonsService: LessonsService,
-    private readonly knowledgeUnitsService: KnowledgeUnitsService
+    private readonly knowledgeUnitsService: KnowledgeUnitsService,
+    private readonly userService: UserService,
   ) { }
 
   @Post('batch')
@@ -151,11 +153,11 @@ export class LessonsController {
 
   @Get('grammar-lesson-prompt')
   @UseGuards(AdminGuard)
-  async getGrammarLessonPrompt(@Query('kuId') kuId: string) {
+  async getGrammarLessonPrompt(@UserId() uid: string, @Query('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
     const ku = await this.knowledgeUnitsService.findOneById(kuId);
     if (!ku || ku.type !== 'Grammar') throw new NotFoundException(`Grammar KU ${kuId} not found`);
-    const userMessage = buildGrammarLessonMessage(ku as GrammarKnowledgeUnit, 'N4');
+    const userMessage = buildGrammarLessonMessage(ku as GrammarKnowledgeUnit, await this.userService.getJlptLevel(uid));
     return { kuId, content: ku.content, userMessage };
   }
 }

@@ -79,13 +79,14 @@ export class ScenariosService {
         const jlptLevel = (args.jlptLevel as string) || await this.userService.getJlptLevel(uid);
 
         // Fetch only grammar KUs the user has enrolled (and are not above their level)
+        // Filtered in code, not with where('aboveLevel', '!=', true): Firestore's != skips
+        // documents without the field (older enrolments, and new ones until the flag is written).
         const ukuSnap = await this.db
           .collection('users').doc(uid)
           .collection('user-kus')
-          .where('aboveLevel', '!=', true)
           .get();
 
-        const enrolledKuIds = ukuSnap.docs.map(d => d.data().kuId as string);
+        const enrolledKuIds = ukuSnap.docs.filter(d => d.data().aboveLevel !== true).map(d => d.data().kuId as string);
         if (enrolledKuIds.length === 0) {
           this.logger.log(`get_grammar_patterns(${jlptLevel}) → 0 enrolled patterns for uid=${uid}`);
           return { patterns: [] };
@@ -490,10 +491,11 @@ export class ScenariosService {
       throw new InternalServerErrorException('conversationText, userRole, and at least one aiRole are required');
     }
 
+    const difficulty = dto.difficulty ?? await this.userService.getJlptLevel(uid);
     const prompt = buildImportPrompt({
       ...dto,
       aiRoles: resolvedAiRoles,
-      difficulty: dto.difficulty ?? await this.userService.getJlptLevel(uid),
+      difficulty,
     });
 
     try {
@@ -515,7 +517,7 @@ export class ScenariosService {
         userId: uid,
         title: data.title,
         description: data.description,
-        difficultyLevel: dto.difficulty ?? 'N4',
+        difficultyLevel: difficulty,
         setting: {
           location: data.setting.location,
           participants: data.setting.participants,
