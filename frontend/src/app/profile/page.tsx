@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/AuthProvider";
 import { UserAvatar } from "@/components/UserAvatar";
 import { apiFetch } from "@/lib/api-client";
@@ -15,7 +16,11 @@ const THEME_OPTIONS: { value: ThemeChoice; label: string }[] = [
 ];
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, profileComplete, markProfileComplete } = useAuth();
+  const router = useRouter();
+  // The profile was incomplete when this page opened: show the banner and, once a level is
+  // saved, the Continue button (it stays for the visit, even after markProfileComplete).
+  const [completing] = useState(!profileComplete);
   const [showFurigana, setShowFurigana] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>("system");
   // Required. "" = never chosen (the backend treats that as N5); shown as a placeholder to pick from.
@@ -23,9 +28,8 @@ export default function ProfilePage() {
   const [preferredUserRole, setPreferredUserRole] = useState<string>("");
   const [audioFirst, setAudioFirst] = useState(false);
   const [userRoles, setUserRoles] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  // Save feedback for the setting last changed, shown in that setting's row.
+  const [saveStatus, setSaveStatus] = useState<{ field: string; state: "saving" | "saved" | "error" } | null>(null);
 
   useEffect(() => {
     setShowFurigana(loadFurigana());
@@ -49,31 +53,36 @@ export default function ProfilePage() {
       .catch(() => {});
   }, []);
 
-  /** Saves a preference change; true if the server accepted it (apiFetch doesn't throw on HTTP errors). */
+  /**
+   * Saves one preference; true if the server accepted it (apiFetch doesn't throw on HTTP errors).
+   * The patch's key names the setting, so its row shows the Saving / Saved / Couldn't save status.
+   */
   const patchPreferences = useCallback(async (patch: Record<string, unknown>): Promise<boolean> => {
-    setSaving(true);
-    setSaved(false);
-    setSaveError(null);
+    const field = Object.keys(patch)[0];
+    setSaveStatus({ field, state: "saving" });
+    let ok = false;
     try {
       const res = await apiFetch("/api/users/me/preferences", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (!res.ok) {
-        setSaveError("Couldn't save");
-        return false;
-      }
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      return true;
+      ok = res.ok;
     } catch {
-      setSaveError("Couldn't save");
-      return false;
-    } finally {
-      setSaving(false);
+      ok = false;
     }
+    setSaveStatus({ field, state: ok ? "saved" : "error" });
+    if (ok) setTimeout(() => setSaveStatus(s => (s?.field === field && s.state === "saved" ? null : s)), 2000);
+    return ok;
   }, []);
+
+  /** The save status for one setting's row (nothing unless that setting was the last one changed). */
+  const statusFor = (field: string) => {
+    if (saveStatus?.field !== field) return null;
+    if (saveStatus.state === "saving") return <span className="text-xs text-shodo-ink/40">Saving…</span>;
+    if (saveStatus.state === "error") return <span className="text-xs text-shodo-stamp-red">Couldn't save</span>;
+    return <span className="text-xs text-green-600">Saved</span>;
+  };
 
   const handleToggleFurigana = useCallback(async () => {
     const newVal = !showFurigana;
@@ -91,8 +100,9 @@ export default function ProfilePage() {
   const handleJlptLevel = useCallback(async (val: string) => {
     const previous = jlptLevel;
     setJlptLevel(val);
-    if (!(await patchPreferences({ jlptLevel: val }))) setJlptLevel(previous);
-  }, [jlptLevel, patchPreferences]);
+    if (await patchPreferences({ jlptLevel: val })) markProfileComplete();
+    else setJlptLevel(previous);
+  }, [jlptLevel, patchPreferences, markProfileComplete]);
 
   const handlePreferredUserRole = useCallback(async (val: string) => {
     setPreferredUserRole(val);
@@ -104,6 +114,27 @@ export default function ProfilePage() {
   return (
     <main className="container mx-auto max-w-2xl px-8 py-12">
       <h1 className="text-2xl font-bold text-shodo-ink mb-10">Profile</h1>
+
+      {completing && (
+        <div className="mb-10 rounded-lg border border-shodo-ink/15 bg-shodo-paper-warm px-5 py-4">
+          <p className="font-medium text-shodo-ink">Complete your profile</p>
+          {profileComplete ? (
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <p className="text-sm text-shodo-ink/70">You're all set. You can change any of these later.</p>
+              <button
+                onClick={() => router.push("/")}
+                className="shrink-0 rounded-lg bg-shodo-ink px-4 py-2 text-sm font-medium text-shodo-paper hover:bg-shodo-ink/80"
+              >
+                Continue to AIGENKI →
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1 text-sm text-shodo-ink/70">
+              Choose your JLPT level below to start. It sets the level of your lessons, questions and scenarios.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Identity */}
       <div className="flex items-center gap-5 mb-12">
@@ -129,15 +160,7 @@ export default function ProfilePage() {
               </p>
             </div>
             <div className="flex items-center gap-3 ml-4 shrink-0">
-              {saving && (
-                <span className="text-xs text-shodo-ink/40">Saving…</span>
-              )}
-              {saveError && (
-                <span className="text-xs text-shodo-stamp-red">{saveError}</span>
-              )}
-              {saved && (
-                <span className="text-xs text-green-600">Saved</span>
-              )}
+              {statusFor("showFurigana")}
               <button
                 onClick={handleToggleFurigana}
                 role="switch"
@@ -164,13 +187,15 @@ export default function ProfilePage() {
                 Words you&apos;re already learning aren&apos;t affected.
               </p>
             </div>
+            <div className="flex items-center gap-3 ml-4 shrink-0">
+            {statusFor("audioFirstExperiment")}
             <button
               type="button"
               onClick={handleToggleAudioFirst}
               role="switch"
               aria-checked={audioFirst}
               aria-label="Audio-first vocab (experimental)"
-              className={`relative ml-4 shrink-0 w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-shodo-accent focus:ring-offset-2 ${
+              className={`relative shrink-0 w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-shodo-accent focus:ring-offset-2 ${
                 audioFirst ? "bg-shodo-ink" : "bg-shodo-ink/20"
               }`}
             >
@@ -180,6 +205,7 @@ export default function ProfilePage() {
                 }`}
               />
             </button>
+            </div>
           </div>
 
           {/* Appearance (per device — stored in this browser, not on the account) */}
@@ -221,10 +247,12 @@ export default function ProfilePage() {
                 Sets the level of your lessons, questions and scenarios
               </p>
             </div>
+            <div className="flex items-center gap-3 ml-4 shrink-0">
+            {statusFor("jlptLevel")}
             <select
               value={jlptLevel}
               onChange={(e) => handleJlptLevel(e.target.value)}
-              className="ml-4 shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
+              className="shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
             >
               {jlptLevel === "" && (
                 <option value="" disabled>Choose your level</option>
@@ -233,6 +261,7 @@ export default function ProfilePage() {
                 <option key={l} value={l}>{l}</option>
               ))}
             </select>
+            </div>
           </div>
 
           {/* Preferred user role */}
@@ -243,16 +272,19 @@ export default function ProfilePage() {
                 Your default persona in generated roleplay scenarios
               </p>
             </div>
+            <div className="flex items-center gap-3 ml-4 shrink-0">
+            {statusFor("preferredUserRole")}
             <select
               value={preferredUserRole}
               onChange={(e) => handlePreferredUserRole(e.target.value)}
-              className="ml-4 shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
+              className="shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
             >
               <option value="">Not set (AI chooses)</option>
               {userRoles.filter((r) => /^[\x20-\x7E]+$/.test(r)).map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
+            </div>
           </div>
         </div>
       </section>

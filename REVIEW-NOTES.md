@@ -18,6 +18,14 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Failing stub specs** (`*.controller.spec.ts`, `*.service.spec.ts` "should be defined" with no
   providers) fail on `main` too. They aren't regressions from the PR under review.
 
+## Profile gate
+- **The local dev bypass skips the profile gate** (`FirebaseAuthGuard`, no Bearer token / `user_default`),
+  and so does `NEXT_PUBLIC_DEV_SKIP_AUTH` on the frontend. Real tokens in dev are gated.
+- **Saving the level recomputes `aboveLevel` and allowed grammar only.** `frontierVocab` / `leechVocab`
+  aren't recomputed: they're transient lists that refresh as reviews happen.
+- **The complete-profile cache** (`UserService.knownComplete`) is in memory and per instance. It only
+  ever holds uids whose level is stored, and a level can't be cleared, so it can't go stale.
+
 ## Kanji and lessons
 - **Kanji Alive lookups** (`KanjiService.getKanjiAliveMeanings`): failures are deliberately **not**
   cached, so a transient RapidAPI error isn't locked in until restart. A kanji Kanji Alive doesn't

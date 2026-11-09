@@ -71,6 +71,8 @@ export interface UserRoot {
   isAdmin?: boolean;
   /** Response-only (GET /users/me, never stored): the level the user counts as, 'N5' until they choose one. */
   effectiveJlptLevel?: 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
+  /** Response-only (GET /users/me): a level has been chosen. Until then the app is limited to /profile. */
+  profileComplete?: boolean;
 
   /**
    * Statistical data related to the user's reviews, engagement, and progression.

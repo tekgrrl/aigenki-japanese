@@ -458,11 +458,8 @@ export class StatsService {
         return this.backfillAllowedGrammarKuIds(uid);
     }
 
-    /**
-     * One-off per user: rebuild the id list from the Grammar KUs they've actually enrolled
-     * (not above level) — the legacy text list can't be mapped back reliably after renames.
-     */
-    private async backfillAllowedGrammarKuIds(uid: string): Promise<string[]> {
+    /** The Grammar KU ids that belong in a user's allowed grammar: enrolled and not above their level. */
+    private async selectAllowedGrammarKuIds(uid: string): Promise<string[]> {
         const userRef = this.db.collection('users').doc(uid);
         const [prefs, ukus] = await Promise.all([this.userService.getPreferences(uid), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
         const userLevel = prefs.jlptLevel;
@@ -471,9 +468,18 @@ export class StatsService {
             .map(d => (d.data().kuId as string | undefined) ?? d.id);
         // Re-check the level against the KU itself: legacy UKUs have no aboveLevel flag, and a
         // fresh enrolment's flag is written after the UKU, so the flag alone can let N3+ through.
-        const grammarIds = (await this.knowledgeUnitsService.getManyCached(candidateIds))
+        return (await this.knowledgeUnitsService.getManyCached(candidateIds))
             .filter(k => k.type === 'Grammar' && !isAboveLevel((k.data as Record<string, any>)?.jlptLevel, userLevel))
             .map(k => k.id);
+    }
+
+    /**
+     * One-off per user: build the id list the first time it's read (see getAllowedGrammarKuIds).
+     * The legacy text list can't be mapped back reliably after renames.
+     */
+    private async backfillAllowedGrammarKuIds(uid: string): Promise<string[]> {
+        const userRef = this.db.collection('users').doc(uid);
+        const grammarIds = await this.selectAllowedGrammarKuIds(uid);
         // arrayUnion, not a plain set: an enrolment's addToAllowedGrammar can land mid-backfill.
         // arrayUnion() with no elements throws, so with nothing to add just create the empty
         // list (only if still absent) so the backfill doesn't rerun on every call.
@@ -488,6 +494,17 @@ export class StatsService {
             });
         }
         this.logger.log(`Backfilled allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
+        return grammarIds;
+    }
+
+    /**
+     * After the learner's level changes (and recomputeAboveLevel has run): replaces the id list,
+     * so grammar now above their level drops out and grammar now within it comes in.
+     */
+    async rebuildAllowedGrammarKuIds(uid: string): Promise<string[]> {
+        const grammarIds = await this.selectAllowedGrammarKuIds(uid);
+        await this.db.collection('users').doc(uid).set({ tutorContext: { allowedGrammarKuIds: grammarIds } }, { merge: true });
+        this.logger.log(`Rebuilt allowedGrammarKuIds for ${uid}: ${grammarIds.length} grammar KUs`);
         return grammarIds;
     }
 

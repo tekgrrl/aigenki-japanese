@@ -18,6 +18,15 @@ export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): Jl
 };
 
 /**
+ * A profile is complete once a valid level is stored. Until then the learner is sent to
+ * /profile and the API refuses everything but the profile itself (FirebaseAuthGuard).
+ */
+export const isProfileComplete = (user: Pick<UserRoot, 'preferences'> | undefined): boolean => {
+  const stored = user?.preferences?.jlptLevel;
+  return !!stored && JLPT_LEVEL_ORDER.includes(stored);
+};
+
+/**
  * The dev switch that makes every user an admin (`.env`, never set in production). Applied when
  * admin status is read, never stored on a user doc.
  */
@@ -26,6 +35,12 @@ export const adminForAllUsers = () => process.env.ADMIN_ALL === 'true';
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
+
+  /**
+   * Uids already seen with a complete profile. A level can't be cleared (updatePreferences refuses),
+   * so a uid never leaves this set and the cache can't go stale; only incomplete profiles cost a read.
+   */
+  private readonly knownComplete = new Set<string>();
 
   constructor(@Inject(FIRESTORE_CONNECTION) private readonly db: Firestore) {}
 
@@ -83,7 +98,13 @@ export class UserService {
         void userRef.update({ email });
         data.email = email;
       }
-      return { id: uid, ...data, isAdmin: data.isAdmin === true || adminForAllUsers(), effectiveJlptLevel: jlptLevelOf(data) } as UserRoot;
+      return {
+        id: uid,
+        ...data,
+        isAdmin: data.isAdmin === true || adminForAllUsers(),
+        effectiveJlptLevel: jlptLevelOf(data),
+        profileComplete: isProfileComplete(data),
+      } as UserRoot;
     }
 
     this.logger.log(`UserRoot not found for uid: ${uid}. Creating default document.`);
@@ -93,7 +114,7 @@ export class UserService {
     await userRef.set(defaultUser);
 
     this.logger.log(`Default UserRoot created for uid: ${uid}`);
-    return { ...defaultUser, isAdmin: adminForAllUsers(), effectiveJlptLevel: DEFAULT_JLPT_LEVEL };
+    return { ...defaultUser, isAdmin: adminForAllUsers(), effectiveJlptLevel: DEFAULT_JLPT_LEVEL, profileComplete: false };
   }
 
   /**
@@ -122,6 +143,14 @@ export class UserService {
     return (await this.getPreferences(uid)).jlptLevel;
   }
 
+  /** Whether the user has chosen their level (see isProfileComplete). Cached once true. */
+  async hasCompleteProfile(uid: string): Promise<boolean> {
+    if (this.knownComplete.has(uid)) return true;
+    const complete = isProfileComplete((await this.db.collection('users').doc(uid).get()).data() as UserRoot | undefined);
+    if (complete) this.knownComplete.add(uid);
+    return complete;
+  }
+
   /** Whether the user may use admin tools: everyone when ADMIN_ALL is on, else `isAdmin: true` on their doc. */
   async isAdmin(uid: string): Promise<boolean> {
     if (adminForAllUsers()) return true;
@@ -134,5 +163,6 @@ export class UserService {
       throw new BadRequestException(`jlptLevel must be one of ${JLPT_LEVEL_ORDER.join(', ')}`);
     }
     await this.db.collection('users').doc(uid).set({ preferences: prefs }, { merge: true });
+    if (prefs.jlptLevel) this.knownComplete.add(uid);
   }
 }
