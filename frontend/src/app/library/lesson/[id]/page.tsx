@@ -5,8 +5,7 @@ import {
   parseVocabLessonBody,
   parseKanjiLessonBody,
 } from "@/lib/markdown-parser";
-import VocabLessonView from "@/components/lessons/VocabLessonView";
-import KanjiLessonView from "@/components/lessons/KanjiLessonView";
+import LessonSlideStack from "@/components/learn/LessonSlideStack";
 import { VocabLesson, KanjiLesson } from "@/types";
 
 export default async function LibraryLessonPage({
@@ -93,16 +92,13 @@ export default async function LibraryLessonPage({
 
       {/* --- Lesson Body --- */}
       <article>
-        {parsedLesson && type === "Vocab" && (
-          <VocabLessonView
-            lesson={parsedLesson as VocabLesson}
-            readOnly={true}
-            hideContext={true}
-            hideComponentKanji={true}
+        {parsedLesson && (
+          <LessonSlideStack
+            loaded={{
+              item: { kuId: decodedId, content: lessonContent.content || lessonContent.topicId, type },
+              lesson: parsedLesson,
+            }}
           />
-        )}
-        {parsedLesson && type === "Kanji" && (
-          <KanjiLessonView lesson={parsedLesson as KanjiLesson} />
         )}
 
         {!parsedLesson && (

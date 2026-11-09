@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { KnowledgeUnit, Lesson, VocabLesson, VocabUsage, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson } from '../types';
@@ -7,13 +7,12 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { ValidationService } from '../validation/validation.service';
 import { buildVocabLessonMessage, buildVocabCacheContext } from '../prompts/vocab.prompts';
 import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
-import { ADMIN_USER_ID } from '../lib/constants';
 import { KanjiService } from '../kanji/kanji.service';
 import { isUsagePicture, subjectOf, usageKey } from '../pictures/pictures.service';
 import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAside, withUsageIds } from './vocab-usages';
 import { FacetStore } from '../facets/facet-store';
 import { stripFurigana } from '../lib/furigana-text';
-import { UserService, adminForAllUsers } from '../users/user.service';
+import { UserService } from '../users/user.service';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -98,10 +97,9 @@ export class LessonsService {
     const content = ku.content;
 
     const lessonDbRef = this.db.collection(LESSONS_COLLECTION).doc(kuId);
-    const overlayRef = this.db.collection('users').doc(uid).collection(USER_LESSONS_SUBCOLLECTION).doc(kuId);
 
     // Check for lesson in 'lessons' collection
-    const [lessonDoc, overlayDoc] = await Promise.all([lessonDbRef.get(), overlayRef.get()]);
+    const lessonDoc = await lessonDbRef.get();
     // Return existing lesson if it's completed OR if it has no status (legacy lesson)
     if (lessonDoc.exists && (lessonDoc.data()?.status === 'completed' || !lessonDoc.data()?.status)) {
       this.logger.log(`Returning existing lesson for KU ${kuId} from lessons collection`);
@@ -110,8 +108,7 @@ export class LessonsService {
         void lessonDbRef.update({ userId: FieldValue.delete() });
         delete data.userId;
       }
-      const merged = overlayDoc.exists ? { ...data, ...overlayDoc.data() } : data;
-      return applyKuOverrides(dropStrayComponentKanji(merged as Lesson), ku);
+      return applyKuOverrides(dropStrayComponentKanji(data as Lesson), ku);
     }
 
     this.logger.log(`No existing lesson for KU ${kuId}. Generating new lesson`);
@@ -481,40 +478,17 @@ export class LessonsService {
     await lessonRef.update(parsed);
   }
 
-  async updateLesson(uid: string, kuId: string, section: string, content: string) {
-    // Learner route (no AdminGuard): only the admin user, or everyone under the ADMIN_ALL dev
-    // switch, edits the global lesson. Others get a personal overlay.
-    const isAdmin = uid === ADMIN_USER_ID || adminForAllUsers();
-    if (isAdmin) {
-      await this.writeGlobalLesson(kuId, { [section]: content });
-    } else {
-      const lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(kuId).get();
-      if (!lessonDoc.exists) throw new NotFoundException('Lesson not found');
-      const overlayRef = this.db.collection('users').doc(uid).collection(USER_LESSONS_SUBCOLLECTION).doc(kuId);
-      await overlayRef.set({ [section]: this.parseSectionValue(content) }, { merge: true });
-    }
-
-    return { success: true };
-  }
-
   /** Admin-only: batched write of multiple lesson sections to global data in a single Firestore update. */
   async updateGlobalLesson(kuId: string, updates: Record<string, any>) {
     await this.writeGlobalLesson(kuId, updates);
     return { success: true };
   }
 
-  async findByKuId(uid: string, kuId: string): Promise<Lesson | null> {
-    const [lessonDoc, overlayDoc] = await Promise.all([
-      this.db.collection(LESSONS_COLLECTION).doc(kuId).get(),
-      this.db.collection('users').doc(uid).collection(USER_LESSONS_SUBCOLLECTION).doc(kuId).get(),
-    ]);
-
+  /** The global lesson for a KU (lessons are shared; learners don't have their own copies). */
+  async findByKuId(kuId: string): Promise<Lesson | null> {
+    const lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(kuId).get();
     if (!lessonDoc.exists) return null;
-
-    const lesson = lessonDoc.data() as Lesson;
-    return dropStrayComponentKanji(
-      overlayDoc.exists ? { ...lesson, ...overlayDoc.data() } as Lesson : lesson,
-    );
+    return dropStrayComponentKanji(lessonDoc.data() as Lesson);
   }
 
   async createUserGrammarLesson(
@@ -540,18 +514,6 @@ export class LessonsService {
     this.logger.log(`Created UserGrammarLesson ${docId} for uid=${uid} kuId=${kuId}`);
     return { id: docId, ...data };
   }
-
-  async getUserGrammarLessons(uid: string, kuId: string): Promise<UserGrammarLesson[]> {
-    const snapshot = await this.db
-      .collection('users').doc(uid)
-      .collection(USER_GRAMMAR_LESSONS_SUBCOLLECTION)
-      .where('kuId', '==', kuId)
-      .get();
-
-    if (snapshot.empty) return [];
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as unknown as UserGrammarLesson);
-  }
-
 
   async getQueue(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
     // Start Learning services the user's own queue first: everything already waiting

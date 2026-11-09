@@ -32,7 +32,7 @@ export const isProfileComplete = (user: Pick<UserRoot, 'preferences'> | undefine
  * The dev switch that makes every user an admin (`.env`, never set in production). Applied when
  * admin status is read, never stored on a user doc.
  */
-export const adminForAllUsers = () => process.env.ADMIN_ALL === 'true';
+const adminForAllUsers = () => process.env.ADMIN_ALL === 'true';
 
 @Injectable()
 export class UserService {

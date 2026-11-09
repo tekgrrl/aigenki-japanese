@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import Link from "next/link";
-import { ReviewItem, ReviewFacet, KnowledgeUnit, Lesson, VocabLesson, KanjiLesson, GrammarLesson } from "@/types";
+import { ReviewItem, ReviewFacet, KnowledgeUnit, Lesson } from "@/types";
 import * as wanakana from "wanakana";
 import { logger } from "@/lib/logger";
 import { QuestionFeedbackModal } from "@/components/QuestionFeedbackModal";
@@ -19,10 +19,10 @@ import InputModeBadge from "@/components/review/InputModeBadge";
 import FacetDebugPanel from "@/components/review/FacetDebugPanel";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import ReviewActionButtons from "@/components/review/ReviewActionButtons";
-import VocabLessonView from "@/components/lessons/VocabLessonView";
-import KanjiLessonView from "@/components/lessons/KanjiLessonView";
 import KanjiWordsLine from "@/components/review/KanjiWordsLine";
-import GrammarLessonView from "@/components/lessons/GrammarLessonView";
+import LessonSlideStack from "@/components/learn/LessonSlideStack";
+import { fetchApprovedPictures } from "@/lib/pictures";
+import type { PictureRef } from "@/lib/pictures";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useQuestionScout, type ScoutedQuestion } from "@/hooks/useQuestionScout";
 import { Mic } from "lucide-react";
@@ -88,6 +88,9 @@ export default function ReviewPage() {
   // --- Inline Lesson Panel State ---
   const [showLesson, setShowLesson] = useState(false);
   const [lessonForReview, setLessonForReview] = useState<Lesson | null>(null);
+  // Approved pictures for an audio-first word's lesson (its card is a picture card), so the
+  // Review Lesson slides teach it by picture and sound, as Start Learning did.
+  const [lessonPictures, setLessonPictures] = useState<PictureRef[]>([]);
   const [isFetchingLesson, setIsFetchingLesson] = useState(false);
   // Opening the lesson before answering forfeits the item for this round: it can only be
   // skipped (Skip never reschedules, so it stays due and comes back next session).
@@ -625,6 +628,9 @@ export default function ReviewPage() {
       if (currentIndexRef.current !== requestedIndex) return;
       if (res.ok) {
         const data = await res.json() as Lesson;
+        const pictures = currentItem.facet.facetType === "picture-choice" ? await fetchApprovedPictures(currentItem.facet.kuId) : [];
+        if (currentIndexRef.current !== requestedIndex) return;
+        setLessonPictures(pictures);
         setLessonForReview(data);
         lockIfUnanswered();
         setShowLesson(true);
@@ -1310,20 +1316,18 @@ export default function ReviewPage() {
               lesson={lessonForReview}
             />
           </div>
-          {lessonForReview.type === "Vocab" && (
-            <VocabLessonView lesson={lessonForReview as VocabLesson} readOnly />
-          )}
-          {lessonForReview.type === "Kanji" && (
-            <KanjiLessonView lesson={lessonForReview as KanjiLesson} />
-          )}
-          {lessonForReview.type === "Grammar" && (
-            <GrammarLessonView
-              lesson={lessonForReview as GrammarLesson}
-              selectedFacets={{}}
-              onToggleFacet={() => {}}
-              readOnly
-            />
-          )}
+          <LessonSlideStack
+            key={currentItem.facet.id}
+            loaded={{
+              item: {
+                kuId: currentItem.facet.kuId,
+                content: lessonLabel(lessonForReview) ?? currentItem.facet.data?.content ?? currentItem.facet.kuId,
+                type: lessonForReview.type,
+              },
+              lesson: lessonForReview,
+              ...(lessonPictures.length ? { pictures: lessonPictures } : {}),
+            }}
+          />
         </div>
       )}
 

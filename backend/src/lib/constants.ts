@@ -7,13 +7,9 @@ export const ADMIN_USER_ID = 'user_default';
 // SRS stage at which a facet is considered mastered.
 export const MASTERED_STAGE = 7;
 
-// Starting SRS stage for self-certified facets (one below mastered).
-// A self-certified facet is due for review in ~1 month; one failure drops it back into active review.
-export const SELF_CERTIFIED_STAGE = 6;
-
-// Starting SRS stage when a user marks a lesson item "I already know this" during
-// Start Learning / the daily plan. Lower than SELF_CERTIFIED_STAGE — this is a first
-// impression, not a certified mastery claim, so it re-enters active review sooner (~3 days).
+// Starting SRS stage when a user marks a lesson item "I already know this" (Start Learning,
+// the daily plan, the lesson page). A first impression, not a mastery claim, so it re-enters
+// active review soon (~3 days).
 export const ALREADY_KNOWN_STAGE = 3;
 
 // SRS review intervals in hours, indexed by srsStage.

@@ -66,19 +66,6 @@ export class LessonsController {
     return this.lessonsService.generateLesson(uid, body.kuId);
   }
 
-  @Put(':kuId')
-  async update(
-    @UserId() uid: string,
-    @Param('kuId') kuId: string,
-    @Body() body: { section: string; content: string }
-  ) {
-    if (!body.section || body.content === undefined) {
-      throw new BadRequestException('Section and content are required');
-    }
-
-    return this.lessonsService.updateLesson(uid, kuId, body.section, body.content);
-  }
-
   @Put(':kuId/global')
   @UseGuards(AdminGuard)
   async updateGlobal(
@@ -98,7 +85,7 @@ export class LessonsController {
       throw new BadRequestException('kuId is required');
     }
 
-    const lesson = await this.lessonsService.findByKuId(uid, kuId);
+    const lesson = await this.lessonsService.findByKuId(kuId);
 
     // Return 404 if specific lesson lookup fails (optional, depends on frontend expectation)
     if (!lesson) {
@@ -112,14 +99,6 @@ export class LessonsController {
   @Get('queue')
   async getQueue(@UserId() uid: string) {
     return this.lessonsService.getQueue(uid);
-  }
-
-  @Get('user-grammar')
-  async getUserGrammarLessons(@UserId() uid: string, @Query('kuId') kuId: string) {
-    if (!kuId) {
-      throw new BadRequestException('kuId is required');
-    }
-    return this.lessonsService.getUserGrammarLessons(uid, kuId);
   }
 
   /** Lazy: build a Vocab lesson's usages (the Start Learning slideshow uses their labels). */
