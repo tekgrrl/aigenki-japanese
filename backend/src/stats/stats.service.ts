@@ -11,6 +11,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { isAboveLevel } from '../lib/jlpt';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
+import { enrolledKuId } from '../user-knowledge-units/enrolled-ku-id';
 
 @Injectable()
 export class StatsService {
@@ -458,14 +459,16 @@ export class StatsService {
         return this.backfillAllowedGrammarKuIds(uid);
     }
 
-    /** The Grammar KU ids that belong in a user's allowed grammar: enrolled and not above their level. */
-    private async selectAllowedGrammarKuIds(uid: string): Promise<string[]> {
+    /**
+     * The Grammar KU ids that belong in a user's allowed grammar: enrolled and not above their level.
+     * `level`: the level to judge by (a level change passes the one it's applying); default the stored one.
+     */
+    private async selectAllowedGrammarKuIds(uid: string, level?: string): Promise<string[]> {
         const userRef = this.db.collection('users').doc(uid);
-        const [prefs, ukus] = await Promise.all([this.userService.getPreferences(uid), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
-        const userLevel = prefs.jlptLevel;
+        const [userLevel, ukus] = await Promise.all([level ?? this.userService.getJlptLevel(uid), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
         const candidateIds = ukus.docs
             .filter(d => d.data().aboveLevel !== true)
-            .map(d => (d.data().kuId as string | undefined) ?? d.id);
+            .map(enrolledKuId);
         // Re-check the level against the KU itself: legacy UKUs have no aboveLevel flag, and a
         // fresh enrolment's flag is written after the UKU, so the flag alone can let N3+ through.
         return (await this.knowledgeUnitsService.getManyCached(candidateIds))
@@ -498,12 +501,12 @@ export class StatsService {
     }
 
     /**
-     * After the learner's level changes (and recomputeAboveLevel has run): replaces the id list,
+     * After the learner's level changes to `level` (and recomputeAboveLevel has run): updates the id list,
      * so grammar now above their level drops out and grammar now within it comes in.
      */
-    async rebuildAllowedGrammarKuIds(uid: string): Promise<string[]> {
+    async rebuildAllowedGrammarKuIds(uid: string, level: string): Promise<string[]> {
         const userRef = this.db.collection('users').doc(uid);
-        const [grammarIds, userDoc] = await Promise.all([this.selectAllowedGrammarKuIds(uid), userRef.get()]);
+        const [grammarIds, userDoc] = await Promise.all([this.selectAllowedGrammarKuIds(uid, level), userRef.get()]);
         const current: string[] = userDoc.data()?.tutorContext?.allowedGrammarKuIds ?? [];
         const add = grammarIds.filter(id => !current.includes(id));
         const remove = current.filter(id => !grammarIds.includes(id));

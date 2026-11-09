@@ -76,6 +76,14 @@ export default function ProfilePage() {
     return ok;
   }, []);
 
+  /** A setting's control, with its save status to the left (shown when it was the last one changed). */
+  const withStatus = (field: string, control: React.ReactNode) => (
+    <div className="flex items-center gap-3 ml-4 shrink-0">
+      {statusFor(field)}
+      {control}
+    </div>
+  );
+
   /** The save status for one setting's row (nothing unless that setting was the last one changed). */
   const statusFor = (field: string) => {
     if (saveStatus?.field !== field) return null;
@@ -159,8 +167,7 @@ export default function ProfilePage() {
                 Display reading aids above kanji — shortcut: Alt+F
               </p>
             </div>
-            <div className="flex items-center gap-3 ml-4 shrink-0">
-              {statusFor("showFurigana")}
+            {withStatus("showFurigana", (
               <button
                 onClick={handleToggleFurigana}
                 role="switch"
@@ -175,7 +182,7 @@ export default function ProfilePage() {
                   }`}
                 />
               </button>
-            </div>
+            ))}
           </div>
 
           {/* Audio-first experiment (#246) */}
@@ -187,8 +194,7 @@ export default function ProfilePage() {
                 Words you&apos;re already learning aren&apos;t affected.
               </p>
             </div>
-            <div className="flex items-center gap-3 ml-4 shrink-0">
-            {statusFor("audioFirstExperiment")}
+            {withStatus("audioFirstExperiment", (
             <button
               type="button"
               onClick={handleToggleAudioFirst}
@@ -205,7 +211,7 @@ export default function ProfilePage() {
                 }`}
               />
             </button>
-            </div>
+            ))}
           </div>
 
           {/* Appearance (per device — stored in this browser, not on the account) */}
@@ -247,12 +253,12 @@ export default function ProfilePage() {
                 Sets the level of your lessons, questions and scenarios
               </p>
             </div>
-            <div className="flex items-center gap-3 ml-4 shrink-0">
-            {statusFor("jlptLevel")}
+            {withStatus("jlptLevel", (
             <select
               value={jlptLevel}
               onChange={(e) => handleJlptLevel(e.target.value)}
-              className="shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
+              disabled={saveStatus?.field === "jlptLevel" && saveStatus.state === "saving"}
+              className="shrink-0 disabled:opacity-50 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
             >
               {jlptLevel === "" && (
                 <option value="" disabled>Choose your level</option>
@@ -261,7 +267,7 @@ export default function ProfilePage() {
                 <option key={l} value={l}>{l}</option>
               ))}
             </select>
-            </div>
+            ))}
           </div>
 
           {/* Preferred user role */}
@@ -272,8 +278,7 @@ export default function ProfilePage() {
                 Your default persona in generated roleplay scenarios
               </p>
             </div>
-            <div className="flex items-center gap-3 ml-4 shrink-0">
-            {statusFor("preferredUserRole")}
+            {withStatus("preferredUserRole", (
             <select
               value={preferredUserRole}
               onChange={(e) => handlePreferredUserRole(e.target.value)}
@@ -284,7 +289,7 @@ export default function ProfilePage() {
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
-            </div>
+            ))}
           </div>
         </div>
       </section>

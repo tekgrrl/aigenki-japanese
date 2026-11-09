@@ -73,6 +73,8 @@ export interface UserRoot {
   effectiveJlptLevel?: 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
   /** Response-only (GET /users/me): a level has been chosen. Until then the app is limited to /profile. */
   profileComplete?: boolean;
+  /** The level the last successful level sync applied to aboveLevel / allowed grammar (LevelSyncService). */
+  aboveLevelComputedFor?: 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
 
   /**
    * Statistical data related to the user's reviews, engagement, and progression.

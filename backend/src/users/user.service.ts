@@ -7,24 +7,26 @@ import { DEFAULT_JLPT_LEVEL, JLPT_LEVEL_ORDER, JlptLevel } from '../prompts/curr
 /** A user's preferences, with the study level always filled in. */
 export type UserPreferences = NonNullable<UserRoot['preferences']> & { jlptLevel: JlptLevel };
 
+/** The level stored on a user doc, if it's a real level (N5-N1); anything else counts as not chosen. */
+export const storedJlptLevel = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel | undefined => {
+  const stored = user?.preferences?.jlptLevel;
+  return stored && JLPT_LEVEL_ORDER.includes(stored) ? stored : undefined;
+};
+
 /**
  * The study level is required: the learner chooses it on their profile. Until they do (nothing
  * stored, or a stored value that isn't a level) they count as DEFAULT_JLPT_LEVEL (N5) everywhere:
  * generation, queues, enrolment's aboveLevel, scenarios. This is the one place that rule lives.
  */
-export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel => {
-  const stored = user?.preferences?.jlptLevel;
-  return stored && JLPT_LEVEL_ORDER.includes(stored) ? stored : DEFAULT_JLPT_LEVEL;
-};
+export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel =>
+  storedJlptLevel(user) ?? DEFAULT_JLPT_LEVEL;
 
 /**
  * A profile is complete once a valid level is stored. Until then the learner is sent to
  * /profile and the API refuses everything but the profile itself (FirebaseAuthGuard).
  */
-export const isProfileComplete = (user: Pick<UserRoot, 'preferences'> | undefined): boolean => {
-  const stored = user?.preferences?.jlptLevel;
-  return !!stored && JLPT_LEVEL_ORDER.includes(stored);
-};
+export const isProfileComplete = (user: Pick<UserRoot, 'preferences'> | undefined): boolean =>
+  storedJlptLevel(user) !== undefined;
 
 /**
  * The dev switch that makes every user an admin (`.env`, never set in production). Applied when

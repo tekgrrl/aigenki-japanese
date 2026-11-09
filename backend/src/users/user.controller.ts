@@ -3,8 +3,7 @@ import { UserService } from './user.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
 import { AllowIncompleteProfile } from '../auth/allow-incomplete-profile.decorator';
-import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { StatsService } from '../stats/stats.service';
+import { LevelSyncService } from './level-sync.service';
 
 @Controller('users')
 @UseGuards(FirebaseAuthGuard)
@@ -13,8 +12,7 @@ export class UserController {
 
   constructor(
     private readonly userService: UserService,
-    private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
-    private readonly statsService: StatsService,
+    private readonly levelSync: LevelSyncService,
   ) {}
 
   /**
@@ -48,19 +46,10 @@ export class UserController {
     @UserId() uid: string,
     @Body() body: { showFurigana?: boolean; jlptLevel?: string; preferredUserRole?: string; audioFirstExperiment?: boolean },
   ) {
-    // The level as stored before this save (not getJlptLevel: "unset" must count as a change).
-    const previousLevel = body.jlptLevel ? (await this.userService.findById(uid))?.preferences?.jlptLevel : undefined;
     await this.userService.updatePreferences(uid, body);
-    if (body.jlptLevel && body.jlptLevel !== previousLevel) {
-      // The level is saved and the profile complete either way; a failure here leaves some flags
-      // stale until the next level change, which is better than reporting the save as failed.
-      try {
-        await this.userKnowledgeUnitsService.recomputeAboveLevel(uid, body.jlptLevel);
-        await this.statsService.rebuildAllowedGrammarKuIds(uid);
-      } catch (e) {
-        this.logger.error(`Level saved for uid=${uid}, but recomputing aboveLevel / allowed grammar failed`, e);
-      }
-    }
+    // The level is saved and the profile complete; the sync never throws (a failure is logged and
+    // retried on the next level save), so the learner isn't told the save failed.
+    if (body.jlptLevel) await this.levelSync.syncToStoredLevel(uid);
     return { ok: true };
   }
 }

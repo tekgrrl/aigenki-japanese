@@ -29,7 +29,10 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **The dashboard's per-level enrolment counts and curriculum node aren't rebuilt on a level change**
   (`recordKuEnrolled` / `updateCurriculumNode`). They're caches, like the forecasts.
 - **The complete-profile cache** (`UserService.knownComplete`) is in memory and per instance. It only
-  ever holds uids whose level is stored, and a level can't be cleared, so it can't go stale.
+  ever holds uids whose level is stored, and the API can't clear a level. A script or console edit that
+  deletes or resets a user doc behind the API's back leaves it stale until the backend restarts; accepted.
+- **`LevelSyncService` runs one level sync at a time per account with an in-memory chain**, so it
+  serialises within one backend process only. Revisit if the backend ever runs several instances.
 
 ## Kanji and lessons
 - **Kanji Alive lookups** (`KanjiService.getKanjiAliveMeanings`): failures are deliberately **not**

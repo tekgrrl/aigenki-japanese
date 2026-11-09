@@ -32,7 +32,7 @@ describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () =>
     await users.updatePreferences('u1', { jlptLevel: 'N5' });
     expect(await ukuService.recomputeAboveLevel('u1', 'N5')).toBe(2);
     expect(flags()).toEqual({ g5: false, g3: true, v4: true });
-    await stats.rebuildAllowedGrammarKuIds('u1');
+    await stats.rebuildAllowedGrammarKuIds('u1', 'N5');
     expect(allowed()).toEqual(['g5']);
     expect(db.store('users').get('u1')!.tutorContext.leechVocab).toEqual([]); // siblings kept
   });
@@ -49,7 +49,7 @@ describe('level change: recomputeAboveLevel + rebuildAllowedGrammarKuIds', () =>
     await users.updatePreferences('u1', { jlptLevel: 'N3' });
     await ukuService.recomputeAboveLevel('u1', 'N3');
     expect(flags()).toEqual({ g5: false, g3: false, v4: false });
-    await stats.rebuildAllowedGrammarKuIds('u1');
+    await stats.rebuildAllowedGrammarKuIds('u1', 'N3');
     expect([...allowed()].sort()).toEqual(['g3', 'g5']);
   });
 });
