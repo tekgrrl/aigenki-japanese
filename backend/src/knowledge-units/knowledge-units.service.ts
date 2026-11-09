@@ -5,7 +5,6 @@ import {
     LESSONS_COLLECTION,
     PICTURES_COLLECTION,
     QUESTIONS_COLLECTION,
-    REVIEW_FACETS_COLLECTION,
     USER_KUS_SUBCOLLECTION,
     QUESTION_STATES_SUBCOLLECTION,
 } from '../firebase/firebase.module';
@@ -18,6 +17,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Query } from '@google-cloud/firestore';
 import { GrammarNote } from '@/types/scenario';
 import { kanjiIn } from '@/lib/kanji-chars';
+import { FacetStore } from '../facets/facet-store';
 
 @Injectable()
 export class KnowledgeUnitsService {
@@ -37,6 +37,7 @@ export class KnowledgeUnitsService {
 
     constructor(
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly facetStore: FacetStore,
     ) { }
 
     private async ensureSearchCache(): Promise<KnowledgeUnit[]> {
@@ -544,16 +545,20 @@ export class KnowledgeUnitsService {
         const userRef = this.db.collection('users').doc(uid);
         const deleted: Record<string, number> = {};
 
-        const deleteSubcollectionDocs = async (subcollection: string, field: string) => {
-            const snap = await userRef.collection(subcollection).where(field, '==', kuId).get();
-            if (snap.empty) return 0;
+        const deleteRefs = async (refs: FirebaseFirestore.DocumentReference[]) => {
+            if (refs.length === 0) return 0;
             const batch = this.db.batch();
-            snap.docs.forEach(d => batch.delete(d.ref));
+            refs.forEach(ref => batch.delete(ref));
             await batch.commit();
-            return snap.size;
+            return refs.length;
         };
+        const deleteSubcollectionDocs = async (subcollection: string, field: string) =>
+            deleteRefs((await userRef.collection(subcollection).where(field, '==', kuId).get()).docs.map(d => d.ref));
 
-        deleted['review-facets'] = await deleteSubcollectionDocs(REVIEW_FACETS_COLLECTION, 'kuId');
+        // The KU's facets: those testing it and those in its own sequence (its Kanji-Component
+        // cards test the kanji's KU but carry source.id = this KU, and would be left orphaned).
+        const facets = await this.facetStore.forKu(uid, kuId);
+        deleted['review-facets'] = await deleteRefs(facets.map(f => this.facetStore.doc(uid, f.id!)));
         deleted['user-kus'] = await deleteSubcollectionDocs(USER_KUS_SUBCOLLECTION, 'kuId');
         deleted['feed'] = await deleteSubcollectionDocs('feed', 'kuId');
 

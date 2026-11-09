@@ -14,7 +14,8 @@ import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { StatsService } from '../src/stats/stats.service';
-import { FIRESTORE_CONNECTION, REVIEW_FACETS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../src/firebase/firebase.module';
+import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../src/firebase/firebase.module';
+import { FacetStore } from '../src/facets/facet-store';
 import type { Firestore } from 'firebase-admin/firestore';
 
 const TEST_UID = 'T6UtoM95CqVupa8zyIoSY6jR1L52';
@@ -24,13 +25,9 @@ async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
   const db = app.get<Firestore>(FIRESTORE_CONNECTION);
   const statsService = app.get(StatsService);
+  const facetStore = app.get(FacetStore);
 
-  const facetsSnap = await db
-    .collection('users')
-    .doc(TEST_UID)
-    .collection(REVIEW_FACETS_COLLECTION)
-    .limit(50)
-    .get();
+  const facetsSnap = await facetStore.query(TEST_UID).limit(50).get();
 
   if (facetsSnap.empty) {
     console.error('No review-facets found for this uid.');
@@ -53,12 +50,7 @@ async function main() {
 
     await statsService.addToLeechVocab(TEST_UID, content, facet.facetType);
 
-    await db
-      .collection('users')
-      .doc(TEST_UID)
-      .collection(REVIEW_FACETS_COLLECTION)
-      .doc(facet.id)
-      .update({ consecutiveFailures: 3 });
+    await facetStore.doc(TEST_UID, facet.id).update({ consecutiveFailures: 3 });
 
     console.log(`  seeded leech: "${content}" (${facet.facetType}) via facet ${facet.id}`);
   }

@@ -11,6 +11,10 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Multi-step Firestore writes without a transaction** in admin/reset flows (`resetSequence`,
   `returnToLessonsAsAudioFirst`) are accepted, as are `stats.reviewForecast`/`hourlyForecast` not
   being adjusted when facets are deleted. The forecast is a cache.
+- **Facet ownership for the admin account** (`user_default`): its facets live in the shared top-level
+  `review-facets` collection, which is empty today. `FacetStore` filters reads by `userId` (`query()`,
+  `get()`) and the SRS transaction checks `belongsTo`; plain `doc()` writes elsewhere aren't
+  re-checked, and admin facets without a `userId` tag are deliberately not supported. Don't flag either.
 - **Failing stub specs** (`*.controller.spec.ts`, `*.service.spec.ts` "should be defined" with no
   providers) fail on `main` too. They aren't regressions from the PR under review.
 

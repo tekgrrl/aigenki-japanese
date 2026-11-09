@@ -1,12 +1,13 @@
 import { LessonsService } from './lessons.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { FacetStore } from '../facets/facet-store';
 
 const UID = 'u1';
 const at = (seconds: number) => ({ seconds, nanoseconds: 0 });
 
 function setup() {
   const db = new FakeFirestore();
-  const service = new LessonsService(db as any, {} as any, {} as any, {} as any, {} as any);
+  const service = new LessonsService(db as any, new FacetStore(db as any), {} as any, {} as any, {} as any, {} as any);
   const uku = (kuId: string, status: string, createdMs: number) =>
     db.collection('users').doc(UID).collection('user-kus').doc(kuId).set({ kuId, status, createdAt: at(createdMs) });
   const ku = (id: string, type: string, content: string) =>

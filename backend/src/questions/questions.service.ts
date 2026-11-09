@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { StatsService } from '../stats/stats.service';
 import { Firestore } from 'firebase-admin/firestore';
 import {
@@ -13,7 +13,7 @@ import {
 import { ReviewFacet, QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage } from '@/types';
 import { usagesOf } from '../lessons/vocab-usages';
 import { GeminiService } from '../gemini/gemini.service';
-import { ReviewsService } from '../reviews/reviews.service';
+import { FacetStore } from '../facets/facet-store';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import {
   VOCAB_QUESTION_OPTIONS,
@@ -59,8 +59,7 @@ export class QuestionsService {
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly geminiService: GeminiService,
-    @Inject(forwardRef(() => ReviewsService))
-    private readonly reviewsService: ReviewsService,
+    private readonly facetStore: FacetStore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly statsService: StatsService,
   ) {}
@@ -97,7 +96,7 @@ export class QuestionsService {
     const fits = (q: { usageId?: string }) => !target || q.usageId === target.usage.id || (!q.usageId && target.only);
 
     const facetData = facetId
-      ? await this.reviewsService.getByFacetId(uid, facetId) as ReviewFacet | null
+      ? await this.facetStore.get(uid, facetId)
       : null;
 
     // The facet can be gone if it was deleted mid-session (e.g. an admin regenerate-and-reset).
@@ -117,7 +116,7 @@ export class QuestionsService {
     const suitable = await this.findSuitableQuestion(uid, kuId, facetData?.currentQuestionId, fits);
     if (suitable) {
       this.logger.log(`Found suitable question ${suitable.questionId} for KU ${kuId}`);
-      if (facetId) await this.reviewsService.updateFacetQuestion(uid, facetId, suitable.questionId);
+      if (facetId) await this.facetStore.updateQuestion(uid, facetId, suitable.questionId);
       return suitable;
     }
 
@@ -341,7 +340,7 @@ export class QuestionsService {
     this.logger.log(`Saved new question ${ref.id} for KU ${kuId} (level: ${capturedLevel})`);
 
     if (facetId) {
-      await this.reviewsService.updateFacetQuestion(uid, facetId, ref.id);
+      await this.facetStore.updateQuestion(uid, facetId, ref.id);
     }
 
     return this.toResponse(newQuestion, true);
@@ -395,7 +394,7 @@ export class QuestionsService {
     this.logger.log(`Saved new grammar question ${ref.id} for KU ${kuId} (pattern: ${pattern}, level: ${capturedLevel})`);
 
     if (facetId) {
-      await this.reviewsService.updateFacetQuestion(uid, facetId, ref.id);
+      await this.facetStore.updateQuestion(uid, facetId, ref.id);
     }
 
     return this.toResponse(newQuestion, true);
@@ -449,7 +448,7 @@ export class QuestionsService {
     this.logger.log(`Saved new concept question ${ref.id} for KU ${kuId} (mechanic: ${mechanic.goalTitle}, level: ${capturedLevel})`);
 
     if (facetId) {
-      await this.reviewsService.updateFacetQuestion(uid, facetId, ref.id);
+      await this.facetStore.updateQuestion(uid, facetId, ref.id);
     }
 
     return this.toResponse(newQuestion, true);

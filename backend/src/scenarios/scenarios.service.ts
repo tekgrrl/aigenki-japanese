@@ -13,7 +13,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LessonsService } from '../lessons/lessons.service';
 import { UserService } from '../users/user.service';
-import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, REVIEW_FACETS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
@@ -25,6 +25,7 @@ import { GrammarSectionsService } from '../grammar-sections/grammar-sections.ser
 import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
 import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
+import { FacetStore } from '../facets/facet-store';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
@@ -35,6 +36,7 @@ export class ScenariosService {
 
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly facetStore: FacetStore,
     private readonly geminiService: GeminiService,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
@@ -1041,9 +1043,7 @@ export class ScenariosService {
     // Nothing linked means nothing to graduate: Role Play is open.
     if (kuIds.length === 0) return { items: {}, ready: true };
 
-    const facetsRef = uid === ADMIN_USER_ID
-      ? this.db.collection(REVIEW_FACETS_COLLECTION)
-      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const facetsRef = this.facetStore.query(uid);
 
     const items: Record<string, { maxSrsStage: number | null; minSrsStage: number | null }> = {};
     await Promise.all(kuIds.map(async (kuId) => {

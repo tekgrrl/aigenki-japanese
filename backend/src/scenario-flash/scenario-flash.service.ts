@@ -1,12 +1,12 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CollectionReference, Firestore, Query, Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE_CONNECTION, REVIEW_FACETS_COLLECTION } from '../firebase/firebase.module';
-import { ADMIN_USER_ID, SRS_INTERVALS } from '../lib/constants';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Query, Timestamp } from 'firebase-admin/firestore';
+import { SRS_INTERVALS } from '../lib/constants';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { DailyPlanService } from '../daily-plan/daily-plan.service';
 import { TutorService } from '../tutor/tutor.service';
 import { Scenario } from '../types';
+import { FacetStore } from '../facets/facet-store';
 
 /** The scenario chain a Grammar KU gets at SRS stage 3, one Flash card at a time. */
 export type ScenarioFlashStep = 'drill' | 'graduate' | 'simulate' | 'complete';
@@ -41,22 +41,15 @@ export class ScenarioFlashService {
   private readonly starting = new Set<string>();
 
   constructor(
-    @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly facetStore: FacetStore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly scenariosService: ScenariosService,
     private readonly dailyPlanService: DailyPlanService,
     private readonly tutorService: TutorService,
   ) {}
 
-  private facetsCol(uid: string): CollectionReference {
-    return uid === ADMIN_USER_ID
-      ? this.db.collection(REVIEW_FACETS_COLLECTION)
-      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
-  }
-
   private flashQuery(uid: string): Query {
-    const q = this.facetsCol(uid).where('facetType', '==', 'flash');
-    return uid === ADMIN_USER_ID ? q.where('userId', '==', uid) : q;
+    return this.facetStore.query(uid).where('facetType', '==', 'flash');
   }
 
   /**
@@ -100,7 +93,7 @@ export class ScenarioFlashService {
           kind: 'scenario', step, scenarioId, scenarioTitle: scenario.title ?? '',
           grammarKuId, grammarContent: ku.content,
         };
-        await this.facetsCol(uid).doc().set({
+        await this.facetStore.newDoc(uid).set({
           facetType: 'flash',
           kuId: scenarioId,
           sourceCollection: 'scenarios',
@@ -109,7 +102,7 @@ export class ScenarioFlashService {
           createdAt: Timestamp.now(),
           history: [],
           data,
-          ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
+          ...this.facetStore.ownerTag(uid),
         });
       }
       // The check-in's "Ready to practice" suggestion for this grammar point is now handled
@@ -151,11 +144,10 @@ export class ScenarioFlashService {
 
   /** The user has seen the card: hide it for SEEN_SNOOZE_HOURS (sync replaces it sooner if its step gets done). */
   async acknowledge(uid: string, facetId: string): Promise<void> {
-    const ref = this.facetsCol(uid).doc(facetId);
-    const doc = await ref.get();
-    if (!doc.exists) throw new NotFoundException('Card not found');
-    if (doc.data()!.facetType !== 'flash') throw new BadRequestException('Not a Flash card');
-    await ref.update({ nextReviewAt: Timestamp.fromMillis(Date.now() + SEEN_SNOOZE_HOURS * 60 * 60 * 1000) });
+    const card = await this.facetStore.get(uid, facetId);
+    if (!card) throw new NotFoundException('Card not found');
+    if (card.facetType !== 'flash') throw new BadRequestException('Not a Flash card');
+    await this.facetStore.doc(uid, facetId).update({ nextReviewAt: Timestamp.fromMillis(Date.now() + SEEN_SNOOZE_HOURS * 60 * 60 * 1000) });
   }
 
   /** The first step of the chain the scenario hasn't completed yet, or null when it's all done. */

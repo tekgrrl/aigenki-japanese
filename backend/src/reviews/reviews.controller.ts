@@ -1,5 +1,6 @@
 import { Controller, Post, Body, BadRequestException, Put, Param, Get, Query, Logger, UseGuards } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
+import { FacetStore } from '../facets/facet-store';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
@@ -14,6 +15,7 @@ export class ReviewsController {
 
   constructor(
     private readonly reviewsService: ReviewsService,
+    private readonly facetStore: FacetStore,
     private readonly reviewProgressService: ReviewProgressService,
     private readonly scenarioFlashService: ScenarioFlashService,
   ) { }
@@ -114,7 +116,7 @@ export class ReviewsController {
     @Query('kuId') kuId: string,
   ) {
     if (kuId) {
-      return this.reviewsService.getFacetsByKuId(uid, kuId);
+      return this.facetStore.byKuId(uid, kuId);
     }
     if (due === 'true') {
       return this.reviewsService.getDueReviews(uid);

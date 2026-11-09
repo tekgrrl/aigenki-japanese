@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, REVIEW_FACETS_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
 import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
 import { QuestionsService } from '../questions/questions.service';
@@ -13,6 +13,7 @@ import { ADMIN_USER_ID } from '../lib/constants';
 import { KanjiService } from '../kanji/kanji.service';
 import { isUsagePicture, subjectOf, usageKey } from '../pictures/pictures.service';
 import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAside, withUsageIds } from './vocab-usages';
+import { FacetStore } from '../facets/facet-store';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -65,6 +66,7 @@ export class LessonsService {
 
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly facetStore: FacetStore,
     private readonly geminiService: GeminiService,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly validationService: ValidationService,
@@ -559,9 +561,7 @@ export class LessonsService {
     const userDoc = await this.db.collection('users').doc(uid).get();
     const jlptLevel = (userDoc.data() as UserRoot | undefined)?.preferences?.jlptLevel ?? 'N5';
 
-    const facetsCol = uid === ADMIN_USER_ID
-      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
-      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const facetsCol = this.facetStore.query(uid);
 
     const [facetsSnap, ukuSnap] = await Promise.all([
       facetsCol.get(),
@@ -680,9 +680,7 @@ export class LessonsService {
       .get();
     if (ukuSnap.empty) return [];
 
-    const facetsCol = uid === ADMIN_USER_ID
-      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
-      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const facetsCol = this.facetStore.query(uid);
     const started = new Set<string>();
     (await facetsCol.select('kuId', 'source').get()).docs.forEach(d => {
       const f = d.data();

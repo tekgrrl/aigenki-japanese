@@ -1,9 +1,9 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Firestore, Query, Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE_CONNECTION, REVIEW_FACETS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
-import { ADMIN_USER_ID } from '../lib/constants';
+import { Firestore, Timestamp } from 'firebase-admin/firestore';
+import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { PromotedEntry, ReviewFacet, ScenarioOpportunity, UserRoot } from '../types';
 import { StatsService } from '../stats/stats.service';
+import { FacetStore } from '../facets/facet-store';
 
 export interface LeechEntry {
   kuId: string;
@@ -29,6 +29,7 @@ export class DailyPlanService {
 
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly facetStore: FacetStore,
     private readonly statsService: StatsService,
   ) {}
 
@@ -46,13 +47,6 @@ export class DailyPlanService {
       const updated = (plan.practiceOpportunities ?? []).filter(o => o.kuId !== kuId);
       await planRef.update({ practiceOpportunities: updated });
     }
-  }
-
-  private facetsBaseQuery(uid: string): Query {
-    const col = uid === ADMIN_USER_ID
-      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
-      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
-    return col;
   }
 
   async check(uid: string): Promise<{ isNewDay: boolean; plan: DailyPlan }> {
@@ -84,7 +78,7 @@ export class DailyPlanService {
   }
 
   private async countDue(uid: string): Promise<number> {
-    const snap = await this.facetsBaseQuery(uid).where('nextReviewAt', '<=', Timestamp.now()).count().get();
+    const snap = await this.facetStore.query(uid).where('nextReviewAt', '<=', Timestamp.now()).count().get();
     return snap.data().count;
   }
 
@@ -103,7 +97,7 @@ export class DailyPlanService {
     // intended removal mechanism so these stay visible until acted on.
     const practiceOpportunities: ScenarioOpportunity[] = (userData?.stats?.scenarioOpportunities ?? []) as ScenarioOpportunity[];
 
-    const leechSnap = await this.facetsBaseQuery(uid)
+    const leechSnap = await this.facetStore.query(uid)
       .where('consecutiveFailures', '>=', 1)
       .orderBy('consecutiveFailures', 'desc')
       .limit(5)

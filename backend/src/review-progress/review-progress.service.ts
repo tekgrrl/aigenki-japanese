@@ -1,13 +1,12 @@
 import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common';
-import { CollectionReference, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
   FIRESTORE_CONNECTION,
   KNOWLEDGE_UNITS_COLLECTION,
   PICTURES_COLLECTION,
-  REVIEW_FACETS_COLLECTION,
   USER_KUS_SUBCOLLECTION,
 } from '../firebase/firebase.module';
-import { ADMIN_USER_ID, ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
+import { ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
 import { kanjiIn } from '../lib/kanji-chars';
 import { isUsefulAssembly } from '../lib/assembly-quality';
@@ -29,6 +28,7 @@ import { LessonsService } from '../lessons/lessons.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LearningProgressService } from '../learning-progress/learning-progress.service';
 import { StatsService } from '../stats/stats.service';
+import { FacetStore } from '../facets/facet-store';
 
 /** A picture card needs the word plus three distractor words, or it can't record a result. */
 const MIN_PICTURED_WORDS = 4;
@@ -52,19 +52,13 @@ export class ReviewProgressService {
 
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly facetStore: FacetStore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly lessonsService: LessonsService,
     private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
     private readonly learningProgressService: LearningProgressService,
     private readonly statsService: StatsService,
   ) {}
-
-  private facetsColRef(uid: string): CollectionReference {
-    if (uid === ADMIN_USER_ID) {
-      return this.db.collection(REVIEW_FACETS_COLLECTION);
-    }
-    return this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
-  }
 
   /**
    * Called when a user completes a lesson. Creates the first applicable stage's
@@ -205,11 +199,11 @@ export class ReviewProgressService {
     const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     if (!uku) return no('Not enrolled: it will be taught audio-first when it comes up in lessons');
     if (uku.sequenceVariant === 'audio-first') return no('Already audio-first');
-    const docs = await this.sequenceFacetDocs(uid, kuId);
-    const facetCount = docs.size - (await this.planKanjiRehoming(uid, kuId, docs)).size; // exactly what the switch deletes
+    const facets = await this.facetStore.forKu(uid, kuId);
+    const facetCount = facets.length - (await this.planKanjiRehoming(uid, kuId, facets)).size; // exactly what the switch deletes
     const blocker = await this.audioFirstBlocker(uid, kuId, { checkFlag: true });
     if (blocker) return no(blocker, facetCount);
-    if (docs.size === 0) return no('Already waiting in your lessons: it will be taught audio-first');
+    if (facets.length === 0) return no('Already waiting in your lessons: it will be taught audio-first');
     return { eligible: true, facetCount };
   }
 
@@ -248,9 +242,9 @@ export class ReviewProgressService {
     // Kanji-component facets this word introduced are shared: another enrolled word with the
     // same kanji skipped making its own (per-user dedup). Hand those to that word instead of
     // deleting them, so its kanji stays reviewed.
-    const rehome = await this.planKanjiRehoming(uid, kuId, await this.sequenceFacetDocs(uid, kuId));
+    const rehome = await this.planKanjiRehoming(uid, kuId, await this.facetStore.forKu(uid, kuId));
     for (const [facetId, { toKuId, kanjiKuId }] of rehome) {
-      await this.facetsColRef(uid).doc(facetId).update({ 'source.id': toKuId });
+      await this.facetStore.doc(uid, facetId).update({ 'source.id': toKuId });
       const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, kanjiKuId);
       if (kanjiUku?.source?.type === 'lesson' && kanjiUku.source.id === kuId) {
         await this.userKnowledgeUnitsService.update(uid, kanjiKuId, { source: { type: 'lesson', id: toKuId } });
@@ -288,16 +282,16 @@ export class ReviewProgressService {
     uid: string,
     kuId: string,
   ): Promise<{ facetsDeleted: number; countByKuId: Map<string, number> }> {
-    const docs = await this.sequenceFacetDocs(uid, kuId);
+    const facets = await this.facetStore.forKu(uid, kuId);
 
     const countByKuId = new Map<string, number>();
     const batch = this.db.batch();
-    docs.forEach(d => {
-      const target = (d.data().kuId as string) ?? kuId;
+    facets.forEach(f => {
+      const target = f.kuId ?? kuId;
       countByKuId.set(target, (countByKuId.get(target) ?? 0) + 1);
-      batch.delete(d.ref);
+      batch.delete(this.facetStore.doc(uid, f.id!));
     });
-    if (docs.size > 0) await batch.commit();
+    if (facets.length > 0) await batch.commit();
 
     await Promise.all(
       Array.from(countByKuId.entries())
@@ -307,7 +301,7 @@ export class ReviewProgressService {
           await this.learningProgressService.recomputeAndCache(uid, target);
         }),
     );
-    return { facetsDeleted: docs.size, countByKuId };
+    return { facetsDeleted: facets.length, countByKuId };
   }
 
   /**
@@ -318,38 +312,26 @@ export class ReviewProgressService {
   private async planKanjiRehoming(
     uid: string,
     kuId: string,
-    docs: Map<string, FirebaseFirestore.QueryDocumentSnapshot>,
+    facets: ReviewFacet[],
   ): Promise<Map<string, { toKuId: string; kanjiKuId: string }>> {
     const plan = new Map<string, { toKuId: string; kanjiKuId: string }>();
-    const kanjiFacets = [...docs.values()].filter(d => {
-      const f = d.data();
-      return String(f.facetType).startsWith('Kanji-Component') && f.kuId !== kuId && f.data?.content;
-    });
+    const kanjiFacets = facets.filter(f =>
+      String(f.facetType).startsWith('Kanji-Component') && f.kuId !== kuId && f.data?.content,
+    );
     if (kanjiFacets.length === 0) return plan;
 
     const ukus = (await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get()).docs.map(d => d.data());
     const enrolled = new Map(ukus.filter(u => u.kuId && u.kuId !== kuId && u.sequenceVariant !== 'audio-first').map(u => [u.kuId as string, u]));
     const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
-    for (const d of kanjiFacets) {
-      const char = d.data().data.content as string;
+    for (const f of kanjiFacets) {
+      const char = f.data.content as string;
       const words = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).where('data.kanji', 'array-contains', char).get();
       const owner = words.docs
         .filter(w => w.data().type === 'Vocab' && enrolled.has(w.id))
         .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt))[0];
-      if (owner) plan.set(d.id, { toKuId: owner.id, kanjiKuId: d.data().kuId as string });
+      if (owner) plan.set(f.id!, { toKuId: owner.id, kanjiKuId: f.kuId });
     }
     return plan;
-  }
-
-  /** Every facet in a word's sequence (by source.id) or targeting it (by kuId), de-duplicated. */
-  private async sequenceFacetDocs(uid: string, kuId: string): Promise<Map<string, FirebaseFirestore.QueryDocumentSnapshot>> {
-    const [bySource, byKu] = await Promise.all([
-      this.facetsColRef(uid).where('source.id', '==', kuId).get(),
-      this.facetsColRef(uid).where('kuId', '==', kuId).get(),
-    ]);
-    const docs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
-    [...bySource.docs, ...byKu.docs].forEach(d => docs.set(d.id, d));
-    return docs;
   }
 
   /**
@@ -365,8 +347,8 @@ export class ReviewProgressService {
           const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, target);
           if (kanjiUku?.source?.type !== 'lesson' || kanjiUku.source.id !== kuId) return;
           const [byTarget, bySequence] = await Promise.all([
-            this.facetsColRef(uid).where('kuId', '==', target).limit(1).get(),
-            this.facetsColRef(uid).where('source.id', '==', target).limit(1).get(),
+            this.facetStore.query(uid).where('kuId', '==', target).limit(1).get(),
+            this.facetStore.query(uid).where('source.id', '==', target).limit(1).get(),
           ]);
           if (byTarget.empty && bySequence.empty) await this.userKnowledgeUnitsService.remove(uid, target);
         }),
@@ -429,7 +411,7 @@ export class ReviewProgressService {
     if (currentStageDef?.unlockAtSrsStage === null) return; // terminal stage — normal, common, not logged
 
     // One read serves both the readiness check and isStillKnown below.
-    const kuFacets = await this.getFacetsForKu(uid, kuId);
+    const kuFacets = await this.getSequenceFacets(uid, kuId);
     const stageFacets = kuFacets.filter(f => f.sequenceStage === uku.currentStage);
     if (stageFacets.length === 0) {
       this.logger.warn(`checkAndAdvanceStage: UKU says currentStage=${uku.currentStage} for kuId=${kuId} but zero facets exist at that stage — sequence is stuck with nothing left to review`);
@@ -547,23 +529,23 @@ export class ReviewProgressService {
   }
 
   /**
-   * Returns all facets in a KU's sequence, every stage.
+   * The facets in a KU's own sequence, every stage (not those that only test it: see FacetStore.forKu).
    * Queries by source.id (the lesson/sequence lineage), not kuId — some facets
    * (e.g. Kanji-Component-*) target a different KU's content than the one whose
    * sequence they gate, so kuId alone can't identify stage membership.
    */
-  private async getFacetsForKu(uid: string, kuId: string): Promise<ReviewFacet[]> {
-    const snapshot = await this.facetsColRef(uid).where('source.id', '==', kuId).get();
+  private async getSequenceFacets(uid: string, kuId: string): Promise<ReviewFacet[]> {
+    const snapshot = await this.facetStore.query(uid).where('source.id', '==', kuId).get();
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() }) as ReviewFacet);
   }
 
-  /** The facets belonging to one sequence stage (see getFacetsForKu). */
+  /** The facets belonging to one sequence stage (see getSequenceFacets). */
   private async getFacetsAtStage(
     uid: string,
     kuId: string,
     stage: number,
   ): Promise<ReviewFacet[]> {
-    return (await this.getFacetsForKu(uid, kuId)).filter(f => f.sequenceStage === stage);
+    return (await this.getSequenceFacets(uid, kuId)).filter(f => f.sequenceStage === stage);
   }
 
   /** The sequence for a KU type and variant (absent variant = the default sequence). */
@@ -645,7 +627,7 @@ export class ReviewProgressService {
         ? await Promise.all(dataItems.map(async d => {
             const kanjiKuId = await this.knowledgeUnitsService.ensureKanjiStub(d.content, d);
             await this.userKnowledgeUnitsService.create(uid, kanjiKuId, { type: 'lesson', id: kuId });
-            const existing = await this.facetsColRef(uid)
+            const existing = await this.facetStore.query(uid)
               .where('kuId', '==', kanjiKuId)
               .where('facetType', '==', entry.type)
               .limit(1)
@@ -658,7 +640,7 @@ export class ReviewProgressService {
         const targetKuId = targetKuIds[i];
         if (targetKuId === null) continue;
         const data = dataItems[i];
-        batch.set(this.facetsColRef(uid).doc(), {
+        batch.set(this.facetStore.newDoc(uid), {
           kuId: targetKuId,
           sourceCollection: targetKuId === kuId ? (ku.type === 'Concept' ? 'concepts' : 'knowledge-units') : 'knowledge-units',
           facetType: entry.type,
@@ -669,7 +651,7 @@ export class ReviewProgressService {
           sequenceStage: stageDef.stage,
           source: { type: 'lesson', id: kuId },
           ...(startAtSrsStage > 0 ? { selfCertified: true } : {}),
-          ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
+          ...this.facetStore.ownerTag(uid),
           data,
         });
         count++;

@@ -6,7 +6,6 @@ import { FirebaseModule } from './firebase/firebase.module';
 import { GeminiModule } from './gemini/gemini.module';
 import { ClaudeModule } from './claude/claude.module';
 import { ConfigModule } from '@nestjs/config';
-import { QuestionsService } from './questions/questions.service';
 import { QuestionsModule } from './questions/questions.module';
 import { ApilogModule } from './apilog/apilog.module';
 import { LessonsModule } from './lessons/lessons.module';
@@ -27,10 +26,11 @@ import { ValidationModule } from './validation/validation.module';
 import { LearnerFlagsModule } from './learner-flags/learner-flags.module';
 import { GrammarSectionsModule } from './grammar-sections/grammar-sections.module';
 import { PicturesModule } from './pictures/pictures.module';
+import { FacetsModule } from './facets/facets.module';
 
 @Module({
-  imports: [ValidationModule, ReviewsModule, FirebaseModule, GeminiModule, ClaudeModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, DailyPlanModule, LearnerFlagsModule, GrammarSectionsModule, PicturesModule],
+  imports: [ValidationModule, ReviewsModule, FirebaseModule, FacetsModule, GeminiModule, ClaudeModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, DailyPlanModule, LearnerFlagsModule, GrammarSectionsModule, PicturesModule],
   controllers: [AppController],
-  providers: [AppService, QuestionsService],
+  providers: [AppService],
 })
 export class AppModule { }

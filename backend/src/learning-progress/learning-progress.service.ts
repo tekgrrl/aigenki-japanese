@@ -1,10 +1,11 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { CollectionReference, Firestore, Query } from 'firebase-admin/firestore';
-import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, REVIEW_FACETS_COLLECTION } from '../firebase/firebase.module';
-import { ADMIN_USER_ID, MASTERED_STAGE } from '../lib/constants';
+import { Firestore } from 'firebase-admin/firestore';
+import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
+import { MASTERED_STAGE } from '../lib/constants';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { StatsService } from '../stats/stats.service';
 import { ReviewFacet } from '../types';
+import { FacetStore } from '../facets/facet-store';
 
 @Injectable()
 export class LearningProgressService {
@@ -12,39 +13,10 @@ export class LearningProgressService {
 
     constructor(
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly facetStore: FacetStore,
         private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
         private readonly statsService: StatsService,
     ) {}
-
-    private facetsColRef(uid: string): CollectionReference {
-        if (uid === ADMIN_USER_ID) {
-            return this.db.collection(REVIEW_FACETS_COLLECTION);
-        }
-        return this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
-    }
-
-    private facetsBaseQuery(uid: string): Query {
-        const col = this.facetsColRef(uid);
-        return uid === ADMIN_USER_ID ? col.where('userId', '==', uid) : col;
-    }
-
-    /**
-     * Every facet that counts toward a KU's status: those targeting it (kuId) and those in
-     * its own sequence (source.id). They differ for Kanji-Component-* facets, which target
-     * the component kanji's KU while belonging to the word's sequence, so a word whose
-     * first stage is only kanji components would otherwise look like it has no facets.
-     */
-    private async getFacetsForKu(uid: string, kuId: string): Promise<ReviewFacet[]> {
-        const [byTarget, bySequence] = await Promise.all([
-            this.facetsBaseQuery(uid).where('kuId', '==', kuId).get(),
-            this.facetsBaseQuery(uid).where('source.id', '==', kuId).get(),
-        ]);
-        const byId = new Map<string, ReviewFacet>();
-        for (const doc of [...byTarget.docs, ...bySequence.docs]) {
-            byId.set(doc.id, { id: doc.id, ...doc.data() } as ReviewFacet);
-        }
-        return [...byId.values()];
-    }
 
     /**
      * Derives UKU status from facet SRS data and writes it back to the UKU document.
@@ -57,7 +29,7 @@ export class LearningProgressService {
      */
     async recomputeAndCache(uid: string, kuId: string): Promise<void> {
         const [facets, currentUku] = await Promise.all([
-            this.getFacetsForKu(uid, kuId),
+            this.facetStore.forKu(uid, kuId),
             this.userKnowledgeUnitsService.findByKuId(uid, kuId),
         ]);
 

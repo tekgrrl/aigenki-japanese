@@ -512,7 +512,7 @@ Stored inside a path-scoped sub-collection (`users/{uid}/user-grammar-lessons`).
 Copied from `Question.kuId` at creation time. If a Question document's `kuId` were ever corrected, the `UserQuestionState` would be stale. Low risk in practice but structurally fragile. FIXED — `kuId` removed from type and write path; nothing reads it back from state.
 
 ### 11. Dual-path collections for admin vs users
-`review-facets` (root, admin) vs `users/{uid}/review-facets` (per-user), and `scenarios` (root, admin) vs `users/{uid}/scenarios` (per-user). Routing handled by helpers (`facetsColRef`, `scenariosColRef`) but every service that touches these must know to use the helper.
+`review-facets` (root, admin) vs `users/{uid}/review-facets` (per-user), and `scenarios` (root, admin) vs `users/{uid}/scenarios` (per-user). Routing handled by `FacetStore` (facets, one shared provider) and `scenariosColRef` (scenarios); every service that touches these must use them.
 
 ### 12. `KnowledgeUnitBase` carries deprecated user-state fields
 `userId`, `personalNotes`, `userNotes`, `facet_count`, `history` are marked `@deprecated` on the global KU base type. These belong on `UserKnowledgeUnit`. They persist on Firestore documents and are read by some code paths. FIXED
