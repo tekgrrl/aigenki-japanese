@@ -1,5 +1,6 @@
 import { LessonsService } from './lessons.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { FacetStore } from '../facets/facet-store';
 
 const lesson = () => ({
   type: 'Vocab',
@@ -17,7 +18,7 @@ function setup(raw: unknown) {
   db.store('lessons').set('k', lesson());
   const gemini = { buildExampleUsages: jest.fn().mockResolvedValue(raw) };
   const none = {} as any;
-  const service = new LessonsService(db as any, gemini as any, none, none, none);
+  const service = new LessonsService(db as any, new FacetStore(db as any), gemini as any, none, none, none);
   return { service, gemini, db };
 }
 

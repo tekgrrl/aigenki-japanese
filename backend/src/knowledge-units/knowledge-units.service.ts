@@ -5,7 +5,6 @@ import {
     LESSONS_COLLECTION,
     PICTURES_COLLECTION,
     QUESTIONS_COLLECTION,
-    REVIEW_FACETS_COLLECTION,
     USER_KUS_SUBCOLLECTION,
     QUESTION_STATES_SUBCOLLECTION,
 } from '../firebase/firebase.module';
@@ -18,6 +17,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Query } from '@google-cloud/firestore';
 import { GrammarNote } from '@/types/scenario';
 import { kanjiIn } from '@/lib/kanji-chars';
+import { FacetStore } from '../facets/facet-store';
 
 @Injectable()
 export class KnowledgeUnitsService {
@@ -37,6 +37,7 @@ export class KnowledgeUnitsService {
 
     constructor(
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly facetStore: FacetStore,
     ) { }
 
     private async ensureSearchCache(): Promise<KnowledgeUnit[]> {
@@ -553,7 +554,14 @@ export class KnowledgeUnitsService {
             return snap.size;
         };
 
-        deleted['review-facets'] = await deleteSubcollectionDocs(REVIEW_FACETS_COLLECTION, 'kuId');
+        // Facets via FacetStore: the admin's live in the shared top-level collection, not under users/.
+        const facetSnap = await this.facetStore.query(uid).where('kuId', '==', kuId).get();
+        if (!facetSnap.empty) {
+            const batch = this.db.batch();
+            facetSnap.docs.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+        }
+        deleted['review-facets'] = facetSnap.size;
         deleted['user-kus'] = await deleteSubcollectionDocs(USER_KUS_SUBCOLLECTION, 'kuId');
         deleted['feed'] = await deleteSubcollectionDocs('feed', 'kuId');
 

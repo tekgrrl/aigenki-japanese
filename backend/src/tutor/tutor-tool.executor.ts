@@ -5,15 +5,14 @@ import {
   FIRESTORE_CONNECTION,
   KNOWLEDGE_UNITS_COLLECTION,
   LESSONS_COLLECTION,
-  REVIEW_FACETS_COLLECTION,
 } from '../firebase/firebase.module';
-import { ADMIN_USER_ID } from '../lib/constants';
 import { AiToolCall } from './providers/ai-provider.interface';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { getLevelSeed } from './level-seed.data';
 import { FacetType, Lesson } from '../types';
 import { dropStrayComponentKanji } from '../lessons/lessons.service';
+import { FacetStore } from '../facets/facet-store';
 
 /** Items below this SRS stage still need review: scenario candidates (the user's rule, 2026-11-04). */
 const REVIEW_CANDIDATE_STAGE = 3;
@@ -25,6 +24,7 @@ export class TutorToolExecutor {
 
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+    private readonly facetStore: FacetStore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly scenariosService: ScenariosService,
     private readonly statsService: StatsService,
@@ -130,9 +130,7 @@ export class TutorToolExecutor {
    * first, capped. Audio-first words (picture-choice facets) are left out: scenarios show text.
    */
   private async getReviewCandidates(uid: string): Promise<{ kuId: string; content: string; type: string; minSrsStage: number }[]> {
-    const facets = uid === ADMIN_USER_ID
-      ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
-      : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+    const facets = this.facetStore.query(uid);
     const minStage = new Map<string, number>();
     const audioFirst = new Set<string>();
     (await facets.select('kuId', 'srsStage', 'facetType', 'sourceCollection').get()).docs.forEach(d => {

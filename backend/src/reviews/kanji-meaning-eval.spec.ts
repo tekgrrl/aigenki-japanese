@@ -1,12 +1,14 @@
 import { ReviewsService } from './reviews.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { FacetStore } from '../facets/facet-store';
 
 /** ReviewsService with only the collaborators evaluateAnswer touches. */
 function makeService(kanjiAlive: string[], aiResult: 'pass' | 'fail' = 'fail') {
   const gemini = { evaluateAnswer: jest.fn().mockResolvedValue({ result: aiResult, explanation: '' }) };
   const kanji = { getKanjiAliveMeanings: jest.fn().mockResolvedValue(kanjiAlive) };
   const none = {} as any;
-  const service = new ReviewsService(new FakeFirestore() as any, gemini as any, none, none, none, none, none, none, none, kanji as any, none);
+  const fdb = new FakeFirestore();
+  const service = new ReviewsService(fdb as any, new FacetStore(fdb as any), gemini as any, none, none, none, none, none, none, none, kanji as any, none);
   return { service, gemini, kanji };
 }
 

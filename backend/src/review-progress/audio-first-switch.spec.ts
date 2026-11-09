@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { ReviewProgressService } from './review-progress.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { FacetStore } from '../facets/facet-store';
 
 const UID = 'u1';
 const WORD = 'word1';
@@ -19,7 +20,7 @@ function setup() {
   };
   const learningProgress = { recomputeAndCache: jest.fn() };
   const stats = { removeFromTutorVocab: jest.fn() };
-  const service = new ReviewProgressService(db as any, knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, stats as any);
+  const service = new ReviewProgressService(db as any, new FacetStore(db as any), knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, stats as any);
 
   const facets = db.collection('users').doc(UID).collection('review-facets');
   const ukuCol = db.collection('users').doc(UID).collection('user-kus');

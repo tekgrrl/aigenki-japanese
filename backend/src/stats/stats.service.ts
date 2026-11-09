@@ -3,13 +3,13 @@ import { FieldValue, Firestore, Timestamp, Transaction } from 'firebase-admin/fi
 import { FacetType, TutorVocabEntry } from '../types';
 import {
     FIRESTORE_CONNECTION,
-    REVIEW_FACETS_COLLECTION,
     USER_KUS_SUBCOLLECTION,
     SCENARIOS_COLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { isAboveLevel } from '../lib/jlpt';
+import { FacetStore } from '../facets/facet-store';
 
 @Injectable()
 export class StatsService {
@@ -17,6 +17,7 @@ export class StatsService {
 
     constructor(
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly facetStore: FacetStore,
         private readonly knowledgeUnitsService: KnowledgeUnitsService,
     ) { }
 
@@ -40,9 +41,7 @@ export class StatsService {
             .count()
             .get();
 
-        const facetsCol = uid === ADMIN_USER_ID
-            ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
-            : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+        const facetsCol = this.facetStore.query(uid);
 
         const reviewsDueQuery = facetsCol
             .where("nextReviewAt", "<=", Timestamp.now())
@@ -203,9 +202,7 @@ export class StatsService {
             throw new BadRequestException('date must be in YYYY-MM-DD format');
         }
 
-        const facetsCol = uid === ADMIN_USER_ID
-            ? this.db.collection(REVIEW_FACETS_COLLECTION).where('userId', '==', uid)
-            : this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
+        const facetsCol = this.facetStore.query(uid);
 
         const now = new Date();
         const isToday = this.getDateBuckets(now).dayKey === dateKey;

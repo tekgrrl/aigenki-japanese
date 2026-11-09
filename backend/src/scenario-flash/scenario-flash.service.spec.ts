@@ -1,6 +1,7 @@
 import { ScenarioFlashService } from './scenario-flash.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { FacetStore } from '../facets/facet-store';
 
 const UID = 'u1';
 const G = 'g1';
@@ -17,7 +18,7 @@ function setup(opts: { existingScenario?: boolean } = {}) {
   const tutorService = { generateScenario: jest.fn(async () => { scenarios.set('s-new', { id: 's-new', title: 'At the gate', state: 'encounter' }); return 's-new'; }) };
   const dailyPlanService = { dismissOpportunity: jest.fn() };
   const kuService = { findOneById: jest.fn(async (id: string) => (id === G ? { id: G, type: 'Grammar', content: '{V-te}はいけません', data: { title: 'Must not', scenarioReady: true } } : id === 'g-no' ? { id, type: 'Grammar', content: 'よ', data: {} } : { id, type: 'Vocab', content: 'x' })) };
-  const service = new ScenarioFlashService(db as any, kuService as any, scenariosService as any, dailyPlanService as any, tutorService as any);
+  const service = new ScenarioFlashService(new FacetStore(db as any), kuService as any, scenariosService as any, dailyPlanService as any, tutorService as any);
   if (opts.existingScenario) scenarios.set('s-old', { id: 's-old', title: 'Old one', state: 'drill' });
   const cards = () => [...db.store(`users/${UID}/review-facets`).values()].filter(f => f.facetType === 'flash');
   return { db, service, scenarios, scenariosService, tutorService, dailyPlanService, cards };
@@ -122,7 +123,7 @@ describe('ScenarioFlashService.sync', () => {
 describe('ScenariosService.scenarioReadiness (the Role Play gate)', () => {
   it('includes Key Grammar (grammarMatches) as well as Key Vocabulary', async () => {
     const db = new FakeFirestore();
-    const svc = new ScenariosService(db as any, ...(Array(8).fill({}) as [any, any, any, any, any, any, any, any]));
+    const svc = new ScenariosService(db as any, new FacetStore(db as any), ...(Array(8).fill({}) as [any, any, any, any, any, any, any, any]));
     const facets = db.collection('users').doc(UID).collection('review-facets');
     await facets.doc('a').set({ kuId: 'v1', srsStage: 3 });
     await facets.doc('b').set({ kuId: G, srsStage: 2 });
@@ -135,7 +136,8 @@ describe('ScenariosService.scenarioReadiness (the Role Play gate)', () => {
   });
 
   it('a scenario with nothing linked has nothing to graduate: ready', async () => {
-    const svc = new ScenariosService(new FakeFirestore() as any, ...(Array(8).fill({}) as [any, any, any, any, any, any, any, any]));
+    const fdb = new FakeFirestore();
+    const svc = new ScenariosService(fdb as any, new FacetStore(fdb as any), ...(Array(8).fill({}) as [any, any, any, any, any, any, any, any]));
     const scenario: any = { extractedKUs: [{ content: 'x' }], grammarMatches: [] };
     expect((await svc.scenarioReadiness(UID, scenario)).ready).toBe(true);
   });

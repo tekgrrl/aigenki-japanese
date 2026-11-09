@@ -1,5 +1,6 @@
 import { KnowledgeUnitsService } from './knowledge-units.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { FacetStore } from '../facets/facet-store';
 
 describe('Vocab data.kanji (#332)', () => {
   let db: FakeFirestore;
@@ -8,7 +9,7 @@ describe('Vocab data.kanji (#332)', () => {
 
   beforeEach(() => {
     db = new FakeFirestore();
-    service = new KnowledgeUnitsService(db as any);
+    service = new KnowledgeUnitsService(db as any, new FacetStore(db as any));
   });
 
   it('is set when a Vocab KU is created, and not on other types', async () => {

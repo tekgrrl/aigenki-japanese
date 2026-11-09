@@ -3,18 +3,17 @@ import {
     Inject,
     Logger,
     NotFoundException,
-    forwardRef,
 } from '@nestjs/common';
-import { CollectionReference, FieldValue, Firestore, Query, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
     FIRESTORE_CONNECTION,
     LESSONS_COLLECTION,
     QUESTIONS_COLLECTION,
-    REVIEW_FACETS_COLLECTION,
     USER_STATS_COLLECTION,
 } from '../firebase/firebase.module';
-import { ADMIN_USER_ID, MASTERED_STAGE, SELF_CERTIFIED_STAGE, SRS_INTERVALS } from '../lib/constants';
+import { MASTERED_STAGE, SELF_CERTIFIED_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
+import { FacetStore } from '../facets/facet-store';
 import { QuestionsService } from '../questions/questions.service';
 import { FacetType, Lesson, ReviewFacet, VocabLesson, VocabUsage } from '@/types';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
@@ -53,8 +52,8 @@ export class ReviewsService {
 
     constructor(
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly facetStore: FacetStore,
         private readonly geminiService: GeminiService,
-        @Inject(forwardRef(() => QuestionsService))
         private readonly questionsService: QuestionsService,
         private readonly knowledgeUnitsService: KnowledgeUnitsService,
         private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
@@ -66,28 +65,10 @@ export class ReviewsService {
         private readonly scenarioFlashService: ScenarioFlashService,
     ) { }
 
-    private facetsColRef(uid: string): CollectionReference {
-        if (uid === ADMIN_USER_ID) {
-            return this.db.collection(REVIEW_FACETS_COLLECTION);
-        }
-        return this.db.collection('users').doc(uid).collection(REVIEW_FACETS_COLLECTION);
-    }
-
-    private facetsBaseQuery(uid: string): Query {
-        const col = this.facetsColRef(uid);
-        return uid === ADMIN_USER_ID ? col.where('userId', '==', uid) : col;
-    }
-
-    async getByFacetId(uid: string, facetId: string) {
-        const doc = await this.facetsColRef(uid).doc(facetId).get();
-        if (!doc.exists) return null;
-        return doc.data();
-    }
-
     /** `usageId`: on a Vocab meaning card, the usage a correct answer matched (from evaluateAnswer). */
     async updateFacetSrs(uid: string, facetId: string, result: 'pass' | 'fail', usageId?: string) {
         const txResult = await this.db.runTransaction(async (transaction) => {
-            const facetRef = this.facetsColRef(uid).doc(facetId);
+            const facetRef = this.facetStore.doc(uid, facetId);
             const facetDoc = await transaction.get(facetRef);
 
             if (!facetDoc.exists) {
@@ -95,7 +76,7 @@ export class ReviewsService {
             }
 
             // For user_default using the shared top-level collection, verify ownership
-            if (uid === ADMIN_USER_ID && facetDoc.data()?.userId !== uid) {
+            if (!this.facetStore.belongsTo(uid, facetDoc.data())) {
                 throw new NotFoundException('Facet not found');
             }
 
@@ -358,11 +339,6 @@ export class ReviewsService {
         }
     }
 
-    async updateFacetQuestion(uid: string, facetId: string, questionId: string) {
-        await this.facetsColRef(uid).doc(facetId).update({ currentQuestionId: questionId });
-        this.logger.log(`Updated facet ${facetId} with new question ${questionId}`);
-    }
-
     async evaluateAnswer(
         uid: string,
         userAnswer: string,
@@ -394,7 +370,7 @@ export class ReviewsService {
      */
     private async meaningPreview(uid: string, facetId: string | undefined, result: 'pass' | 'fail', usageId: string | undefined) {
         if (!facetId) return null;
-        const facet = (await this.facetsColRef(uid).doc(facetId).get()).data() as ReviewFacet | undefined;
+        const facet = await this.facetStore.get(uid, facetId);
         if (facet?.facetType !== 'Content-to-Definition') return null;
         const lesson = (await this.db.collection(LESSONS_COLLECTION).doc(facet.kuId).get()).data() as Lesson | undefined;
         if (lesson?.type !== 'Vocab') return null;
@@ -555,7 +531,7 @@ export class ReviewsService {
                 return answer;
             }
             if (!facetId) return undefined;
-            await this.facetsColRef(uid).doc(facetId).update({
+            await this.facetStore.doc(uid, facetId).update({
                 'data.acceptedAlternatives': FieldValue.arrayUnion(answer),
             });
             this.logger.log(`Added accepted alternative "${answer}" to facet ${facetId} (${facetType})`);
@@ -604,7 +580,7 @@ export class ReviewsService {
                     let newFacetCount = 0;
 
                     if (!existingKanjiTypes.has('Kanji-Component-Meaning')) {
-                        batch.set(this.facetsColRef(uid).doc(), {
+                        batch.set(this.facetStore.newDoc(uid), {
                             kuId: kanjiKuId,
                             sourceCollection: 'knowledge-units',
                             facetType: 'Kanji-Component-Meaning',
@@ -613,14 +589,14 @@ export class ReviewsService {
                             createdAt: now,
                             history: [],
                             source: { type: 'lesson', id: kuId },
-                            ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
+                            ...this.facetStore.ownerTag(uid),
                             data: { content: kanjiChar, meaning: data?.meaning },
                         });
                         newFacetCount++;
                     }
 
                     if (!existingKanjiTypes.has('Kanji-Component-Reading')) {
-                        batch.set(this.facetsColRef(uid).doc(), {
+                        batch.set(this.facetStore.newDoc(uid), {
                             kuId: kanjiKuId,
                             sourceCollection: 'knowledge-units',
                             facetType: 'Kanji-Component-Reading',
@@ -629,7 +605,7 @@ export class ReviewsService {
                             createdAt: now,
                             history: [],
                             source: { type: 'lesson', id: kuId },
-                            ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
+                            ...this.facetStore.ownerTag(uid),
                             data: { content: kanjiChar, onyomi: data?.onyomi, kunyomi: data?.kunyomi },
                         });
                         newFacetCount++;
@@ -652,7 +628,7 @@ export class ReviewsService {
             const startStage = isSelfCertified ? SELF_CERTIFIED_STAGE : 0;
             const nextReviewAt = isSelfCertified ? selfCertifiedNextReview : now;
 
-            const newFacetRef = this.facetsColRef(uid).doc();
+            const newFacetRef = this.facetStore.newDoc(uid);
             batch.set(newFacetRef, {
                 kuId: targetKuId,
                 sourceCollection: 'knowledge-units',
@@ -663,7 +639,7 @@ export class ReviewsService {
                 history: [],
                 source: { type: 'lesson', id: kuId },
                 ...(isSelfCertified ? { selfCertified: true } : {}),
-                ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
+                ...this.facetStore.ownerTag(uid),
                 ...(data ? { data } : {}),
             });
 
@@ -715,7 +691,7 @@ export class ReviewsService {
         }
         const now = Timestamp.now();
 
-        const snapshot = await this.facetsBaseQuery(uid)
+        const snapshot = await this.facetStore.query(uid)
             .where('nextReviewAt', '<=', now)
             .orderBy('nextReviewAt', 'asc')
             .get();
@@ -766,7 +742,7 @@ export class ReviewsService {
     }
 
     async getAllFacets(uid: string) {
-        const snapshot = await this.facetsBaseQuery(uid).get();
+        const snapshot = await this.facetStore.query(uid).get();
 
         if (snapshot.empty) {
             return [];
@@ -785,10 +761,7 @@ export class ReviewsService {
     }
 
     async getFacetsByKuId(uid: string, kuId: string): Promise<ReviewFacet[]> {
-        const snapshot = await this.facetsBaseQuery(uid)
-            .where('kuId', '==', kuId)
-            .get();
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ReviewFacet));
+        return this.facetStore.byKuId(uid, kuId);
     }
 
     async createFacetBatch(
@@ -801,7 +774,7 @@ export class ReviewsService {
         const sourceCollection = resolveKuCollection({ source });
 
         for (const facet of facets) {
-            const ref = this.facetsColRef(uid).doc();
+            const ref = this.facetStore.newDoc(uid);
             batch.set(ref, {
                 kuId: facet.kuId,
                 sourceCollection,
@@ -811,7 +784,7 @@ export class ReviewsService {
                 createdAt: now,
                 history: [],
                 ...(source ? { source } : {}),
-                ...(uid === ADMIN_USER_ID ? { userId: uid } : {}),
+                ...this.facetStore.ownerTag(uid),
                 ...(facet.data ? { data: facet.data } : {}),
             });
         }

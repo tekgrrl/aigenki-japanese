@@ -169,7 +169,7 @@ All service methods accept `uid: string` as their first parameter and use it for
 
 Per-user data lives in **Firestore sub-collections** under `users/{uid}/<collection>`. The Firestore Collection Map above reflects the current state.
 
-**Sub-collection routing** — services that touch per-user data use a private `colRef(uid)` helper that routes `ADMIN_USER_ID` (`user_default`) to the legacy top-level collection and everyone else to `users/{uid}/<collection>`. `ReviewsService.facetsColRef` is the canonical reference implementation. See issue #138 for the ongoing work to consolidate duplicate copies of this logic.
+**Sub-collection routing** — per-user data routes `ADMIN_USER_ID` (`user_default`) to the legacy top-level collection and everyone else to `users/{uid}/<collection>`. For review facets this lives in one place, `FacetStore` (`backend/src/facets/facet-store.ts`, a global provider): `query(uid)` for reads of several facets (adds the admin's `userId` filter), `get(uid, id)` for one, `doc()` / `newDoc()` refs for writes, transactions and batches, `ownerTag(uid)` spread into new facets. The raw collection is private. Never build a `review-facets` path by hand. Scenarios still use `ScenariosService.scenariosColRef`.
 
 **Global collections** (`knowledge-units`, `concepts`, `questions`, `lessons/{kuId}`) have no `userId` on new documents. `createdBy` is used for audit only where present.
 
