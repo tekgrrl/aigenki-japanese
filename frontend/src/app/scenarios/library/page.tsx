@@ -81,9 +81,9 @@ function ScenarioLibraryContent() {
         if (archRes.ok) setArchives(await archRes.json());
         if (userRes.ok) {
           const userData = await userRes.json();
-          if (userData.preferences?.jlptLevel) {
-            setUserJlptLevel(userData.preferences.jlptLevel as ScenarioDifficulty);
-          }
+          // effectiveJlptLevel: the level the backend uses (N5 until the learner chooses one).
+          const level = userData.effectiveJlptLevel ?? userData.preferences?.jlptLevel;
+          if (level) setUserJlptLevel(level as ScenarioDifficulty);
         }
       } catch (error) {
         console.error("Failed to load library data", error);

@@ -1,7 +1,27 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Firestore, Timestamp } from 'firebase-admin/firestore';
+import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common';
+import { Firestore } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION } from '../firebase/firebase.module';
 import { UserRoot } from '../types';
+import { DEFAULT_JLPT_LEVEL, JLPT_LEVEL_ORDER, JlptLevel } from '../prompts/curriculum';
+
+/** A user's preferences, with the study level always filled in. */
+export type UserPreferences = NonNullable<UserRoot['preferences']> & { jlptLevel: JlptLevel };
+
+/**
+ * The study level is required: the learner chooses it on their profile. Until they do (nothing
+ * stored, or a stored value that isn't a level) they count as DEFAULT_JLPT_LEVEL (N5) everywhere:
+ * generation, queues, enrolment's aboveLevel, scenarios. This is the one place that rule lives.
+ */
+export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel => {
+  const stored = user?.preferences?.jlptLevel;
+  return stored && JLPT_LEVEL_ORDER.includes(stored) ? stored : DEFAULT_JLPT_LEVEL;
+};
+
+/**
+ * The dev switch that makes every user an admin (`.env`, never set in production). Applied when
+ * admin status is read, never stored on a user doc.
+ */
+export const adminForAllUsers = () => process.env.ADMIN_ALL === 'true';
 
 @Injectable()
 export class UserService {
@@ -16,7 +36,6 @@ export class UserService {
   private buildDefaultUserRoot(uid: string): UserRoot {
     return {
       id: uid,
-      isAdmin: process.env.ADMIN_ALL === 'true',
       stats: {
         reviewForecast: {},
         hourlyForecast: {},
@@ -64,7 +83,7 @@ export class UserService {
         void userRef.update({ email });
         data.email = email;
       }
-      return { id: uid, ...data, isAdmin: data.isAdmin ?? (process.env.ADMIN_ALL === 'true') } as UserRoot;
+      return { id: uid, ...data, isAdmin: data.isAdmin === true || adminForAllUsers(), effectiveJlptLevel: jlptLevelOf(data) } as UserRoot;
     }
 
     this.logger.log(`UserRoot not found for uid: ${uid}. Creating default document.`);
@@ -74,7 +93,7 @@ export class UserService {
     await userRef.set(defaultUser);
 
     this.logger.log(`Default UserRoot created for uid: ${uid}`);
-    return defaultUser;
+    return { ...defaultUser, isAdmin: adminForAllUsers(), effectiveJlptLevel: DEFAULT_JLPT_LEVEL };
   }
 
   /**
@@ -89,7 +108,31 @@ export class UserService {
     return { id: uid, ...userDoc.data() } as UserRoot;
   }
 
+  /**
+   * The user's preferences, with `jlptLevel` filled in (DEFAULT_JLPT_LEVEL if never set). Services
+   * read preferences here rather than digging them out of the user doc.
+   */
+  async getPreferences(uid: string): Promise<UserPreferences> {
+    const user = (await this.db.collection('users').doc(uid).get()).data() as UserRoot | undefined;
+    return { ...user?.preferences, jlptLevel: jlptLevelOf(user) };
+  }
+
+  /** The level the user studies at (DEFAULT_JLPT_LEVEL if never set). */
+  async getJlptLevel(uid: string): Promise<JlptLevel> {
+    return (await this.getPreferences(uid)).jlptLevel;
+  }
+
+  /** Whether the user may use admin tools: everyone when ADMIN_ALL is on, else `isAdmin: true` on their doc. */
+  async isAdmin(uid: string): Promise<boolean> {
+    if (adminForAllUsers()) return true;
+    return (await this.db.collection('users').doc(uid).get()).data()?.isAdmin === true;
+  }
+
+  /** Saves the preferences given (merged). The study level is required, so it can be changed but not cleared. */
   async updatePreferences(uid: string, prefs: { showFurigana?: boolean; jlptLevel?: string; preferredUserRole?: string; audioFirstExperiment?: boolean }): Promise<void> {
+    if ('jlptLevel' in prefs && !JLPT_LEVEL_ORDER.includes(prefs.jlptLevel as JlptLevel)) {
+      throw new BadRequestException(`jlptLevel must be one of ${JLPT_LEVEL_ORDER.join(', ')}`);
+    }
     await this.db.collection('users').doc(uid).set({ preferences: prefs }, { merge: true });
   }
 }

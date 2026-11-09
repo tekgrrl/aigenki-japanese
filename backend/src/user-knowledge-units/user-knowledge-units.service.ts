@@ -4,6 +4,7 @@ import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, USER_KUS_SUBCOLLECTIO
 import { KnowledgeUnit, UserKnowledgeUnit } from '../types';
 import { StatsService } from '../stats/stats.service';
 import { isAboveLevel } from '../lib/jlpt';
+import { UserService } from '../users/user.service';
 
 @Injectable()
 export class UserKnowledgeUnitsService {
@@ -12,6 +13,7 @@ export class UserKnowledgeUnitsService {
   constructor(
     @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
     private readonly statsService: StatsService,
+    private readonly userService: UserService,
   ) {}
 
   private userKusRef(uid: string) {
@@ -123,12 +125,11 @@ export class UserKnowledgeUnitsService {
     // Non-blocking: update stats, tutorContext, and aboveLevel flag on enrollment
     void (async () => {
       try {
-        const [kuDoc, userDoc] = await Promise.all([
+        const [kuDoc, userPrefs] = await Promise.all([
           this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(kuId).get(),
-          this.db.collection('users').doc(uid).get(),
+          this.userService.getPreferences(uid),
         ]);
         const kuData = kuDoc.data();
-        const userPrefs = userDoc.data()?.preferences;
         const jlptLevel = kuData?.data?.jlptLevel;
 
         const aboveLevel = isAboveLevel(jlptLevel, userPrefs?.jlptLevel);

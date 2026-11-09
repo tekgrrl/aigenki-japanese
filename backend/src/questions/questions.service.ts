@@ -10,10 +10,11 @@ import {
   Timestamp,
   FieldValue,
 } from '../firebase/firebase.module';
-import { ReviewFacet, QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage } from '@/types';
+import { QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage } from '@/types';
 import { usagesOf } from '../lessons/vocab-usages';
 import { GeminiService } from '../gemini/gemini.service';
 import { FacetStore } from '../facets/facet-store';
+import { jlptLevelOf } from '../users/user.service';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import {
   VOCAB_QUESTION_OPTIONS,
@@ -30,7 +31,7 @@ import {
   buildGrammarQuestionPrompt,
   GrammarQuestionType,
 } from '../prompts/quiz.prompts';
-import { GET_USER_LEVEL_DECLARATION, JlptLevel } from '../prompts/curriculum';
+import { GET_USER_LEVEL_DECLARATION } from '../prompts/curriculum';
 
 const SUITABLE_RANK_THRESHOLD = 30;
 const RANK_CORRECT_DELTA = 5;
@@ -235,7 +236,7 @@ export class QuestionsService {
       get_user_level: async () => {
         const userDoc = await this.db.collection('users').doc(uid).get();
         const userData = userDoc.data() as any;
-        const level = (userData?.preferences?.jlptLevel ?? 'N5') as JlptLevel;
+        const level = jlptLevelOf(userData);
         // Resolved from enrolled KU ids at call time — always current content + title.
         const allowedGrammar = await this.statsService.getAllowedGrammar(uid, userData);
         const excludedVocab: string[] = userData?.tutorContext?.excludedVocab ?? [];

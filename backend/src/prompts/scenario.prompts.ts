@@ -6,6 +6,7 @@
 import { GenerateScenarioDto, ImportScenarioDto, Scenario } from '../types/scenario';
 import { GrammarSection } from '../types/grammar-section';
 import { FRAGMENT_CONTRACT, ACCEPTED_ALTERNATIVES_DEF } from './fragments';
+import { DEFAULT_JLPT_LEVEL } from './curriculum';
 
 // ---------------------------------------------------------------------------
 // Role allowlists
@@ -383,7 +384,7 @@ ${dto.conversationText}
 **Parameters:**
 - Learner's Role: ${dto.userRole}
 - Partner Role(s): ${aiRoleList}
-- Target Level: ${dto.difficulty ?? 'N4'}${dto.sceneNotes ? `\n- Scene Context: ${dto.sceneNotes}` : ''}
+- Target Level: ${dto.difficulty ?? DEFAULT_JLPT_LEVEL}${dto.sceneNotes ? `\n- Scene Context: ${dto.sceneNotes}` : ''}
 
 **Instructions:**
 1. **Dialogue:** Parse the conversation into structured lines.
@@ -395,7 +396,7 @@ ${dto.conversationText}
    - Set \`speakerRole\` on every line to \`"user"\` if it's "${dto.userRole}" speaking, or \`"ai"\` if it's one of the partner role(s) speaking — this must be set independent of whatever label the conversation itself used.
 2. **Setting:** Infer location, participants, goal, timeOfDay, and visualPrompt from the conversation.${dto.sceneNotes ? ' Use the provided scene context as your primary guide.' : ''}
 3. **Vocabulary:** Extract 3-5 key vocabulary items the learner needs to participate in this conversation.
-4. **Grammar Matches:** Call \`get_grammar_patterns("${dto.difficulty ?? 'N4'}")\` to see the available grammar pool. Identify 1-3 patterns from those results that appear in the conversation. For each, provide a short example sentence from the conversation (with fragments for the typing exercise). If no patterns from the pool fit, return an empty \`grammarMatches\` array.
+4. **Grammar Matches:** Call \`get_grammar_patterns("${dto.difficulty ?? DEFAULT_JLPT_LEVEL}")\` to see the available grammar pool. Identify 1-3 patterns from those results that appear in the conversation. For each, provide a short example sentence from the conversation (with fragments for the typing exercise). If no patterns from the pool fit, return an empty \`grammarMatches\` array.
 5. **Title & Description:** Write a short English title and description for this scenario.
 
 **Data Formatting Rules:**

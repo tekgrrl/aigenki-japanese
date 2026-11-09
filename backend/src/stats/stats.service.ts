@@ -10,6 +10,7 @@ import { ADMIN_USER_ID } from '../lib/constants';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { isAboveLevel } from '../lib/jlpt';
 import { FacetStore } from '../facets/facet-store';
+import { UserService } from '../users/user.service';
 
 @Injectable()
 export class StatsService {
@@ -19,6 +20,7 @@ export class StatsService {
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
         private readonly facetStore: FacetStore,
         private readonly knowledgeUnitsService: KnowledgeUnitsService,
+        private readonly userService: UserService,
     ) { }
 
     async getDashboardStats(uid: string) {
@@ -462,8 +464,8 @@ export class StatsService {
      */
     private async backfillAllowedGrammarKuIds(uid: string): Promise<string[]> {
         const userRef = this.db.collection('users').doc(uid);
-        const [userDoc, ukus] = await Promise.all([userRef.get(), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
-        const userLevel = userDoc.data()?.preferences?.jlptLevel;
+        const [prefs, ukus] = await Promise.all([this.userService.getPreferences(uid), userRef.collection(USER_KUS_SUBCOLLECTION).get()]);
+        const userLevel = prefs.jlptLevel;
         const candidateIds = ukus.docs
             .filter(d => d.data().aboveLevel !== true)
             .map(d => (d.data().kuId as string | undefined) ?? d.id);

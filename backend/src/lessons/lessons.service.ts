@@ -1,10 +1,8 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { FIRESTORE_CONNECTION, LESSONS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, PICTURES_COLLECTION, USER_GRAMMAR_LESSONS_SUBCOLLECTION, USER_LESSONS_SUBCOLLECTION, USER_KUS_SUBCOLLECTION, FieldValue } from '../firebase/firebase.module';
-import { Firestore, BulkWriter, Timestamp } from 'firebase-admin/firestore';
+import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { GeminiService } from '../gemini/gemini.service';
-import { QuestionsService } from '../questions/questions.service';
-import { KnowledgeUnit, Lesson, VocabLesson, VocabUsage, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson, UserRoot } from '../types';
-import { performance } from 'perf_hooks';
+import { KnowledgeUnit, Lesson, VocabLesson, VocabUsage, KanjiLesson, GrammarLesson, GrammarKnowledgeUnit, UserGrammarLesson } from '../types';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ValidationService } from '../validation/validation.service';
 import { buildVocabLessonMessage, buildVocabCacheContext } from '../prompts/vocab.prompts';
@@ -14,6 +12,8 @@ import { KanjiService } from '../kanji/kanji.service';
 import { isUsagePicture, subjectOf, usageKey } from '../pictures/pictures.service';
 import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAside, withUsageIds } from './vocab-usages';
 import { FacetStore } from '../facets/facet-store';
+import { stripFurigana } from '../lib/furigana-text';
+import { UserService, adminForAllUsers } from '../users/user.service';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
   if (ku.type !== 'Grammar') return lesson;
@@ -71,6 +71,7 @@ export class LessonsService {
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly validationService: ValidationService,
     private readonly kanjiService: KanjiService,
+    private readonly userService: UserService,
   ) { }
 
   async generateLesson(uid: string, kuId: string, cachedContentName?: string) {
@@ -92,8 +93,7 @@ export class LessonsService {
       return this.kanjiService.getKanjiDetails(uid, ku.content, kuId);
     }
 
-    const userDoc = await this.db.collection('users').doc(uid).get();
-    const jlptLevel: string = (userDoc.data() as any)?.preferences?.jlptLevel ?? 'N5';
+    const jlptLevel = await this.userService.getJlptLevel(uid);
 
     const content = ku.content;
 
@@ -482,7 +482,9 @@ export class LessonsService {
   }
 
   async updateLesson(uid: string, kuId: string, section: string, content: string) {
-    const isAdmin = uid === ADMIN_USER_ID || process.env.ADMIN_ALL === 'true';
+    // Learner route (no AdminGuard): only the admin user, or everyone under the ADMIN_ALL dev
+    // switch, edits the global lesson. Others get a personal overlay.
+    const isAdmin = uid === ADMIN_USER_ID || adminForAllUsers();
     if (isAdmin) {
       await this.writeGlobalLesson(kuId, { [section]: content });
     } else {
@@ -558,8 +560,8 @@ export class LessonsService {
     const waiting = await this.getWaitingLessons(uid);
     if (waiting.length > 0) return waiting;
 
-    const userDoc = await this.db.collection('users').doc(uid).get();
-    const jlptLevel = (userDoc.data() as UserRoot | undefined)?.preferences?.jlptLevel ?? 'N5';
+    const prefs = await this.userService.getPreferences(uid);
+    const jlptLevel = prefs.jlptLevel;
 
     const facetsCol = this.facetStore.query(uid);
 
@@ -606,7 +608,7 @@ export class LessonsService {
     // first, so the experiment's words actually reach the learner. Fetched directly — the
     // corpus query above only samples the first 200 at the level.
     let picturedDocs: FirebaseFirestore.DocumentSnapshot[] = [];
-    if ((userDoc.data() as UserRoot | undefined)?.preferences?.audioFirstExperiment === true) {
+    if (prefs.audioFirstExperiment === true) {
       const pics = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId', 'subject').get();
       // Usage pictures only: free-standing ones have kuId null, and whole-KU ones aren't cards.
       const ids = [...new Set(pics.docs.filter(d => isUsagePicture(d.data())).map(d => d.data().kuId as string))].filter(id => !seenKuIds.has(id));
@@ -708,8 +710,7 @@ export class LessonsService {
   }
 
   async processBatch(uid: string, vocabValues: { id: string; content: string }[]) {
-    const userDoc = await this.db.collection('users').doc(uid).get();
-    const batchJlptLevel: string = (userDoc.data() as any)?.preferences?.jlptLevel ?? 'N5';
+    const batchJlptLevel = await this.userService.getJlptLevel(uid);
 
     const cacheName = await this.geminiService.createContextCache(
       buildVocabCacheContext(batchJlptLevel),
@@ -835,7 +836,7 @@ export class LessonsService {
  */
 export function isValidFurigana(sentence: string, annotated: string | undefined): boolean {
   if (typeof annotated !== 'string') return false;
-  if (annotated.replace(/\[[^\]]*\]/g, '') !== sentence) return false;
+  if (stripFurigana(annotated) !== sentence) return false;
   const brackets = annotated.match(/\[[^\]]*\]/g) ?? [];
   const valid = annotated.match(/[\u4e00-\u9faf\u3005]\[[ぁ-ゖー]+\]/g) ?? [];
   return brackets.length === valid.length;

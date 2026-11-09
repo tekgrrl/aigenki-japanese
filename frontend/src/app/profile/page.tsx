@@ -18,12 +18,14 @@ export default function ProfilePage() {
   const { user } = useAuth();
   const [showFurigana, setShowFurigana] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>("system");
+  // Required. "" = never chosen (the backend treats that as N5); shown as a placeholder to pick from.
   const [jlptLevel, setJlptLevel] = useState<string>("");
   const [preferredUserRole, setPreferredUserRole] = useState<string>("");
   const [audioFirst, setAudioFirst] = useState(false);
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     setShowFurigana(loadFurigana());
@@ -47,19 +49,27 @@ export default function ProfilePage() {
       .catch(() => {});
   }, []);
 
-  const patchPreferences = useCallback(async (patch: Record<string, unknown>) => {
+  /** Saves a preference change; true if the server accepted it (apiFetch doesn't throw on HTTP errors). */
+  const patchPreferences = useCallback(async (patch: Record<string, unknown>): Promise<boolean> => {
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
     try {
-      await apiFetch("/api/users/me/preferences", {
+      const res = await apiFetch("/api/users/me/preferences", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
+      if (!res.ok) {
+        setSaveError("Couldn't save");
+        return false;
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      return true;
     } catch {
-      // best-effort; UI already reflects the optimistic update
+      setSaveError("Couldn't save");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -79,9 +89,10 @@ export default function ProfilePage() {
   }, [audioFirst, patchPreferences]);
 
   const handleJlptLevel = useCallback(async (val: string) => {
+    const previous = jlptLevel;
     setJlptLevel(val);
-    await patchPreferences({ jlptLevel: val || null });
-  }, [patchPreferences]);
+    if (!(await patchPreferences({ jlptLevel: val }))) setJlptLevel(previous);
+  }, [jlptLevel, patchPreferences]);
 
   const handlePreferredUserRole = useCallback(async (val: string) => {
     setPreferredUserRole(val);
@@ -120,6 +131,9 @@ export default function ProfilePage() {
             <div className="flex items-center gap-3 ml-4 shrink-0">
               {saving && (
                 <span className="text-xs text-shodo-ink/40">Saving…</span>
+              )}
+              {saveError && (
+                <span className="text-xs text-shodo-stamp-red">{saveError}</span>
               )}
               {saved && (
                 <span className="text-xs text-green-600">Saved</span>
@@ -204,7 +218,7 @@ export default function ProfilePage() {
             <div>
               <p className="text-sm font-medium text-shodo-ink">Current JLPT Level</p>
               <p className="text-xs text-shodo-ink/50 mt-0.5">
-                Used as the default difficulty when generating scenarios
+                Sets the level of your lessons, questions and scenarios
               </p>
             </div>
             <select
@@ -212,7 +226,9 @@ export default function ProfilePage() {
               onChange={(e) => handleJlptLevel(e.target.value)}
               className="ml-4 shrink-0 text-sm border border-shodo-ink/20 rounded-md px-2 py-1.5 bg-shodo-paper text-shodo-ink focus:outline-none focus:ring-2 focus:ring-shodo-accent"
             >
-              <option value="">Not set</option>
+              {jlptLevel === "" && (
+                <option value="" disabled>Choose your level</option>
+              )}
               {JLPT_LEVELS.map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}

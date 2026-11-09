@@ -102,13 +102,9 @@ export class KnowledgeUnitsService {
         this.searchCache = this.searchCache.filter(k => k.id !== id);
     }
 
-    async findAll({ status, type, content, jlptLevel }: { status?: string, type?: string, content?: string[], jlptLevel?: string }) {
+    async findAll({ type, content, jlptLevel }: { type?: string, content?: string[], jlptLevel?: string }) {
         try {
             let query: Query = this.db.collection(KNOWLEDGE_UNITS_COLLECTION) as unknown as Query;
-
-            if (status) {
-                query = query.where("status", "==", status);
-            }
 
             if (type) {
                 query = query.where("type", "==", type);
@@ -299,7 +295,6 @@ export class KnowledgeUnitsService {
                 kanji: kanjiIn(content),
                 ...(hint?.jlptLevel ? { jlptLevel: hint.jlptLevel } : {}),
             },
-            status: 'learning',
             createdAt: Timestamp.now(),
             relatedUnits: [],
         });
@@ -349,7 +344,6 @@ export class KnowledgeUnitsService {
             relatedUnits: body.relatedUnits || [],
             data: body.type === 'Vocab' ? { ...(body.data || {}), kanji: kanjiIn(body.content) } : (body.data || {}),
             createdAt: Timestamp.now(),
-            status: "learning",
         };
         delete newKuData.userId; // KUs are global; no user ownership
 
@@ -472,7 +466,6 @@ export class KnowledgeUnitsService {
                     type: item.type,
                     data: item.type === 'Vocab' ? { ...(item.data || {}), kanji: kanjiIn(item.content) } : (item.data || {}),
                     relatedUnits: item.relatedUnits || [],
-                    status: 'learning',
                     createdAt: Timestamp.now(),
                 },
             });

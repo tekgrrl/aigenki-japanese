@@ -10,9 +10,10 @@ import { AiToolCall } from './providers/ai-provider.interface';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
 import { getLevelSeed } from './level-seed.data';
-import { FacetType, Lesson } from '../types';
+import { FacetType, Lesson, UserRoot } from '../types';
 import { dropStrayComponentKanji } from '../lessons/lessons.service';
 import { FacetStore } from '../facets/facet-store';
+import { jlptLevelOf } from '../users/user.service';
 
 /** Items below this SRS stage still need review: scenario candidates (the user's rule, 2026-11-04). */
 const REVIEW_CANDIDATE_STAGE = 3;
@@ -103,7 +104,7 @@ export class TutorToolExecutor {
     const prefs = (doc.preferences ?? {}) as Record<string, unknown>;
     const ctx = (doc.tutorContext ?? {}) as Record<string, unknown>;
     return {
-      jlptLevel: prefs.jlptLevel ?? 'N5',
+      jlptLevel: jlptLevelOf(doc as Pick<UserRoot, 'preferences'>),
       communicationStyle: ctx.communicationStyle ?? 'balanced',
       preferredUserRole: prefs.preferredUserRole ?? null,
     };

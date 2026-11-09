@@ -69,6 +69,8 @@ export interface UserRoot {
   id: string; // The Firestore document ID (which corresponds to the user's auth UID)
   email?: string;
   isAdmin?: boolean;
+  /** Response-only (GET /users/me, never stored): the level the user counts as, 'N5' until they choose one. */
+  effectiveJlptLevel?: 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
 
   /**
    * Statistical data related to the user's reviews, engagement, and progression.

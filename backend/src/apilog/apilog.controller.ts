@@ -1,9 +1,7 @@
-import { Controller, Get, Post, Query, Body, Inject } from '@nestjs/common';
-import { Firestore } from 'firebase-admin/firestore';
+import { Controller, Get, Post, Query, Body } from '@nestjs/common';
 import { ApilogService } from './apilog.service';
 import { GeminiService } from '../gemini/gemini.service';
-import { FIRESTORE_CONNECTION } from '../firebase/firebase.module';
-import { GET_USER_LEVEL_DECLARATION, getCumulativeGrammar, JlptLevel } from '../prompts/curriculum';
+import { GET_USER_LEVEL_DECLARATION, getCumulativeGrammar } from '../prompts/curriculum';
 import {
     buildVocabQuestionPrompt,
     buildNounParticleQuestionPrompt,
@@ -11,6 +9,7 @@ import {
     VOCAB_QUESTION_OPTIONS,
     CONCEPT_QUESTION_OPTIONS,
 } from '../prompts/quiz.prompts';
+import { UserService } from '../users/user.service';
 
 const QUESTION_RESPONSE_SCHEMA = {
     type: 'OBJECT',
@@ -42,7 +41,7 @@ export class ApilogController {
     constructor(
         private readonly apilogService: ApilogService,
         private readonly geminiService: GeminiService,
-        @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
+        private readonly userService: UserService,
     ) { }
 
     @Get()
@@ -81,8 +80,7 @@ export class ApilogController {
         if (useTools) {
             toolHandlers.get_user_level = async () => {
                 if (!uid) return { jlptLevel: 'N5', cumulativeGrammar: getCumulativeGrammar('N5') };
-                const userDoc = await this.db.collection('users').doc(uid).get();
-                const level = ((userDoc.data() as any)?.preferences?.jlptLevel ?? 'N5') as JlptLevel;
+                const level = await this.userService.getJlptLevel(uid);
                 return { jlptLevel: level, cumulativeGrammar: getCumulativeGrammar(level) };
             };
         }

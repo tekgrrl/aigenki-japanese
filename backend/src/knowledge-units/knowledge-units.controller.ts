@@ -31,7 +31,8 @@ export class KnowledgeUnitsController {
         if (status === 'user') {
             return this.userKnowledgeUnitsService.findAllAsKUs(uid);
         }
-        return this.knowledgeUnitsService.findAll({ status, type, content, jlptLevel });
+        if (status) throw new BadRequestException(`Unknown status "${status}" (use learning or user)`);
+        return this.knowledgeUnitsService.findAll({ type, content, jlptLevel });
     }
 
     @Put(':id')

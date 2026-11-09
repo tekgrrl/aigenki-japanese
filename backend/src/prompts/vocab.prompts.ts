@@ -4,6 +4,7 @@
  */
 
 import { levelConstraint, PREFER_SPOKEN_REGISTER } from './fragments';
+import { stripFurigana } from '../lib/furigana-text';
 
 // ---------------------------------------------------------------------------
 // Vocab lesson
@@ -313,7 +314,7 @@ export function buildUsageBuildMessage(
   const list = examples
     .map((e, i) => {
       const label = fixedLabels[i];
-      return `${i + 1}. ${e.sentence.replace(/\[[^\]]*\]/g, '')} — ${e.translation}${label ? `  [FIXED LABEL: "${label}"]` : ''}`;
+      return `${i + 1}. ${stripFurigana(e.sentence)} — ${e.translation}${label ? `  [FIXED LABEL: "${label}"]` : ''}`;
     })
     .join('\n');
   const defs = definitions.map((d, i) => `${i + 1}. ${d}`).join('\n');

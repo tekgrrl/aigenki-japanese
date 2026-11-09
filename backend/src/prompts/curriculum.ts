@@ -4,6 +4,9 @@ export type JlptLevel = 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
 
 export const JLPT_LEVEL_ORDER: JlptLevel[] = ['N5', 'N4', 'N3', 'N2', 'N1'];
 
+/** The level a learner counts as until they choose one (see UserService.getJlptLevel). */
+export const DEFAULT_JLPT_LEVEL: JlptLevel = 'N5';
+
 // Grammar points introduced at each level. getCumulativeGrammar() stacks these.
 const GRAMMAR_ADDITIONS: Record<JlptLevel, string[]> = {
   N5: [

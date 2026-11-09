@@ -26,6 +26,8 @@ import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
 import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { FacetStore } from '../facets/facet-store';
+import { stripFurigana } from '../lib/furigana-text';
+import { jlptLevelOf } from '../users/user.service';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
@@ -74,16 +76,17 @@ export class ScenariosService {
   private buildGrammarToolHandlers(uid: string) {
     return {
       get_grammar_patterns: async (args: Record<string, unknown>) => {
-        const jlptLevel = (args.jlptLevel as string) || 'N4';
+        const jlptLevel = (args.jlptLevel as string) || await this.userService.getJlptLevel(uid);
 
         // Fetch only grammar KUs the user has enrolled (and are not above their level)
+        // Filtered in code, not with where('aboveLevel', '!=', true): Firestore's != skips
+        // documents without the field (older enrolments, and new ones until the flag is written).
         const ukuSnap = await this.db
           .collection('users').doc(uid)
           .collection('user-kus')
-          .where('aboveLevel', '!=', true)
           .get();
 
-        const enrolledKuIds = ukuSnap.docs.map(d => d.data().kuId as string);
+        const enrolledKuIds = ukuSnap.docs.filter(d => d.data().aboveLevel !== true).map(d => d.data().kuId as string);
         if (enrolledKuIds.length === 0) {
           this.logger.log(`get_grammar_patterns(${jlptLevel}) → 0 enrolled patterns for uid=${uid}`);
           return { patterns: [] };
@@ -286,9 +289,9 @@ export class ScenariosService {
     const userPrefs = user?.preferences;
     const resolvedDto: GenerateScenarioDto = {
       ...dto,
-      difficulty: dto.difficulty ?? userPrefs?.jlptLevel ?? 'N4',
+      difficulty: dto.difficulty ?? jlptLevelOf(user ?? undefined),
       userRole: dto.userRole ?? userPrefs?.preferredUserRole,
-      sourceContextSentence: dto.sourceContextSentence?.replace(/\[[^\]]*\]/g, '').trim(),
+      sourceContextSentence: dto.sourceContextSentence == null ? undefined : stripFurigana(dto.sourceContextSentence).trim(),
     };
 
     const grammarSection = resolvedDto.sourceType === 'grammar-pattern' && resolvedDto.sourceSectionId
@@ -488,10 +491,11 @@ export class ScenariosService {
       throw new InternalServerErrorException('conversationText, userRole, and at least one aiRole are required');
     }
 
+    const difficulty = dto.difficulty ?? await this.userService.getJlptLevel(uid);
     const prompt = buildImportPrompt({
       ...dto,
       aiRoles: resolvedAiRoles,
-      difficulty: dto.difficulty ?? 'N4',
+      difficulty,
     });
 
     try {
@@ -513,7 +517,7 @@ export class ScenariosService {
         userId: uid,
         title: data.title,
         description: data.description,
-        difficultyLevel: dto.difficulty ?? 'N4',
+        difficultyLevel: difficulty,
         setting: {
           location: data.setting.location,
           participants: data.setting.participants,
