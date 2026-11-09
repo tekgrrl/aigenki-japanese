@@ -6,11 +6,15 @@ import { FacetStore } from '../facets/facet-store';
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** `existing` without entries older than `windowMs` or for the same kuId, plus `entry`. */
+/**
+ * `existing` without entries older than `windowMs` or for the same kuId, plus `entry`. An entry with
+ * no usable timestamp (a hand edit, a legacy value) is dropped rather than failing the whole write.
+ */
 function withRecent<T extends { kuId: string }>(existing: T[] | undefined, entry: T, tsKey: keyof T, windowMs: number): T[] {
   const cutoffMs = Date.now() - windowMs;
+  const millis = (e: T) => (e[tsKey] as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
   return [
-    ...(existing ?? []).filter(e => (e[tsKey] as unknown as Timestamp).toMillis() > cutoffMs && e.kuId !== entry.kuId),
+    ...(existing ?? []).filter(e => millis(e) > cutoffMs && e.kuId !== entry.kuId),
     entry,
   ];
 }

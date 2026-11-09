@@ -34,14 +34,15 @@ export interface GradedReview {
 }
 
 /**
- * Everything that reacts to a graded review, after the SRS transaction, in one fixed order:
- *   1. learning progress: advance the facet sequence, then recompute UKU status (after the advance,
- *      so the last status write sees the advanced stage; F-001)
- *   2. scenario vocab readiness
- *   3. tutor context: leech vocab and weak grammar points
- *   4. daily plan: promotion, scenario opportunity, or the scenario Flash chain
- * Each step catches and logs its own failure, so one failing step doesn't skip the rest.
- * Not awaited by the review answer: nothing here is in the response.
+ * Everything that reacts to a graded review, after the SRS transaction. Two chains run side by side,
+ * each in a fixed order:
+ *   progress: advance the facet sequence, then recompute UKU status (after the advance, so the last
+ *     status write sees the advanced stage; F-001), then the component kanji's status
+ *   the rest: scenario vocab readiness → leech vocab and weak grammar points → daily plan
+ *     (promotion, scenario opportunity) → the scenario Flash chain
+ * The rest needs nothing from progress, so a slow advance (Kanji Alive, facet creation) doesn't hold
+ * it up. Every write is its own step that catches and logs its failure, so one failure doesn't skip
+ * the others. Not awaited by the review answer: nothing here is in the response.
  */
 @Injectable()
 export class ReviewOutcomeService {
@@ -61,12 +62,40 @@ export class ReviewOutcomeService {
     async onGraded(uid: string, review: GradedReview): Promise<void> {
         const { kuId } = review;
         if (!kuId) return;
-        await this.step('learning progress', uid, review, () => this.updateProgress(uid, kuId, review));
+        await Promise.all([this.updateProgress(uid, kuId, review), this.reactToGrade(uid, kuId, review)]);
+    }
+
+    private async step(name: string, uid: string, review: GradedReview, run: () => Promise<unknown>): Promise<void> {
+        try {
+            await run();
+        } catch (e) {
+            this.logger.error(`onGraded ${name} failed uid=${uid} kuId=${review.kuId} facetId=${review.facetId}`, e);
+        }
+    }
+
+    private async updateProgress(uid: string, kuId: string, review: GradedReview): Promise<void> {
+        // An advance recomputes the status itself, after writing the new stage.
+        let advanced = false;
+        if (review.newStage > review.prevStage) {
+            await this.step('sequence advance', uid, review, async () => {
+                advanced = await this.reviewProgressService.checkAndAdvanceStage(uid, kuId);
+            });
+        }
+        if (!advanced) await this.step('status recompute', uid, review, () => this.learningProgressService.recomputeAndCache(uid, kuId));
+        // A Kanji-Component facet also counts toward the component kanji's own status.
+        if (review.targetKuId && review.targetKuId !== kuId) {
+            const target = review.targetKuId;
+            await this.step('component kanji status', uid, review, () => this.learningProgressService.recomputeAndCache(uid, target));
+        }
+    }
+
+    private async reactToGrade(uid: string, kuId: string, review: GradedReview): Promise<void> {
         await this.step('scenario vocabReady', uid, review, () => this.updateScenarioVocabReady(uid, kuId, review));
 
         // Audio-first (picture-choice) words are never shown written: keep them out of the tutor
         // context (leechVocab, like frontierVocab) and the daily plan. Checked before the KU read.
         if (!review.facetType || review.facetType === 'picture-choice') return;
+        const facetType = review.facetType;
         const promoted = review.result === 'pass' && review.newStage > review.prevStage;
         const leechChange = this.leechChange(review);
         if (!leechChange && !promoted) return;
@@ -80,43 +109,9 @@ export class ReviewOutcomeService {
         }
         if (leechChange) {
             await this.step('tutor context leech', uid, review, () =>
-                this.tutorContext.updateLeech(uid, ku.content, review.facetType!, leechChange, ku.type === 'Grammar'));
+                this.tutorContext.updateLeech(uid, ku.content, facetType, leechChange, ku.type === 'Grammar'));
         }
-        if (promoted) await this.step('daily plan', uid, review, () => this.updateDailyPlan(uid, kuId, ku, review));
-    }
-
-    private async step(name: string, uid: string, review: GradedReview, run: () => Promise<void>): Promise<void> {
-        try {
-            await run();
-        } catch (e) {
-            this.logger.error(`onGraded ${name} failed uid=${uid} kuId=${review.kuId} facetId=${review.facetId}`, e);
-        }
-    }
-
-    private async updateProgress(uid: string, kuId: string, review: GradedReview): Promise<void> {
-        if (review.newStage > review.prevStage) await this.reviewProgressService.checkAndAdvanceStage(uid, kuId);
-        await this.learningProgressService.recomputeAndCache(uid, kuId);
-        // A Kanji-Component facet also counts toward the component kanji's own status.
-        if (review.targetKuId && review.targetKuId !== kuId) {
-            await this.learningProgressService.recomputeAndCache(uid, review.targetKuId);
-        }
-    }
-
-    /** A word learned for a scenario: once its facet is drill-ready, check whether the scenario's vocab all is. */
-    private async updateScenarioVocabReady(uid: string, kuId: string, review: GradedReview): Promise<void> {
-        if (review.newStage < VOCAB_READY_MIN_STAGE) return;
-        const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
-        if (uku?.source?.type === 'scenario') await this.scenariosService.checkAndSetVocabReady(uid, uku.source.id);
-    }
-
-    /** 'add' when the facet just became a leech (or still is one), 'remove' on a pass after failures. */
-    private leechChange(review: GradedReview): 'add' | 'remove' | null {
-        if (review.newConsecutiveFailures >= LEECH_THRESHOLD) return 'add';
-        if (review.result === 'pass' && review.prevConsecutiveFailures > 0) return 'remove';
-        return null;
-    }
-
-    private async updateDailyPlan(uid: string, kuId: string, ku: Ku, review: GradedReview): Promise<void> {
+        if (!promoted) return;
         const { newStage, prevStage } = review;
         // A Grammar point promoted to SRS stage 3 or above starts its scenario chain (Flash cards:
         // Get to Drill → Graduate → Get to Simulate → Complete). Every learner is promoted through
@@ -131,7 +126,22 @@ export class ReviewOutcomeService {
         const opportunity = ku.type === 'Grammar' && !flashChain && getSrsLevelIndex(newStage) > getSrsLevelIndex(prevStage)
             ? { kuId, content: ku.content, type: ku.type, newLevel: getSrsLevelName(newStage) }
             : undefined;
-        await this.dailyPlanService.recordPromotion(uid, { kuId, content: ku.content, type: ku.type, srsStage: newStage }, opportunity);
-        if (flashChain) await this.scenarioFlashService.start(uid, kuId);
+        await this.step('daily plan', uid, review, () =>
+            this.dailyPlanService.recordPromotion(uid, { kuId, content: ku.content, type: ku.type, srsStage: newStage }, opportunity));
+        if (flashChain) await this.step('scenario Flash chain', uid, review, () => this.scenarioFlashService.start(uid, kuId));
+    }
+
+    /** A word learned for a scenario: once its facet is drill-ready, check whether the scenario's vocab all is. */
+    private async updateScenarioVocabReady(uid: string, kuId: string, review: GradedReview): Promise<void> {
+        if (review.newStage < VOCAB_READY_MIN_STAGE) return;
+        const uku = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
+        if (uku?.source?.type === 'scenario') await this.scenariosService.checkAndSetVocabReady(uid, uku.source.id);
+    }
+
+    /** 'add' when the facet just became a leech (or still is one), 'remove' on a pass after failures. */
+    private leechChange(review: GradedReview): 'add' | 'remove' | null {
+        if (review.newConsecutiveFailures >= LEECH_THRESHOLD) return 'add';
+        if (review.result === 'pass' && review.prevConsecutiveFailures > 0) return 'remove';
+        return null;
     }
 }

@@ -22,43 +22,22 @@ export class TutorContextService {
         private readonly userService: UserService,
     ) { }
 
-    /** Merge facetTypes into an existing entry (by content) or add a new entry. */
-    private async mergeTutorVocabEntry(
-        uid: string,
-        field: 'frontierVocab' | 'leechVocab' | 'weakGrammarPoints',
-        content: string,
-        facetTypes: FacetType[],
-    ): Promise<void> {
-        const userRef = this.db.collection('users').doc(uid);
-        await this.db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(userRef);
-            const entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
-            transaction.update(userRef, { [`tutorContext.${field}`]: withFacetTypes(entries, content, facetTypes) });
-        });
-    }
-
-    /** Remove a specific facetType from an entry; drop the entry entirely if no facetTypes remain.
-     *  Pass facetType=undefined to remove the whole entry regardless. */
-    private async removeTutorVocabFacetType(
-        uid: string,
-        field: 'frontierVocab' | 'leechVocab' | 'weakGrammarPoints',
-        content: string,
-        facetType?: FacetType,
-    ): Promise<void> {
-        const userRef = this.db.collection('users').doc(uid);
-        await this.db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(userRef);
-            const entries: TutorVocabEntry[] = doc.data()?.tutorContext?.[field] ?? [];
-            transaction.update(userRef, { [`tutorContext.${field}`]: withoutFacetType(entries, content, facetType) });
-        });
-    }
-
+    /** Adds facetTypes to the word's frontierVocab entry (the entry is created if missing). */
     async addToFrontierVocab(uid: string, content: string, facetTypes: FacetType[]): Promise<void> {
-        await this.mergeTutorVocabEntry(uid, 'frontierVocab', content, facetTypes);
+        const userRef = this.db.collection('users').doc(uid);
+        await this.db.runTransaction(async (transaction) => {
+            const entries: TutorVocabEntry[] = (await transaction.get(userRef)).data()?.tutorContext?.frontierVocab ?? [];
+            transaction.update(userRef, { 'tutorContext.frontierVocab': withFacetTypes(entries, content, facetTypes) });
+        });
     }
 
+    /** Drops the word's frontierVocab entry (every facet type). */
     async removeFromFrontierVocab(uid: string, content: string): Promise<void> {
-        await this.removeTutorVocabFacetType(uid, 'frontierVocab', content);
+        const userRef = this.db.collection('users').doc(uid);
+        await this.db.runTransaction(async (transaction) => {
+            const entries: TutorVocabEntry[] = (await transaction.get(userRef)).data()?.tutorContext?.frontierVocab ?? [];
+            transaction.update(userRef, { 'tutorContext.frontierVocab': entries.filter(e => e.content !== content) });
+        });
     }
 
     /** Drops a word from both frontierVocab and leechVocab (every facet type). */
@@ -217,9 +196,8 @@ function withFacetTypes(entries: TutorVocabEntry[], content: string, facetTypes:
     return out;
 }
 
-/** `entries` without `facetType` on the entry for `content` (the entry goes when none remain; undefined = the whole entry). */
-function withoutFacetType(entries: TutorVocabEntry[], content: string, facetType?: FacetType): TutorVocabEntry[] {
-    if (facetType === undefined) return entries.filter(e => e.content !== content);
+/** `entries` without `facetType` on the entry for `content` (the entry goes when none remain). */
+function withoutFacetType(entries: TutorVocabEntry[], content: string, facetType: FacetType): TutorVocabEntry[] {
     return entries.flatMap(e => {
         if (e.content !== content) return [e];
         const remaining = e.facetTypes.filter(t => t !== facetType);

@@ -11,7 +11,7 @@ function setup(ku: Record<string, any> = { type: 'Vocab', content: '川', data: 
     jest.fn(async (...args: any[]) => { calls.push(`${name}(${args.slice(1).join(',')})`); return impl(...args); });
   const deps = {
     learningProgress: { recomputeAndCache: log('recompute') },
-    reviewProgress: { checkAndAdvanceStage: log('advance') },
+    reviewProgress: { checkAndAdvanceStage: log('advance', () => false) },
     ukus: { findByKuId: log('findUku', () => null) },
     scenarios: { checkAndSetVocabReady: log('vocabReady') },
     kus: { findOne: log('findKu', () => ({ id: 'k', ...ku })) },
@@ -32,10 +32,34 @@ const graded = (over: Partial<GradedReview> = {}): GradedReview => ({
 });
 
 describe('ReviewOutcomeService.onGraded', () => {
-  it('advances the sequence before recomputing status (F-001), then the component kanji', async () => {
+  const progress = (calls: string[]) => calls.filter(c => /^(advance|recompute)/.test(c));
+
+  it('no advance: checks the sequence, then recomputes status (F-001), then the component kanji', async () => {
     const { service, calls } = setup();
     await service.onGraded('u', graded({ targetKuId: 'kanji' }));
-    expect(calls.slice(0, 3)).toEqual(['advance(k)', 'recompute(k)', 'recompute(kanji)']);
+    expect(progress(calls)).toEqual(['advance(k)', 'recompute(k)', 'recompute(kanji)']);
+  });
+
+  it('an advance recomputes status itself, so no second recompute of the KU', async () => {
+    const { service, calls, deps } = setup();
+    deps.reviewProgress.checkAndAdvanceStage.mockImplementationOnce(async () => { calls.push('advance(k)'); return true; });
+    await service.onGraded('u', graded({ targetKuId: 'kanji' }));
+    expect(progress(calls)).toEqual(['advance(k)', 'recompute(kanji)']);
+  });
+
+  it('a failed advance still recomputes status', async () => {
+    const { service, deps } = setup();
+    deps.reviewProgress.checkAndAdvanceStage.mockRejectedValueOnce(new Error('Kanji Alive timeout'));
+    await service.onGraded('u', graded());
+    expect(deps.learningProgress.recomputeAndCache).toHaveBeenCalledWith('u', 'k');
+  });
+
+  it('the rest does not wait for progress (a hanging advance still records the promotion)', async () => {
+    const { service, deps } = setup();
+    deps.reviewProgress.checkAndAdvanceStage.mockImplementationOnce(() => new Promise<boolean>(() => {}));
+    void service.onGraded('u', graded());
+    await new Promise(r => setImmediate(r));
+    expect(deps.dailyPlan.recordPromotion).toHaveBeenCalled();
   });
 
   it('only recomputes when the stage did not move up', async () => {
@@ -75,6 +99,13 @@ describe('ReviewOutcomeService.onGraded', () => {
     expect(deps.flash.start).not.toHaveBeenCalled();
   });
 
+  it('a failed promotion write still starts the Flash chain', async () => {
+    const { service, deps } = setup({ type: 'Grammar', content: 'て-form', data: { scenarioReady: true } });
+    deps.dailyPlan.recordPromotion.mockRejectedValueOnce(new Error('contention'));
+    await service.onGraded('u', graded({ prevStage: 2, newStage: 3 }));
+    expect(deps.flash.start).toHaveBeenCalledWith('u', 'k');
+  });
+
   it('scenarioReady Grammar promoted to stage 3: Flash chain, no opportunity', async () => {
     const { service, deps } = setup({ type: 'Grammar', content: 'て-form', data: { scenarioReady: true } });
     await service.onGraded('u', graded({ prevStage: 2, newStage: 3 }));
@@ -109,6 +140,16 @@ describe('DailyPlanService.recordPromotion', () => {
     const stats = db.store('users').get('u')!.stats;
     expect(stats.recentlyPromoted).toEqual([expect.objectContaining({ kuId: 'k', srsStage: 4 })]);
     expect(stats.scenarioOpportunities).toEqual([expect.objectContaining({ kuId: 'k', newLevel: 'Kaisho' })]);
+  });
+
+  it('an entry with no usable timestamp is dropped instead of failing the write', async () => {
+    const db = new FakeFirestore();
+    await db.collection('users').doc('u').set({ stats: { scenarioOpportunities: [{ kuId: 'legacy', createdAt: '2026-01-01' }] } });
+    const plan = new DailyPlanService(db as any, new FacetStore(db as any));
+    await plan.recordPromotion('u', { kuId: 'k', content: 'て', type: 'Grammar', srsStage: 4 }, { kuId: 'k', content: 'て', type: 'Grammar', newLevel: 'Kaisho' });
+    const stats = db.store('users').get('u')!.stats;
+    expect(stats.recentlyPromoted).toHaveLength(1);
+    expect(stats.scenarioOpportunities.map((e: any) => e.kuId)).toEqual(['k']);
   });
 
   it('leaves scenarioOpportunities alone without an opportunity', async () => {

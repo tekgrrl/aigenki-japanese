@@ -461,20 +461,20 @@ All user stats live in `users/{uid}.stats.*`. The `user-stats/{uid}` top-level c
 
 `frontierVocab`, `leechVocab`, and `weakGrammarPoints` use `TutorVocabEntry[]` (`{ content, facetTypes }`) rather than `string[]`. This allows the same KU to appear in both arrays with different facet-type sets — e.g. 入れる can be frontier for `Content-to-Definition` and a leech for `Reading-to-Content` simultaneously.
 
-`FieldValue.arrayUnion/arrayRemove` cannot merge nested objects, so all mutations use Firestore transaction-based read-modify-write helpers in `TutorContextService`: `mergeTutorVocabEntry` (add/merge) and `removeTutorVocabFacetType` (remove one facet type, drop entry if none remain).
+`FieldValue.arrayUnion/arrayRemove` cannot merge nested objects, so all mutations use Firestore transaction-based read-modify-write transactions in `TutorContextService`, built on two helpers: `withFacetTypes` (add/merge) and `withoutFacetType` (remove one facet type, drop the entry if none remain).
 
 `allowedGrammar` stays as `string[]` — no per-facet granularity needed.
 
 #### After a review is graded
 
 `ReviewsService.updateFacetSrs` answers once its SRS transaction commits, then hands what changed to
-`ReviewOutcomeService.onGraded` (`backend/src/reviews/review-outcome.service.ts`, not awaited). It runs
-in a fixed order, each step catching and logging its own failure so one failure doesn't skip the rest:
-(1) learning progress: `checkAndAdvanceStage` on a promotion, *then* `recomputeAndCache` (so the last
-status write sees the advanced stage; F-001), and the component kanji's status for a Kanji-Component facet;
-(2) scenario `vocabReady`; (3) leech / weak grammar (`TutorContextService.updateLeech`); (4) daily plan
-(`DailyPlanService.recordPromotion`, with a scenario opportunity) or the scenario Flash chain. Picture-choice
-facets stop after (2). New "react to a review" behaviour goes in `ReviewOutcomeService`, not `ReviewsService`.
+`ReviewOutcomeService.onGraded` (`backend/src/reviews/review-outcome.service.ts`, not awaited). Two chains
+run side by side, each in a fixed order, and every write is its own step that catches and logs its failure:
+**progress:** `checkAndAdvanceStage` on a promotion, *then* `recomputeAndCache` if it didn't advance (an
+advance recomputes after writing the new stage; F-001), then the component kanji's status for a
+Kanji-Component facet. **The rest:** scenario `vocabReady` → leech / weak grammar
+(`TutorContextService.updateLeech`) → daily plan (`DailyPlanService.recordPromotion`, with a scenario
+opportunity) → the scenario Flash chain. Picture-choice facets stop after `vocabReady`. New "react to a review" behaviour goes in `ReviewOutcomeService`, not `ReviewsService`.
 
 #### Leech detection: why `updateFacetSrs` not `recordAnswer`
 
