@@ -22,6 +22,24 @@ export async function fetchApprovedPictures(kuId: string): Promise<PictureRef[]>
   }
 }
 
+/**
+ * The pictures to teach a word with, if it's audio-first for this learner (one of its cards is a
+ * picture card), else []. The one rule the lesson page and the Review Lesson panel share, so a word
+ * looks the same in both. Pass `facets` if they're already loaded.
+ */
+export async function audioFirstPictures(kuId: string, facets?: { facetType: string }[]): Promise<PictureRef[]> {
+  let cards = facets;
+  if (!cards) {
+    try {
+      const res = await apiFetch(`/api/reviews/facets?kuId=${encodeURIComponent(kuId)}`);
+      cards = res.ok ? await res.json() : [];
+    } catch {
+      cards = [];
+    }
+  }
+  return Array.isArray(cards) && cards.some((f) => f.facetType === "picture-choice") ? fetchApprovedPictures(kuId) : [];
+}
+
 /** Distractor pictures (other words) for the four-picture choice card. */
 export async function fetchChoices(kuId: string, n = 3): Promise<PictureRef[]> {
   try {

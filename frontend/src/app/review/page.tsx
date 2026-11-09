@@ -21,7 +21,8 @@ import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportCont
 import ReviewActionButtons from "@/components/review/ReviewActionButtons";
 import KanjiWordsLine from "@/components/review/KanjiWordsLine";
 import LessonSlideStack from "@/components/learn/LessonSlideStack";
-import { fetchApprovedPictures } from "@/lib/pictures";
+import { audioFirstPictures } from "@/lib/pictures";
+import { completeLesson } from "@/components/learn/LessonSlides";
 import type { PictureRef } from "@/lib/pictures";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useQuestionScout, type ScoutedQuestion } from "@/hooks/useQuestionScout";
@@ -627,8 +628,10 @@ export default function ReviewPage() {
       // response is now stale and would otherwise show the wrong KU's lesson.
       if (currentIndexRef.current !== requestedIndex) return;
       if (res.ok) {
-        const data = await res.json() as Lesson;
-        const pictures = currentItem.facet.facetType === "picture-choice" ? await fetchApprovedPictures(currentItem.facet.kuId) : [];
+        const [data, pictures] = await Promise.all([
+          completeLesson(await res.json() as Lesson, currentItem.facet.kuId),
+          audioFirstPictures(currentItem.facet.kuId),
+        ]);
         if (currentIndexRef.current !== requestedIndex) return;
         setLessonPictures(pictures);
         setLessonForReview(data);

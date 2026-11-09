@@ -484,7 +484,16 @@ export class LessonsService {
     return { success: true };
   }
 
-  /** The global lesson for a KU (lessons are shared; learners don't have their own copies). */
+  /**
+   * The lesson a KU's review sequence is built from: a Kanji's comes live from Kanji Alive (Kanji
+   * lessons are never stored), everything else is the stored global lesson. Null if there isn't one.
+   */
+  async lessonForSequence(uid: string, ku: KnowledgeUnit & { id: string }): Promise<Lesson | null> {
+    if (ku.type === 'Kanji') return this.kanjiService.getKanjiDetails(uid, ku.content, ku.id);
+    return this.findByKuId(ku.id);
+  }
+
+  /** The stored global lesson for a KU (lessons are shared; learners don't have their own copies). */
   async findByKuId(kuId: string): Promise<Lesson | null> {
     const lessonDoc = await this.db.collection(LESSONS_COLLECTION).doc(kuId).get();
     if (!lessonDoc.exists) return null;

@@ -2,31 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { KnowledgeUnit, Lesson, VocabLesson, VocabKnowledgeUnit, KanjiLesson, GrammarLesson } from "@/types";
+import { KnowledgeUnit, VocabLesson, VocabKnowledgeUnit, KanjiLesson, GrammarLesson } from "@/types";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import KuMetaTags from "@/components/lessons/KuMetaTags";
 import LessonSlideStack from "@/components/learn/LessonSlideStack";
-import { LoadedItem } from "@/components/learn/LessonSlides";
+import { LoadedItem, fetchLesson } from "@/components/learn/LessonSlides";
 import { FuriganaText } from "@/components/FuriganaText";
 import { buildFuriganaMarkup, stripFurigana } from "@/lib/furigana";
-import { fetchApprovedPictures } from "@/lib/pictures";
+import { audioFirstPictures } from "@/lib/pictures";
 import { apiFetch } from "@/lib/api-client";
 
 type Facet = { facetType: string };
 type Scenario = { id: string; title: string; sourceContextSentence?: string };
-
-/** Kanji lessons come from Kanji Alive; Vocab and Grammar lessons from the lesson store. */
-async function loadLesson(ku: KnowledgeUnit): Promise<Lesson> {
-  const res = ku.type === "Kanji"
-    ? await apiFetch(`/api/kanji/details?char=${encodeURIComponent(ku.content)}&kuId=${ku.id}`)
-    : await apiFetch("/api/lessons/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kuId: ku.id }),
-      });
-  if (!res.ok) throw new Error("Couldn't load the lesson");
-  return (await res.json()) as Lesson;
-}
 
 /**
  * A learning item's lesson: its slides on one page (the same slides Start Learning shows),
@@ -63,16 +50,15 @@ export default function LearnItemPage() {
         if (!kuRes.ok) throw new Error(kuRes.status === 404 ? "Learning item not found." : "Couldn't load the learning item");
         const kuData = (await kuRes.json()) as KnowledgeUnit;
         setKu(kuData);
+        const item = { kuId: kuData.id, content: kuData.content, type: kuData.type };
         const [lesson, itemFacets, scenarioRes] = await Promise.all([
-          loadLesson(kuData),
+          fetchLesson(item, new AbortController().signal),
           loadFacets(kuData.id),
           apiFetch(`/api/scenarios?sourceKuId=${kuData.id}`),
         ]);
-        // An audio-first word (its cards include a picture card) is shown as Start Learning
-        // teaches it: picture and sound, no kanji.
-        const audioFirst = kuData.type === "Vocab" && itemFacets.some((f) => f.facetType === "picture-choice");
-        const pictures = audioFirst ? await fetchApprovedPictures(kuData.id) : [];
-        setLoaded({ item: { kuId: kuData.id, content: kuData.content, type: kuData.type }, lesson, ...(pictures.length ? { pictures } : {}) });
+        // An audio-first word is shown as Start Learning teaches it: picture and sound, no kanji.
+        const pictures = kuData.type === "Vocab" ? await audioFirstPictures(kuData.id, itemFacets) : [];
+        setLoaded({ item, lesson, ...(pictures.length ? { pictures } : {}) });
         if (scenarioRes.ok) {
           const list = (await scenarioRes.json()) as Scenario[];
           setScenarios(Object.fromEntries(list.filter((s) => s.sourceContextSentence).map((s) => [s.sourceContextSentence!, s])));
@@ -94,7 +80,8 @@ export default function LearnItemPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kuId: ku.id, alreadyKnown }),
       });
-      if (!res.ok) throw new Error("Couldn't add it to your reviews");
+      const result = res.ok ? ((await res.json()) as { facetsCreated?: number }) : null;
+      if (!result || !result.facetsCreated) throw new Error("Couldn't add it to your reviews");
       await loadFacets(ku.id);
       window.dispatchEvent(new Event("refreshStats"));
     } catch (e: any) {
@@ -133,19 +120,23 @@ export default function LearnItemPage() {
   };
 
   const lesson = loaded?.lesson;
+  // Audio-first: the word is taught by picture and sound only, so nothing on the page shows it written.
+  const audioFirst = !!loaded?.pictures?.length;
   const title = !ku || !lesson
     ? "…"
-    : lesson.type === "Vocab"
+    : audioFirst
+      ? "New word · listen"
+      : lesson.type === "Vocab"
       ? <FuriganaText text={buildFuriganaMarkup(ku.content, (lesson as VocabLesson).component_kanji ?? [])} />
       : lesson.type === "Kanji"
         ? (lesson as KanjiLesson).kanji || ku.content
         : (lesson as GrammarLesson).title || ku.content;
-  const examples = lesson?.type === "Vocab" ? (lesson as VocabLesson).context_examples ?? [] : [];
+  const examples = lesson?.type === "Vocab" && !audioFirst ? (lesson as VocabLesson).context_examples ?? [] : [];
 
   return (
     <main className="container mx-auto max-w-2xl p-8">
       <header className="mb-8">
-        <h1 className={`font-bold text-shodo-ink mb-2 break-all ${lesson?.type === "Grammar" ? "text-4xl" : "text-6xl"}`}>
+        <h1 className={`font-bold text-shodo-ink mb-2 break-all ${audioFirst ? "text-3xl" : lesson?.type === "Grammar" ? "text-4xl" : "text-6xl"}`}>
           {title}
         </h1>
         {lesson?.type === "Vocab" && (

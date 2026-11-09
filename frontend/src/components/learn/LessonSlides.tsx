@@ -53,7 +53,7 @@ export function slideCount(loaded: LoadedItem): number {
   if (item.type === "Vocab" && lesson.type === "Vocab") {
     const vl = lesson as VocabLesson;
     const hasKanji = !vl.kanaOnly && (vl.component_kanji?.length ?? 0) > 0;
-    return 3 + (hasKanji ? 1 : 0) + vocabExampleSlides(vl).length;
+    return 3 + (hasKanji ? 1 : 0) + (hasReadingSlide(vl) ? 1 : 0) + vocabExampleSlides(vl).length;
   }
   if (item.type === "Kanji") return 4;
   if (item.type === "Grammar" && lesson.type === "Grammar") {
@@ -99,9 +99,16 @@ export async function fetchLesson(item: QueueItem, signal: AbortSignal): Promise
     signal,
   });
   if (!res.ok) throw new Error("Failed to generate lesson");
-  const lesson: Lesson = await res.json();
-  if (lesson.type === "Vocab") await ensureUsageLabels(lesson as VocabLesson, item.kuId);
-  if (lesson.type === "Grammar") await ensureGrammarFurigana(lesson as GrammarLesson, item.kuId);
+  return completeLesson(await res.json(), item.kuId);
+}
+
+/**
+ * Fills in what an older stored lesson may lack before it's shown (Vocab usage labels, Grammar
+ * readings). fetchLesson does this; call it yourself if you fetched the lesson another way.
+ */
+export async function completeLesson(lesson: Lesson, kuId: string): Promise<Lesson> {
+  if (lesson.type === "Vocab") await ensureUsageLabels(lesson as VocabLesson, kuId);
+  if (lesson.type === "Grammar") await ensureGrammarFurigana(lesson as GrammarLesson, kuId);
   return lesson;
 }
 
@@ -172,13 +179,22 @@ export async function fetchLessonWithRetry(item: QueueItem): Promise<Lesson> {
 
 // ─── Audio ──────────────────────────────────────────────────────────────────
 
+/** Spoken audio already fetched, by text, shared by every lesson on the page (survives remounts). */
+const audioCache: Record<string, string> = {};
+
 export function useLessonAudio() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioCache = useRef<Record<string, string>>({});
+
+  /** Plays `text`; a play the browser refuses (autoplay before any click) is ignored. */
+  const play = (url: string) => {
+    if (!audioRef.current) return;
+    audioRef.current.src = url;
+    audioRef.current.play().catch(() => {});
+  };
 
   const playAudio = useCallback(async (text: string) => {
-    if (audioCache.current[text]) {
-      if (audioRef.current) { audioRef.current.src = audioCache.current[text]; audioRef.current.play(); }
+    if (audioCache[text]) {
+      play(audioCache[text]);
       return;
     }
     try {
@@ -189,8 +205,8 @@ export function useLessonAudio() {
       });
       if (res.ok) {
         const url = URL.createObjectURL(await res.blob());
-        audioCache.current[text] = url;
-        if (audioRef.current) { audioRef.current.src = url; audioRef.current.play(); }
+        audioCache[text] = url;
+        play(url);
       }
     } catch { /* non-critical */ }
   }, []);
@@ -227,10 +243,10 @@ function PictureFrame({ picture }: { picture: PictureRef }) {
 }
 
 /** Audio-first: the word as picture + sound, with the English meaning as a small caption. */
-function PictureWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (text: string) => void }) {
+function PictureWordSlide({ loaded, onAudio, autoPlay }: { loaded: LoadedItem; onAudio: (text: string) => void; autoPlay: boolean }) {
   const vl = loaded.lesson as VocabLesson;
   // biome-ignore lint/correctness/useExhaustiveDependencies: play once when the slide opens
-  useEffect(() => { onAudio(vl.reading); }, []);
+  useEffect(() => { if (autoPlay) onAudio(vl.reading); }, []);
   return (
     <div className="w-full flex flex-col items-center gap-5 text-center">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">New word · listen</span>
@@ -247,14 +263,16 @@ function PictureExampleSlide({
   example,
   showUsage,
   onAudio,
+  autoPlay,
 }: {
   picture: PictureRef;
   example?: NonNullable<VocabLesson["context_examples"]>[number];
   showUsage: boolean;
   onAudio: (text: string) => void;
+  autoPlay: boolean;
 }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: play once when the slide opens
-  useEffect(() => { if (example) onAudio(stripFurigana(example.sentence)); }, []);
+  useEffect(() => { if (autoPlay && example) onAudio(stripFurigana(example.sentence)); }, []);
   return (
     <div className="w-full flex flex-col items-center gap-5 text-center">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">
@@ -271,9 +289,10 @@ function PictureExampleSlide({
   );
 }
 
-function VocabWordSlide({ loaded, onAudio }: { loaded: LoadedItem; onAudio: (text: string) => void }) {
+function VocabWordSlide({ loaded, onAudio, autoPlay }: { loaded: LoadedItem; onAudio: (text: string) => void; autoPlay: boolean }) {
   const vl = loaded.lesson as VocabLesson;
-  useEffect(() => { onAudio(vl.reading); }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: play once when the slide opens
+  useEffect(() => { if (autoPlay) onAudio(vl.reading); }, []);
   return (
     <div className="w-full flex flex-col items-center justify-center gap-6 text-center">
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">New Vocabulary</span>
@@ -341,6 +360,20 @@ function VocabMeaningSlide({ loaded }: { loaded: LoadedItem }) {
   );
 }
 
+/** Why the word is read the way it is (rendaku, irregular readings), when the lesson explains it. */
+function VocabReadingSlide({ loaded }: { loaded: LoadedItem }) {
+  const vl = loaded.lesson as VocabLesson;
+  return (
+    <div className="flex flex-col gap-6 max-w-2xl mx-auto">
+      <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">Reading</span>
+      <div className="text-4xl font-bold text-shodo-ink">{loaded.item.content} <span className="text-3xl font-normal text-shodo-ink-light">{vl.reading}</span></div>
+      <p className="text-lg text-shodo-ink-light leading-relaxed">{vl.reading_explanation}</p>
+    </div>
+  );
+}
+
+const hasReadingSlide = (vl: VocabLesson) => !!vl.reading_explanation?.trim();
+
 function VocabDefinitionsSlide({ loaded }: { loaded: LoadedItem }) {
   const vl = loaded.lesson as VocabLesson;
   return (
@@ -373,7 +406,11 @@ function KanjiCharacterSlide({ loaded }: { loaded: LoadedItem }) {
       <span className="text-xs font-semibold uppercase tracking-widest text-shodo-ink-faint">New Kanji</span>
       <div className="text-9xl font-bold text-shodo-stamp-red leading-none">{loaded.item.content}</div>
       <div className="text-2xl text-shodo-ink-light">{kl.meaning}</div>
-      <div className="text-sm text-shodo-ink-faint">{kl.strokeCount} strokes</div>
+      <div className="text-sm text-shodo-ink-faint">
+        {kl.strokeCount} strokes
+        {kl.radical?.character && <> · radical {kl.radical.character}{kl.radical.meaning ? ` (${kl.radical.meaning})` : ""}</>}
+      </div>
+      {kl.mnemonic_meaning && <p className="max-w-xl text-lg text-shodo-ink-light leading-relaxed">{kl.mnemonic_meaning}</p>}
     </div>
   );
 }
@@ -534,21 +571,26 @@ function GrammarNotesSlide({ loaded }: { loaded: LoadedItem }) {
   );
 }
 
-export function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text: string) => void) {
+/**
+ * One slide. `autoPlay` (default true): word and sentence slides play their audio when they open,
+ * which suits the one-at-a-time slideshow; the stacked view passes false (every slide opens at once).
+ */
+export function renderSlide(loaded: LoadedItem, slideIdx: number, onAudio: (text: string) => void, { autoPlay = true }: { autoPlay?: boolean } = {}) {
   const { item, lesson } = loaded;
   if (isAudioFirst(loaded)) {
-    if (slideIdx === 0) return <PictureWordSlide loaded={loaded} onAudio={onAudio} />;
+    if (slideIdx === 0) return <PictureWordSlide loaded={loaded} onAudio={onAudio} autoPlay={autoPlay} />;
     const slides = audioFirstSlides(loaded);
     const s = slides[slideIdx - 1];
-    if (s) return <PictureExampleSlide key={slideIdx} picture={s.picture} example={s.example} showUsage={slides.length > 1} onAudio={onAudio} />;
+    if (s) return <PictureExampleSlide key={slideIdx} picture={s.picture} example={s.example} showUsage={slides.length > 1} onAudio={onAudio} autoPlay={autoPlay} />;
   }
   if (item.type === "Vocab" && lesson.type === "Vocab") {
     const vl = lesson as VocabLesson;
     const hasKanji = !vl.kanaOnly && (vl.component_kanji?.length ?? 0) > 0;
     let s = slideIdx;
-    if (s === 0) return <VocabWordSlide loaded={loaded} onAudio={onAudio} />;
+    if (s === 0) return <VocabWordSlide loaded={loaded} onAudio={onAudio} autoPlay={autoPlay} />;
     s--;
     if (hasKanji) { if (s === 0) return <VocabKanjiSlide loaded={loaded} />; s--; }
+    if (hasReadingSlide(vl)) { if (s === 0) return <VocabReadingSlide loaded={loaded} />; s--; }
     if (s === 0) return <VocabMeaningSlide loaded={loaded} />;
     if (s === 1) return <VocabDefinitionsSlide loaded={loaded} />;
     const exampleSlides = vocabExampleSlides(vl);

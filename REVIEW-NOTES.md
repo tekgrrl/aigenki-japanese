@@ -49,6 +49,9 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Lessons are shown as the Start Learning slides, all on one page** (the lesson page, the Review Lesson
   panel and the library lesson page; the owner's decision). So a Vocab lesson shows one example per
   usage, not every example, and a Grammar point shows no "where you met it" card. That's intended.
+  (The slides do include the Vocab reading explanation and the Kanji radical and meaning mnemonic.)
+- **In the stacked view nothing plays by itself**: every slide opens at once, so the learner taps play.
+- **`user-grammar-lessons` is written but unread** (kept for a future "where you met it" card).
 - **Learners can't edit lessons or choose their card types.** The per-user overlay (`user-lessons`) is
   retired, and the old docs are left in place, unread.
 
