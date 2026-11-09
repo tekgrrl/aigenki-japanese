@@ -195,8 +195,15 @@ export function useQuestionScout(
     bump();
   }, [reviewQueue, bump]);
 
+  /** Read-only: the item's question isn't ready yet (not fetched, or still loading). Starts nothing. */
+  const isPending = (facetId: string): boolean => {
+    const entry = entries.current.get(facetId);
+    return !entry || entry.status === "loading";
+  };
+
   return {
     ensure,
+    isPending,
     retry,
     park,
     markSeen,
