@@ -235,19 +235,26 @@ export default function ReviewPage() {
   };
 
   // --- Data Fetching ---
+  // Only the latest fetch may set the queue. Two can overlap (React StrictMode runs the mount
+  // effect twice in dev; a Review-tab reload during a load): each shuffles differently, so a
+  // late one would swap the card on screen for another.
+  const fetchSeq = useRef(0);
   const fetchDueItems = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     try {
       setIsLoading(true);
       setError(null);
       const response = await apiFetch("/api/reviews/facets?due=true");
       if (!response.ok) throw new Error("Failed to fetch due review items");
       const data: ReviewItem[] = await response.json();
+      if (seq !== fetchSeq.current) return;
       setReviewQueue(shuffleArray(data.map(asPresented)));
     } catch (err) {
+      if (seq !== fetchSeq.current) return;
       if (err instanceof Error) setError(err.message);
       else setError("An unknown error occurred");
     } finally {
-      setIsLoading(false);
+      if (seq === fetchSeq.current) setIsLoading(false);
     }
   }, []);
 
