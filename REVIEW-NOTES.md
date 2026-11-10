@@ -60,6 +60,9 @@ if a change actually breaks the stated intent. New decisions get added here as t
   Learning serves **only** those, at most 10 per session, oldest first, with **no** grammar/vocab
   quotas and no pictured-word priority. That's the owner's spec. The quota mix applies only when
   nothing is waiting.
+- **The quota mix offers only new items.** A KU the user has a UKU for is never offered there, even
+  with no facets: a UKU that isn't `learning` and has no facets is a stale record (e.g. facets deleted
+  by hand), not a lesson. The old "enrolled but not started" path that served those was removed.
 - `returnToLessonsAsAudioFirst` writes `status: 'learning'` **explicitly**, even though
   `recomputeAndCache` derives the same value straight afterwards. That's intentional, so the intent
   is stated rather than left to a side effect.

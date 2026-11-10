@@ -69,22 +69,19 @@ describe('getQueue: Start Learning services the waiting queue first', () => {
 });
 
 describe('getQueue: quota mix when nothing is waiting', () => {
-  it('serves up to 3 Grammar then 7 Vocab/Kanji, enrolled-not-started first, skipping anything started', async () => {
+  it('serves 3 new Grammar then 7 new Vocab/Kanji, never offering a stale or started record', async () => {
     const { db, service, uku, ku } = setup();
     await db.collection('users').doc(UID).set({ preferences: { jlptLevel: 'N5' } });
     for (let i = 0; i < 5; i++) await ku(`g${i}`, 'Grammar', `g${i}`);
     for (let i = 0; i < 10; i++) await ku(`v${i}`, 'Vocab', `v${i}`);
-    await uku('g4', 'reviewing', 1); // enrolled, no facets: comes first
-    await uku('v9', 'reviewing', 1); // enrolled, no facets: comes first
-    await uku('v0', 'reviewing', 1); // started (has a facet): skipped
-    await db.collection('users').doc(UID).collection(REVIEW_FACETS_COLLECTION).doc('f').set({ kuId: 'v0' });
+    await uku('g0', 'reviewing', 1); // stale record (no facets, not learning): not offered
+    await uku('v0', 'mastered', 1);  // stale record: not offered
+    await uku('v1', 'reviewing', 1); // started (has a facet): not offered
+    await db.collection('users').doc(UID).collection(REVIEW_FACETS_COLLECTION).doc('f').set({ kuId: 'v1' });
 
     const q = (await service.getQueue(UID)).map(i => i.kuId);
 
-    expect(q).toHaveLength(10);
-    expect(q.slice(0, 3)).toEqual(['g4', 'g0', 'g1']);
-    expect(q[3]).toBe('v9');
-    expect(q).not.toContain('v0');
+    expect(q).toEqual(['g1', 'g2', 'g3', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']);
   });
 
   it('counts a kanji-component facet as starting both the component kanji and its parent word', async () => {

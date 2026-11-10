@@ -45,6 +45,9 @@ export class LearningQueueService {
     const prefs = await this.userService.getPreferences(uid);
     const jlptLevel = prefs.jlptLevel;
 
+    // Anything the user has started or has a UKU for is never offered as new. A UKU with no
+    // facets that isn't 'learning' is a stale record (e.g. its facets were deleted by hand),
+    // not a lesson to serve.
     const ukuKuIds = ukus.map(u => u.kuId as string).filter(Boolean);
     const seenKuIds = new Set([...started, ...ukuKuIds]);
 
@@ -80,7 +83,6 @@ export class LearningQueueService {
       }
     }
     const pictured = new Set(picturedDocs.map(d => d.id));
-    // Corpus items exclude everything seen, so they never overlap the enrolled items below.
     const vocabKanjiItems = [...picturedDocs, ...vocabKanjiSnap.docs.filter(d => !pictured.has(d.id))]
       .filter(d => !seenKuIds.has(d.id))
       .slice(0, 7)
@@ -91,36 +93,7 @@ export class LearningQueueService {
       .slice(0, 3)
       .map(toItem);
 
-    // ── Path 2: Enrolled-but-not-started queue ────────────────────────────
-    // KUs the user enrolled (via a scenario, or the "help me learn this" flag
-    // flow) but hasn't started in review yet (UKU exists, no facets). Covers
-    // all types, not just Grammar — a flagged Vocab word with zero facets
-    // would otherwise never surface here at all (seenKuIds already excludes
-    // it from the fresh-corpus pool above).
-    const enrolledNotStarted = ukuKuIds.filter(id => !started.has(id));
-
-    let enrolledGrammarItems: QueueItem[] = [];
-    let enrolledVocabKanjiItems: QueueItem[] = [];
-    if (enrolledNotStarted.length > 0) {
-      const chunk = enrolledNotStarted.slice(0, 30);
-      const enrolledSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
-        .where('__name__', 'in', chunk)
-        .get();
-      enrolledGrammarItems = enrolledSnap.docs
-        .filter(d => d.data().type === 'Grammar')
-        .slice(0, 3)
-        .map(toItem);
-      enrolledVocabKanjiItems = enrolledSnap.docs
-        .filter(d => d.data().type === 'Vocab' || d.data().type === 'Kanji')
-        .slice(0, 3)
-        .map(toItem);
-    }
-
-    // Enrolled grammar first, then corpus grammar, then enrolled vocab/kanji, then corpus vocab/kanji
-    const grammarItems = [...enrolledGrammarItems, ...grammarCorpusItems].slice(0, 3);
-    const combinedVocabKanjiItems = [...enrolledVocabKanjiItems, ...vocabKanjiItems].slice(0, 7);
-
-    return [...grammarItems, ...combinedVocabKanjiItems];
+    return [...grammarCorpusItems, ...vocabKanjiItems];
   }
 
   /**
@@ -128,7 +101,7 @@ export class LearningQueueService {
    * the word whose sequence it belongs to (source.id) and the content it targets (kuId). These
    * differ for Kanji-Component-* facets, which target the component kanji's own kuId while being
    * gated by the parent Vocab word's source.id (see ReviewProgressService.getFacetsAtStage).
-   * Counting only one leaves the other looking "enrolled but never started" forever.
+   * Counting only one leaves the other looking unstarted, so it would be offered again.
    */
   private async startedKuIds(uid: string): Promise<Set<string>> {
     const started = new Set<string>();

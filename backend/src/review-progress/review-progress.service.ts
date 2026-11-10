@@ -233,7 +233,7 @@ export class ReviewProgressService {
 
   /**
    * Admin tool: deletes the word's facets but keeps it enrolled at stage 0 with no variant,
-   * so it reappears in Start Learning ("enrolled but not started") and is relearned with
+   * waiting (status 'learning'), so Start Learning serves it again and it's relearned with
    * audio-first slides, then enrolled audio-first by chooseVariant. SRS progress is lost.
    */
   async returnToLessonsAsAudioFirst(uid: string, kuId: string): Promise<{ facetsDeleted: number }> {
