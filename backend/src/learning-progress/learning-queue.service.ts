@@ -8,6 +8,14 @@ import { isUsagePicture } from '../pictures/pictures.service';
 /** Start Learning serves at most this many waiting items per session; the rest come next time. */
 const WAITING_PER_SESSION = 10;
 
+/** One item Start Learning offers. */
+export type QueueItem = { kuId: string; content: string; type: string };
+
+const toItem = (d: FirebaseFirestore.DocumentSnapshot): QueueItem =>
+  ({ kuId: d.id, content: d.data()?.content as string, type: d.data()?.type as string });
+
+const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+
 /**
  * Decides what Start Learning teaches next: the user's waiting items first, otherwise a mix of
  * new corpus items at their level. A learning-progress concern, so it lives here rather than in
@@ -21,39 +29,24 @@ export class LearningQueueService {
     private readonly userService: UserService,
   ) {}
 
-  async getQueue(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
+  async getQueue(uid: string): Promise<QueueItem[]> {
+    // The user's facets and UKUs are read once and shared by both paths.
+    const [started, ukus] = await Promise.all([
+      this.startedKuIds(uid),
+      this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get().then(s => s.docs.map(d => d.data())),
+    ]);
+
     // Start Learning services the user's own queue first: everything already waiting
     // (status 'learning' — the "Available lessons" count), and only that. New corpus
     // items are added only when nothing is waiting.
-    const waiting = await this.getWaitingLessons(uid);
+    const waiting = await this.getWaitingLessons(ukus, started);
     if (waiting.length > 0) return waiting;
 
     const prefs = await this.userService.getPreferences(uid);
     const jlptLevel = prefs.jlptLevel;
 
-    const facetsCol = this.facetStore.query(uid);
-
-    const [facetsSnap, ukuSnap] = await Promise.all([
-      facetsCol.get(),
-      this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get(),
-    ]);
-
-    // Separate facet KU ids from UKU KU ids so we can compute enrolled-but-not-started.
-    // A facet can be "started" for two different KUs at once: the word whose sequence
-    // it belongs to (source.id) and the specific content it targets (kuId) — these
-    // differ for Kanji-Component-* facets, which target the component kanji's own kuId
-    // while being gated by the parent Vocab word's source.id (see
-    // ReviewProgressService.getFacetsAtStage). Registering only one of the two
-    // incorrectly leaves the other looking "enrolled but never started" forever —
-    // track both so neither the parent word nor the component kanji gets stuck.
-    const facetKuIds = new Set<string>();
-    facetsSnap.docs.forEach(d => {
-      const data = d.data();
-      if (data.kuId) facetKuIds.add(data.kuId as string);
-      if (data.source?.id) facetKuIds.add(data.source.id as string);
-    });
-    const ukuKuIds = ukuSnap.docs.map(d => d.data().kuId as string).filter(Boolean);
-    const seenKuIds = new Set([...facetKuIds, ...ukuKuIds]);
+    const ukuKuIds = ukus.map(u => u.kuId as string).filter(Boolean);
+    const seenKuIds = new Set([...started, ...ukuKuIds]);
 
     // ── Path 1a: Vocab / Kanji corpus ─────────────────────────────────────
     // ── Path 1b: Grammar corpus ────────────────────────────────────────────
@@ -87,26 +80,27 @@ export class LearningQueueService {
       }
     }
     const pictured = new Set(picturedDocs.map(d => d.id));
+    // Corpus items exclude everything seen, so they never overlap the enrolled items below.
     const vocabKanjiItems = [...picturedDocs, ...vocabKanjiSnap.docs.filter(d => !pictured.has(d.id))]
       .filter(d => !seenKuIds.has(d.id))
       .slice(0, 7)
-      .map(d => ({ kuId: d.id, content: d.data()?.content as string, type: d.data()?.type as string }));
+      .map(toItem);
 
     const grammarCorpusItems = grammarCorpusSnap.docs
       .filter(d => !seenKuIds.has(d.id))
       .slice(0, 3)
-      .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+      .map(toItem);
 
     // ── Path 2: Enrolled-but-not-started queue ────────────────────────────
     // KUs the user enrolled (via a scenario, or the "help me learn this" flag
     // flow) but hasn't started in review yet (UKU exists, no facets). Covers
     // all types, not just Grammar — a flagged Vocab word with zero facets
     // would otherwise never surface here at all (seenKuIds already excludes
-    // it from the fresh-corpus pool below).
-    const enrolledNotStarted = ukuKuIds.filter(id => !facetKuIds.has(id));
+    // it from the fresh-corpus pool above).
+    const enrolledNotStarted = ukuKuIds.filter(id => !started.has(id));
 
-    let enrolledGrammarItems: { kuId: string; content: string; type: string }[] = [];
-    let enrolledVocabKanjiItems: { kuId: string; content: string; type: string }[] = [];
+    let enrolledGrammarItems: QueueItem[] = [];
+    let enrolledVocabKanjiItems: QueueItem[] = [];
     if (enrolledNotStarted.length > 0) {
       const chunk = enrolledNotStarted.slice(0, 30);
       const enrolledSnap = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION)
@@ -115,64 +109,57 @@ export class LearningQueueService {
       enrolledGrammarItems = enrolledSnap.docs
         .filter(d => d.data().type === 'Grammar')
         .slice(0, 3)
-        .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+        .map(toItem);
       enrolledVocabKanjiItems = enrolledSnap.docs
         .filter(d => d.data().type === 'Vocab' || d.data().type === 'Kanji')
         .slice(0, 3)
-        .map(d => ({ kuId: d.id, content: d.data().content as string, type: d.data().type as string }));
+        .map(toItem);
     }
 
     // Enrolled grammar first, then corpus grammar, then enrolled vocab/kanji, then corpus vocab/kanji
-    const grammarItems = [
-      ...enrolledGrammarItems,
-      ...grammarCorpusItems.filter(g => !enrolledGrammarItems.some(e => e.kuId === g.kuId)),
-    ].slice(0, 3);
+    const grammarItems = [...enrolledGrammarItems, ...grammarCorpusItems].slice(0, 3);
+    const combinedVocabKanjiItems = [...enrolledVocabKanjiItems, ...vocabKanjiItems].slice(0, 7);
 
-    const combinedVocabKanjiItems = [
-      ...enrolledVocabKanjiItems,
-      ...vocabKanjiItems.filter(v => !enrolledVocabKanjiItems.some(e => e.kuId === v.kuId)),
-    ].slice(0, 7);
-
-    return [...grammarItems, ...combinedVocabKanjiItems].slice(0, 10);
+    return [...grammarItems, ...combinedVocabKanjiItems];
   }
 
   /**
-   * The user's KUs waiting for a lesson, oldest enrolment first, at most WAITING_PER_SESSION.
-   * Waiting = UKU status 'learning' AND no facets yet (by kuId or source.id, as in Path 2
-   * below). The status is a cache: a stale 'learning' on a word that already has facets
-   * (e.g. written before kanji-component facets counted toward their word) would otherwise
-   * be served every session, since enrollment skips a word that's already started.
-   * Deleted KUs are skipped.
+   * KU ids the user has started, i.e. that have at least one facet. A facet counts for two KUs:
+   * the word whose sequence it belongs to (source.id) and the content it targets (kuId). These
+   * differ for Kanji-Component-* facets, which target the component kanji's own kuId while being
+   * gated by the parent Vocab word's source.id (see ReviewProgressService.getFacetsAtStage).
+   * Counting only one leaves the other looking "enrolled but never started" forever.
    */
-  private async getWaitingLessons(uid: string): Promise<{ kuId: string; content: string; type: string }[]> {
-    const ukuSnap = await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION)
-      .where('status', '==', 'learning')
-      .get();
-    if (ukuSnap.empty) return [];
-
-    const facetsCol = this.facetStore.query(uid);
+  private async startedKuIds(uid: string): Promise<Set<string>> {
     const started = new Set<string>();
-    (await facetsCol.select('kuId', 'source').get()).docs.forEach(d => {
+    (await this.facetStore.query(uid).select('kuId', 'source').get()).docs.forEach(d => {
       const f = d.data();
       if (f.kuId) started.add(f.kuId as string);
       if (f.source?.id) started.add(f.source.id as string);
     });
+    return started;
+  }
 
-    const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
-    const candidates = ukuSnap.docs.map(d => d.data())
-      .filter(u => u.kuId && !started.has(u.kuId as string))
+  /**
+   * The user's KUs waiting for a lesson, oldest enrolment first, at most WAITING_PER_SESSION.
+   * Waiting = UKU status 'learning' AND not started (see startedKuIds). The status is a cache:
+   * a stale 'learning' on a word that already has facets (e.g. written before kanji-component
+   * facets counted toward their word) would otherwise be served every session, since
+   * enrollment skips a word that's already started. Deleted KUs are skipped.
+   */
+  private async getWaitingLessons(ukus: FirebaseFirestore.DocumentData[], started: Set<string>): Promise<QueueItem[]> {
+    const candidates = ukus
+      .filter(u => u.status === 'learning' && u.kuId && !started.has(u.kuId as string))
       .sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
 
     // Read in chunks until enough live KUs are found: a run of UKUs whose KU was deleted
     // must not hide newer waiting words.
     const kuCol = this.db.collection(KNOWLEDGE_UNITS_COLLECTION);
-    const found: { kuId: string; content: string; type: string }[] = [];
+    const found: QueueItem[] = [];
     for (let i = 0; i < candidates.length && found.length < WAITING_PER_SESSION; i += 50) {
       const chunk = candidates.slice(i, i + 50);
       const kuDocs = await this.db.getAll(...chunk.map(u => kuCol.doc(u.kuId as string)));
-      for (const d of kuDocs) {
-        if (d.exists) found.push({ kuId: d.id, content: d.data()!.content as string, type: d.data()!.type as string });
-      }
+      found.push(...kuDocs.filter(d => d.exists).map(toItem));
     }
     return found.slice(0, WAITING_PER_SESSION);
   }
