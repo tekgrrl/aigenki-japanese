@@ -137,7 +137,14 @@ function groupSegments(segments: PatternSegment[]): PatternSegment[][] {
 interface GrammarPatternDisplayProps {
   pattern: string;
   className?: string;
+  /** "slide" (default): big centred pills for the lesson slides. "compact": smaller, left-aligned pills for body-size text such as cards. */
+  size?: "slide" | "compact";
 }
+
+const PILL_SIZE_CLASSES = {
+  slide: "mx-1.5 px-5 py-2 text-2xl",
+  compact: "mx-1 px-2.5 py-0.5 text-sm",
+} as const;
 
 /**
  * Renders a Grammar KU's pattern string. If it uses the {Token} notation from
@@ -145,7 +152,7 @@ interface GrammarPatternDisplayProps {
  * (old [Bracket] style, or a KU not yet curated into the new notation) it renders
  * exactly as plain text, unchanged.
  */
-export default function GrammarPatternDisplay({ pattern, className }: GrammarPatternDisplayProps) {
+export default function GrammarPatternDisplay({ pattern, className, size = "slide" }: GrammarPatternDisplayProps) {
   const usesNotation = /\{[^}]+\}/.test(pattern);
   // "/" separates alternative forms (e.g. plain vs. polite negative-past) that are too
   // long to share one line — force a line break there instead of letting the browser
@@ -226,7 +233,7 @@ export default function GrammarPatternDisplay({ pattern, className }: GrammarPat
           <div
             key={li}
             ref={el => { viewportRefs.current[li] = el; }}
-            className="w-full flex justify-center overflow-hidden"
+            className={`w-full flex ${size === "compact" ? "justify-start" : "justify-center"} overflow-hidden`}
           >
             <div
               ref={el => { contentRefs.current[li] = el; }}
@@ -242,7 +249,7 @@ export default function GrammarPatternDisplay({ pattern, className }: GrammarPat
                     return (
                       <span
                         key={i}
-                        className={`inline-block mx-1.5 px-5 py-2 rounded-full text-2xl align-middle font-bold ${style?.className ?? UNMAPPED_PILL_CLASSNAME}`}
+                        className={`inline-block ${PILL_SIZE_CLASSES[size]} rounded-full align-middle font-bold ${style?.className ?? UNMAPPED_PILL_CLASSNAME}`}
                       >
                         {style?.label ?? segment.value}
                       </span>

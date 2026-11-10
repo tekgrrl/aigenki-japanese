@@ -8,6 +8,7 @@ import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { Volume2, Mic, MicOff } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import ScenePicture from "@/components/scenarios/ScenePicture";
+import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
 
 const API_BASE_URL = "http://localhost:3000/api";
 
@@ -939,7 +940,7 @@ export default function ScenarioPage({
                       {badge.text}
                     </div>
                   )}
-                  <div className="text-xl font-bold text-slate-800">{g.content}</div>
+                  <GrammarPatternDisplay pattern={g.content} size="compact" className="text-xl font-bold text-slate-800" />
                   {g.title && <div className="text-sm text-slate-600 font-medium">{g.title}</div>}
                   {example?.japanese && <div className="mt-2 text-sm text-slate-500">{example.japanese}</div>}
                 </div>
