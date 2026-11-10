@@ -1,6 +1,5 @@
 import { LessonsService } from './lessons.service';
 import { FakeFirestore } from '../testing/fake-firestore';
-import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
 
 describe('LessonsService.lessonForSequence', () => {
@@ -8,7 +7,7 @@ describe('LessonsService.lessonForSequence', () => {
     const db = new FakeFirestore();
     const kanjiLesson = { type: 'Kanji', kanji: '川', meaning: 'river', onyomi: ['セン'], kunyomi: ['かわ'] };
     const kanji = { getKanjiDetails: jest.fn().mockResolvedValue(kanjiLesson) };
-    const service = new LessonsService(db as any, new FacetStore(db as any), {} as any, {} as any, {} as any, kanji as any, new UserService(db as any));
+    const service = new LessonsService(db as any, {} as any, {} as any, {} as any, kanji as any, new UserService(db as any));
     return { db, kanji, kanjiLesson, service };
   }
 

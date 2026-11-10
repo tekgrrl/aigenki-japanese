@@ -1,4 +1,4 @@
-import { LessonsService } from './lessons.service';
+import { LearningQueueService } from './learning-queue.service';
 import { FakeFirestore } from '../testing/fake-firestore';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
@@ -8,7 +8,7 @@ const at = (seconds: number) => ({ seconds, nanoseconds: 0 });
 
 function setup() {
   const db = new FakeFirestore();
-  const service = new LessonsService(db as any, new FacetStore(db as any), {} as any, {} as any, {} as any, {} as any, new UserService(db as any));
+  const service = new LearningQueueService(db as any, new FacetStore(db as any), new UserService(db as any));
   const uku = (kuId: string, status: string, createdMs: number) =>
     db.collection('users').doc(UID).collection('user-kus').doc(kuId).set({ kuId, status, createdAt: at(createdMs) });
   const ku = (id: string, type: string, content: string) =>
@@ -64,5 +64,25 @@ describe('getQueue: Start Learning services the waiting queue first', () => {
     await uku('v1', 'learning', 1);
     await uku('gone', 'learning', 2);
     expect(await service.getQueue(UID)).toEqual([{ kuId: 'v1', content: '川', type: 'Vocab' }]);
+  });
+});
+
+describe('getQueue: quota mix when nothing is waiting', () => {
+  it('serves up to 3 Grammar then 7 Vocab/Kanji, enrolled-not-started first, skipping anything started', async () => {
+    const { db, service, uku, ku } = setup();
+    await db.collection('users').doc(UID).set({ preferences: { jlptLevel: 'N5' } });
+    for (let i = 0; i < 5; i++) await ku(`g${i}`, 'Grammar', `g${i}`);
+    for (let i = 0; i < 10; i++) await ku(`v${i}`, 'Vocab', `v${i}`);
+    await uku('g4', 'reviewing', 1); // enrolled, no facets: comes first
+    await uku('v9', 'reviewing', 1); // enrolled, no facets: comes first
+    await uku('v0', 'reviewing', 1); // started (has a facet): skipped
+    await db.collection('users').doc(UID).collection('review-facets').doc('f').set({ kuId: 'v0' });
+
+    const q = (await service.getQueue(UID)).map(i => i.kuId);
+
+    expect(q).toHaveLength(10);
+    expect(q.slice(0, 3)).toEqual(['g4', 'g0', 'g1']);
+    expect(q[3]).toBe('v9');
+    expect(q).not.toContain('v0');
   });
 });
