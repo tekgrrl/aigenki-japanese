@@ -14,6 +14,8 @@ type Usage = UsageStates["usages"][number];
 interface Props {
   /** What to offer on one usage row (e.g. Generate / Upload, or "Use this"). */
   actions: (ku: KuHit, usage: Usage) => ReactNode;
+  /** Optional content shown under a usage's row (e.g. a brief editor). */
+  below?: (ku: KuHit, usage: Usage) => ReactNode;
   /** Bump to re-fetch the selected word's usage states (e.g. after starting a picture). */
   refreshKey?: number;
   compact?: boolean;
@@ -41,7 +43,7 @@ const STATE_STYLE: Record<UsageState, string> = {
  * Find a KU by id or content (Kanji never listed), then see a Vocab word's usages with
  * where each stands. The caller decides what each usage row offers.
  */
-export default function KuUsagePicker({ actions, refreshKey = 0, compact }: Props) {
+export default function KuUsagePicker({ actions, below, refreshKey = 0, compact }: Props) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<KuHit[] | null>(null);
   const [selected, setSelected] = useState<KuHit | null>(null);
@@ -213,6 +215,7 @@ export default function KuUsagePicker({ actions, refreshKey = 0, compact }: Prop
                       {actions(selected, u)}
                     </span>
                   </div>
+                  {below?.(selected, u)}
                   {shown?.file && (
                     <div className="mt-2 flex items-start gap-3">
                       {/* biome-ignore lint/performance/noImgElement: served by the backend from local disk */}
