@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenAI, FunctionDeclaration, FunctionCallingConfigMode, createPartFromFunctionResponse, Content } from '@google/genai';
+import { GoogleGenAI, FunctionDeclaration, FunctionCallingConfigMode, createPartFromFunctionResponse, Content, GenerateContentResponse } from '@google/genai';
 import { ApiLog, Lesson, ScenarioEvaluation } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
@@ -100,7 +100,7 @@ export class GeminiService implements OnModuleInit {
           },
         },
       });
-      const parsedJson = this.parseJson<{ result: "pass" | "fail"; explanation: string; usageId?: string; misspelled?: boolean }>(response.text);
+      const parsedJson = this.parseJson<{ result: "pass" | "fail"; explanation: string; usageId?: string; misspelled?: boolean }>(this.textOf(response));
       return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
     }).catch(error => { throw this.serverError(error); });
   }
@@ -124,7 +124,7 @@ export class GeminiService implements OnModuleInit {
           cachedContent: cachedContentName,
         }
       });
-      const lessonString = this.extractJsonObject(response?.text);
+      const lessonString = this.extractJsonObject(this.textOf(response));
       return { result: lessonString, responseData: { parsedJson: lessonString } };
     }).catch(error => { throw this.serverError(error); });
 
@@ -161,7 +161,7 @@ export class GeminiService implements OnModuleInit {
           ...(responseSchema ? { responseSchema: responseSchema as any } : {}),
         }
       });
-      const scenarioString = this.extractJsonObject(response?.text);
+      const scenarioString = this.extractJsonObject(this.textOf(response));
       return { result: this.parseJson<any>(scenarioString), responseData: { parsedJson: scenarioString } };
     }).catch(error => {
       this.logger.error('Gemini Service Error (Scenario):', error);
@@ -185,7 +185,7 @@ export class GeminiService implements OnModuleInit {
       },
     });
 
-    const parsed = this.parseJson<{ segments: string[] }>(response.text);
+    const parsed = this.parseJson<{ segments: string[] }>(this.textOf(response));
     return parsed.segments;
   }
 
@@ -223,9 +223,9 @@ export class GeminiService implements OnModuleInit {
         },
       });
 
-      if (!response.text) throw new Error('Empty response text from Gemini');
       // Returned unparsed: the caller parses and validates it.
-      return { result: response.text, responseData: { rawText: response.text, parsedJson: response.text } };
+      const text = this.textOf(response);
+      return { result: text, responseData: { rawText: text } };
     }).catch(error => { throw this.serverError(error); });
   }
 
@@ -268,7 +268,7 @@ export class GeminiService implements OnModuleInit {
           systemInstruction: { parts: [{ text: systemPrompt }] },
         },
       });
-      const parsedJson = this.parseJson<any>(response?.text);
+      const parsedJson = this.parseJson<any>(this.textOf(response));
       return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
     });
   }
@@ -341,8 +341,7 @@ export class GeminiService implements OnModuleInit {
         contents: [{ parts: [{ text: userMessage }] }],
         config: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.2 },
       });
-      const parsedJson = this.parseJson<unknown>(response.text);
-      if (!parsedJson) throw new Error('Empty response');
+      const parsedJson = this.parseJson<unknown>(this.textOf(response));
       return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
     }).catch(error => {
       this.logger.error(`Failed to build usages for ${vocab}`, error);
@@ -366,7 +365,7 @@ export class GeminiService implements OnModuleInit {
           temperature: 0.1,
         },
       });
-      const parsedJson = this.parseJson<{ annotated: string[] }>(response.text);
+      const parsedJson = this.parseJson<{ annotated: string[] }>(this.textOf(response));
       if (!Array.isArray(parsedJson.annotated) || parsedJson.annotated.length !== sentences.length) {
         throw new Error(`Expected ${sentences.length} annotated sentences, got ${parsedJson.annotated?.length}`);
       }
@@ -383,48 +382,63 @@ export class GeminiService implements OnModuleInit {
     requestData: ApiLog['requestData'],
     call: () => Promise<{ result: T; responseData: ApiLog['responseData'] }>,
   ): Promise<T> {
-    const logRef = await this.apilogService.startLog({
-      timestamp: Timestamp.now(),
-      route,
-      status: 'pending',
-      modelUsed: model,
-      requestData,
-    });
+    // A failed log write mustn't fail (or be blamed on) the Gemini call: run it unlogged.
+    const logRef = await this.apilogService
+      .startLog({ timestamp: Timestamp.now(), route, status: 'pending', modelUsed: model, requestData })
+      .catch(err => { this.logger.error(`Failed to start ${route} log`, err); return null; });
     const startTime = performance.now();
+    const elapsed = () => Math.round(performance.now() - startTime);
     try {
       const { result, responseData } = await call();
       if (logRef) {
         this.apilogService
-          .completeLog(logRef, { status: 'success', durationMs: performance.now() - startTime, responseData })
+          .completeLog(logRef, { status: 'success', durationMs: elapsed(), responseData })
           .catch(err => console.error(`Failed to update ${route} log`, err));
       }
       return result;
     } catch (error: unknown) {
       if (logRef) {
         this.apilogService
-          .completeLog(logRef, { status: 'error', durationMs: performance.now() - startTime, errorData: errorDataOf(error) })
+          .completeLog(logRef, { status: 'error', durationMs: elapsed(), errorData: errorDataOf(error) })
           .catch(err => console.error(`Failed to update ${route} log`, err));
       }
       throw error;
     }
   }
 
-  /** Parses a JSON response from Gemini; fails clearly when it's empty or not JSON. */
-  private parseJson<T>(text: string | undefined): T {
-    if (!text) throw new Error('Empty response text from Gemini');
+  /** The response's text; when there's none, says why (finish reason or block reason) instead of failing blind. */
+  private textOf(response: GenerateContentResponse | undefined): string {
+    if (response?.text) return response.text;
+    const finishReason = response?.candidates?.[0]?.finishReason;
+    const blockReason = response?.promptFeedback?.blockReason;
+    this.logger.error('Empty response text from Gemini', { finishReason, promptFeedback: response?.promptFeedback });
+    throw new Error(`Empty response text from Gemini (${finishReason ?? blockReason ?? 'no reason given'})`);
+  }
+
+  /**
+   * Parses a JSON object from Gemini. Bad JSON, or a `null`/non-object result, fails with a fixed
+   * message (callers may send it to the client); the model's text goes to the backend log only.
+   */
+  private parseJson<T>(text: string): T {
+    let parsed: unknown;
     try {
-      return JSON.parse(text) as T;
+      parsed = JSON.parse(text);
     } catch {
-      throw new Error(`Failed to parse AI JSON response: ${text.slice(0, 200)}`);
+      this.logger.error(`Failed to parse AI JSON response: ${text.slice(0, 200)}`);
+      throw new Error('Failed to parse AI JSON response');
     }
+    if (parsed === null || typeof parsed !== 'object') throw new Error('AI response was not a JSON object');
+    return parsed as T;
   }
 
   /** Cuts a response down to its outermost {...} object, dropping any text the model wrote around it. */
-  private extractJsonObject(text: string | undefined): string {
-    if (!text) throw new Error('AI response was empty.');
+  private extractJsonObject(text: string): string {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error(`AI response did not contain a valid JSON object: ${text.slice(0, 200)}`);
+    if (start === -1 || end < start) {
+      this.logger.error(`AI response did not contain a valid JSON object: ${text.slice(0, 200)}`);
+      throw new Error('AI response did not contain a valid JSON object.');
+    }
     return text.substring(start, end + 1);
   }
 
@@ -458,7 +472,7 @@ export class GeminiService implements OnModuleInit {
         contents: [{ parts: [{ text: userMessage }] }],
         config: { responseMimeType: 'application/json', responseSchema: PICTURE_BRIEF_SCHEMA, temperature: 0.4 },
       });
-      const parsedJson = this.parseJson<PictureBrief>(response.text);
+      const parsedJson = this.parseJson<PictureBrief>(this.textOf(response));
       return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
     });
   }
@@ -519,7 +533,7 @@ export class GeminiService implements OnModuleInit {
         contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: image.toString('base64') } }, { text: PICTURE_TEXT_CHECK_PROMPT }] }],
         config: { responseMimeType: 'application/json', responseSchema: PICTURE_TEXT_CHECK_SCHEMA, temperature: 0 },
       });
-      const parsedJson = this.parseJson<any>(response.text);
+      const parsedJson = this.parseJson<any>(this.textOf(response));
       return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
     });
   }
@@ -605,7 +619,7 @@ export class GeminiService implements OnModuleInit {
         },
       });
 
-      const result = this.parseJson<T>(finalResponse.text);
+      const result = this.parseJson<T>(this.textOf(finalResponse));
       this.logger.log(`[generateWithTools] result: ${JSON.stringify(result)}`);
       return { result, responseData: { toolCalls: toolCallLog, parsedJson: result } };
     }).catch(error => {
@@ -649,7 +663,7 @@ export class GeminiService implements OnModuleInit {
           },
         },
       });
-      const parsedJson = this.parseJson<{ message: string; speaker: string; correction?: string; sceneFinished?: boolean }>(response.text);
+      const parsedJson = this.parseJson<{ message: string; speaker: string; correction?: string; sceneFinished?: boolean }>(this.textOf(response));
       return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
     }).catch(error => {
       this.logger.error('Gemini Service Chat Error:', error);
@@ -696,7 +710,7 @@ export class GeminiService implements OnModuleInit {
           },
         },
       });
-      const parsedJson = this.parseJson<ScenarioEvaluation>(response.text);
+      const parsedJson = this.parseJson<ScenarioEvaluation>(this.textOf(response));
       return { result: parsedJson, responseData: { parsedJson } };
     }).catch(error => {
       this.logger.error("Scenario Evaluation Failed", error);
@@ -719,7 +733,7 @@ export class GeminiService implements OnModuleInit {
           temperature: 0.5,
         },
       });
-      const conceptString = this.extractJsonObject(response?.text);
+      const conceptString = this.extractJsonObject(this.textOf(response));
       return { result: conceptString, responseData: { rawText: conceptString.slice(0, 200) } };
     }).catch(error => {
       this.logger.error("Gemini generateConcept error:", error);

@@ -36,7 +36,7 @@ describe('GeminiService logging', () => {
     expect(completed()).toEqual(expect.objectContaining({
       status: 'success', responseData: { rawText: text, parsedJson: result },
     }));
-    expect(typeof completed().durationMs).toBe('number');
+    expect(Number.isInteger(completed().durationMs)).toBe(true);
   });
 
   it('logs the original error with its stack, then throws the caller-facing 500', async () => {
@@ -56,7 +56,7 @@ describe('GeminiService logging', () => {
 
     await expect(service.generateChatResponse('sys', 'hi')).rejects.toThrow('Failed to generate chat response');
     expect(completed()).toEqual(expect.objectContaining({
-      status: 'error', errorData: expect.objectContaining({ message: 'Empty response text from Gemini' }),
+      status: 'error', errorData: expect.objectContaining({ message: 'Empty response text from Gemini (no reason given)' }),
     }));
   });
 
@@ -82,5 +82,44 @@ describe('GeminiService logging', () => {
 
     expect(apilog.startLog).toHaveBeenCalledWith(expect.objectContaining({ route: '/concepts/generate', modelUsed: 'cm' }));
     expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({ model: 'cm' }));
+  });
+
+  it('rejects a JSON null evaluation instead of returning it as a success', async () => {
+    generateContent.mockResolvedValue({ text: 'null' });
+
+    await expect(service.evaluateAnswer('prompt', 'a', ['a'])).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(completed()).toEqual(expect.objectContaining({
+      status: 'error', errorData: expect.objectContaining({ message: 'AI response was not a JSON object' }),
+    }));
+  });
+
+  it("doesn't call a parse failure a network error, or send the model's text to the client", async () => {
+    generateContent.mockResolvedValue({ text: 'the network word, not json' });
+
+    const err = await service.evaluateAnswer('prompt', 'a', ['a']).catch(e => e);
+
+    expect(err.getResponse()).toEqual(expect.objectContaining({ error: 'Failed to parse AI JSON response' }));
+  });
+
+  it('says why a response came back empty', async () => {
+    generateContent.mockResolvedValue({ text: undefined, candidates: [{ finishReason: 'SAFETY' }] });
+
+    await expect(service.generateChatResponse('sys', 'hi')).rejects.toThrow();
+    expect(completed().errorData.message).toBe('Empty response text from Gemini (SAFETY)');
+  });
+
+  it('fails a lesson whose only closing brace comes before the opening one', async () => {
+    generateContent.mockResolvedValue({ text: 'note: } then {' });
+
+    await expect(service.generateLesson('msg')).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(completed().status).toBe('error');
+  });
+
+  it('still makes the call, unlogged, when the log write fails', async () => {
+    apilog.startLog.mockRejectedValue(new Error('firestore down'));
+    generateContent.mockResolvedValue({ text: '{"usages":[],"exampleUsages":[],"setAside":[]}' });
+
+    await expect(service.buildExampleUsages('語', [], [], [], 'ku1')).resolves.toEqual({ usages: [], exampleUsages: [], setAside: [] });
+    expect(apilog.completeLog).not.toHaveBeenCalled();
   });
 });
