@@ -99,7 +99,8 @@ export default function GrammarLessonEditor({ lesson, onChange }: Props) {
                     type="text"
                     className={inputClass}
                     value={item.japanese}
-                    onChange={(e) => update({ japanese: e.target.value })}
+                    // The stored furigana is a copy of the old sentence: drop it so a fresh one is made.
+                    onChange={(e) => update({ japanese: e.target.value, furigana: undefined })}
                   />
                 </div>
                 <div>

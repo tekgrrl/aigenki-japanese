@@ -1,4 +1,4 @@
-import { isValidFurigana } from './lessons.service';
+import { dropStaleFurigana, isValidFurigana } from './lessons.service';
 
 describe('isValidFurigana', () => {
   const s = '私はあまり肉を食べません。';
@@ -26,5 +26,20 @@ describe('isValidFurigana', () => {
   });
   it('rejects a missing annotation', () => {
     expect(isValidFurigana(s, undefined)).toBe(false);
+  });
+});
+
+describe('dropStaleFurigana', () => {
+  it('keeps furigana that still matches its sentence', () => {
+    const ex = { japanese: '肉を食べます。', furigana: '肉[にく]を食[た]べます。' };
+    expect(dropStaleFurigana([ex])).toEqual([ex]);
+  });
+  it('removes furigana left over from an edited sentence', () => {
+    const ex = { japanese: 'バスで行きます。', english: 'I go by bus.', furigana: '肉[にく]を食[た]べます。' };
+    expect(dropStaleFurigana([ex])).toEqual([{ japanese: 'バスで行きます。', english: 'I go by bus.' }]);
+  });
+  it('leaves examples without furigana alone', () => {
+    const ex = { japanese: 'バスで行きます。' };
+    expect(dropStaleFurigana([ex])).toEqual([ex]);
   });
 });
