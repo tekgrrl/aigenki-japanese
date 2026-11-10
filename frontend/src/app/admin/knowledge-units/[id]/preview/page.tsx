@@ -101,6 +101,7 @@ export default function PreviewLessonPage() {
   };
 
   const handleRegenerate = async () => {
+    if (!confirm("Regenerate writes a new lesson with AI and replaces this one, including any edits you've made. Continue?")) return;
     setRegenerating(true);
     try {
       const res = await apiFetch(`/api/lessons/regenerate/${kuId}`, { method: "POST" });
