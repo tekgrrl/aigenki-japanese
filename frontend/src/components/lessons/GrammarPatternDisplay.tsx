@@ -41,6 +41,7 @@ export const PILL_TOKEN_MAP: Record<string, PillStyle> = (() => {
   const clauseA: PillStyle = { label: "Clause A", className: "bg-indigo-100 text-indigo-700" };
   const clauseB: PillStyle = { label: "Clause B", className: "bg-purple-100 text-purple-700" };
   const quantity: PillStyle = { label: "Quantity", className: "bg-teal-100 text-teal-700" };
+  const number: PillStyle = { label: "Number", className: "bg-teal-100 text-teal-700" };
 
   return {
     // Nouns — role-named (both spellings from the open naming question map to the same style)
@@ -74,6 +75,8 @@ export const PILL_TOKEN_MAP: Record<string, PillStyle> = (() => {
     "Cl-B": clauseB,
     // Numbers before a counter or で (e.g. {Quantity}人, {Quantity}で)
     Quantity: quantity,
+    // A bare number
+    Num: number,
   };
 })();
 
