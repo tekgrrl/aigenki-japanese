@@ -7,6 +7,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { GrammarKnowledgeUnit } from '../types';
 import { UserService } from '../users/user.service';
+import { LearningQueueService } from '../learning-progress/learning-queue.service';
 
 @Controller('lessons')
 @UseGuards(FirebaseAuthGuard)
@@ -17,6 +18,7 @@ export class LessonsController {
     private readonly lessonsService: LessonsService,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly userService: UserService,
+    private readonly learningQueue: LearningQueueService,
   ) { }
 
   @Post('batch')
@@ -98,7 +100,7 @@ export class LessonsController {
 
   @Get('queue')
   async getQueue(@UserId() uid: string) {
-    return this.lessonsService.getQueue(uid);
+    return this.learningQueue.getQueue(uid);
   }
 
   /** Lazy: build a Vocab lesson's usages (the Start Learning slideshow uses their labels). */

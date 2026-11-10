@@ -13,7 +13,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { LessonsService } from '../lessons/lessons.service';
 import { UserService } from '../users/user.service';
-import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
@@ -83,7 +83,7 @@ export class ScenariosService {
         // documents without the field (older enrolments, and new ones until the flag is written).
         const ukuSnap = await this.db
           .collection('users').doc(uid)
-          .collection('user-kus')
+          .collection(USER_KUS_SUBCOLLECTION)
           .get();
 
         const enrolledKuIds = ukuSnap.docs.filter(d => d.data().aboveLevel !== true).map(d => d.data().kuId as string);
@@ -93,7 +93,7 @@ export class ScenariosService {
         }
 
         // Batch-fetch global KUs for enrolled IDs, filter to Grammar at the requested level
-        const kuRefs = enrolledKuIds.map(id => this.db.collection('knowledge-units').doc(id));
+        const kuRefs = enrolledKuIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id));
         const kuDocs = await this.db.getAll(...kuRefs);
 
         const patterns = kuDocs

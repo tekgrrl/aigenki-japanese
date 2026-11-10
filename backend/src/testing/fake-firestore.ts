@@ -108,12 +108,13 @@ class FakeQuery {
   select(..._f: string[]) { return this; }
   limit(_n: number) { return this; }
   async get(): Promise<any> {
-    const match = (d: Data) => this.filters.every(([f, op, v]) => {
-      const x = getPath(d, f);
+    // '__name__' filters on the document id, as in Firestore.
+    const match = (id: string, d: Data) => this.filters.every(([f, op, v]) => {
+      const x = f === '__name__' ? id : getPath(d, f);
       return op === '==' ? x === v : op === 'in' ? (v as any[]).includes(x) : Array.isArray(x) && x.includes(v);
     });
     const docs = [...this.db.store(this.col).entries()]
-      .filter(([, d]) => match(d))
+      .filter(([id, d]) => match(id, d))
       .map(([id, d]) => ({ id, exists: true, data: () => structuredClone(d), ref: new FakeDocRef(this.db, this.col, id) }));
     return { empty: docs.length === 0, size: docs.length, docs, forEach: (fn: (d: any) => void) => docs.forEach(fn) };
   }
