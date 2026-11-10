@@ -470,6 +470,10 @@ export class LessonsService {
       parsed.component_kanji = [];
     }
 
+    if (Array.isArray(parsed.examples)) {
+      parsed.examples = dropStaleFurigana(parsed.examples);
+    }
+
     await lessonRef.update(parsed);
   }
 
@@ -650,4 +654,16 @@ export function isValidFurigana(sentence: string, annotated: string | undefined)
   const brackets = annotated.match(/\[[^\]]*\]/g) ?? [];
   const valid = annotated.match(/[\u4e00-\u9faf\u3005]\[[ぁ-ゖー]+\]/g) ?? [];
   return brackets.length === valid.length;
+}
+
+/**
+ * Removes `furigana` from Grammar examples whose sentence no longer matches it (the admin edited
+ * `japanese`), so the slides don't keep showing the old sentence; a fresh copy is made lazily.
+ */
+export function dropStaleFurigana<T extends { japanese?: string; furigana?: string }>(examples: T[]): T[] {
+  return examples.map(ex => {
+    if (typeof ex?.furigana !== 'string' || stripFurigana(ex.furigana) === ex.japanese) return ex;
+    const { furigana: _stale, ...rest } = ex;
+    return rest as T;
+  });
 }
