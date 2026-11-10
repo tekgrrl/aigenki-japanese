@@ -40,6 +40,7 @@ export const PILL_TOKEN_MAP: Record<string, PillStyle> = (() => {
   const clause: PillStyle = { label: "Clause", className: "bg-indigo-100 text-indigo-700" };
   const clauseA: PillStyle = { label: "Clause A", className: "bg-indigo-100 text-indigo-700" };
   const clauseB: PillStyle = { label: "Clause B", className: "bg-purple-100 text-purple-700" };
+  const quantity: PillStyle = { label: "Quantity", className: "bg-teal-100 text-teal-700" };
 
   return {
     // Nouns — role-named (both spellings from the open naming question map to the same style)
@@ -71,10 +72,18 @@ export const PILL_TOKEN_MAP: Record<string, PillStyle> = (() => {
     Cl: clause,
     "Cl-A": clauseA,
     "Cl-B": clauseB,
+    // Numbers before a counter or で (e.g. {Quantity}人, {Quantity}で)
+    Quantity: quantity,
   };
 })();
 
 export type PillToken = keyof typeof PILL_TOKEN_MAP;
+
+// The corpus and the spec spell the same token several ways ({N_A} vs {N-A}, {Adj-I} vs
+// {Adj-i}, {Adj-i·stem}, {CL_A}), so lookups ignore separator style and letter case.
+const normalizeToken = (token: string) => token.trim().replace(/[_·]/g, "-").toLowerCase();
+const PILL_LOOKUP = new Map(Object.entries(PILL_TOKEN_MAP).map(([k, v]) => [normalizeToken(k), v]));
+const pillStyleFor = (token: string): PillStyle | undefined => PILL_LOOKUP.get(normalizeToken(token));
 
 const UNMAPPED_PILL_CLASSNAME = "bg-gray-100 text-gray-500";
 
@@ -226,7 +235,7 @@ export default function GrammarPatternDisplay({ pattern, className }: GrammarPat
                     if (segment.type === "text") {
                       return <React.Fragment key={i}>{segment.value}</React.Fragment>;
                     }
-                    const style = PILL_TOKEN_MAP[segment.value];
+                    const style = pillStyleFor(segment.value);
                     return (
                       <span
                         key={i}
