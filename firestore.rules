@@ -1,11 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // WARNING: TEMPORARY DIAGNOSTIC RULE
-    // This allows all reads and writes from the client.
-    // This is ONLY safe because we are on the local emulator.
+    // No direct client access. The frontend uses Firebase only for sign-in; all data goes through
+    // the backend, whose Admin SDK isn't subject to these rules.
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

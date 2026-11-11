@@ -18,6 +18,17 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Failing stub specs** (`*.controller.spec.ts`, `*.service.spec.ts` "should be defined" with no
   providers) fail on `main` too. They aren't regressions from the PR under review.
 
+## Security
+- **The local dev bypass is opt-in:** `DEV_AUTH_BYPASS=true` in `backend/.env`, never in production. Without
+  it, dev refuses requests with no token, like production. An invalid token is always refused.
+- **`ADMIN_ALL` is ignored in production.**
+- **Public on purpose:** `GET /` (health check) and `GET /pictures/:id/image` (loaded by `<img>`, which can't
+  send a token; pictures are app content, not user data).
+- **Learner AI routes have no quota yet** (lesson generate, label-usages, furigana, concept generate,
+  questions). That's deployment work (free/paid tiers, App Check), not a finding for now.
+- **Global word writes are admin-only** (`PUT`/`DELETE /knowledge-units/:id`, bulk). Learners have no
+  "remove from my studies" yet; that's a separate feature.
+
 ## Profile gate
 - **The local dev bypass skips the profile gate** (`FirebaseAuthGuard`, no Bearer token / `user_default`),
   and so does `NEXT_PUBLIC_DEV_SKIP_AUTH` on the frontend. Real tokens in dev are gated.
