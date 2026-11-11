@@ -86,6 +86,20 @@ if a change actually breaks the stated intent. New decisions get added here as t
   the scenario page counts gate items itself (it may count a duplicated item twice; the backend's
   `ready` decides the button).
 
+## Admin reset and the audio-first switch
+- **A shared kanji-component facet is handed to another word** when its word is reset or switched to
+  audio-first: the oldest enrolled default-sequence Vocab word with that kanji that's being studied (has
+  at least one card of its own). Its stage doesn't matter. The facet keeps the old word's
+  `sequenceStage` and is marked `rehomedFrom`, and the new owner's stage logic ignores it
+  (`getSequenceFacets`). It's still reviewed and counts for the kanji.
+- **With no studied owner, the facet is deleted** with the word. Words waiting for their lesson make
+  their own when they get there.
+- **A kanji enrolled another way** (scenario, flag, directly) that's left with no facets after a reset
+  goes back to waiting for its own Kanji lesson. That's the state it was in before the word's facet
+  took it over.
+- **Facets handed over before `rehomedFrom` existed** (earlier audio-first switches) aren't marked, so
+  they still count in their owner's stage logic. Rare, left as they are.
+
 ## Reviews
 - **Opening Review Lesson before answering** locks the card for this round: only Skip is left. A skipped
   card stays due, so reloading the page or clicking the Review tab brings it straight back, unlocked.

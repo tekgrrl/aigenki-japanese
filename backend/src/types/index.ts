@@ -552,6 +552,12 @@ export interface ReviewFacet {
   questionAttempts?: number;
   /** Which stage in the KU's facet unlock sequence this facet belongs to. */
   sequenceStage?: number;
+  /**
+   * Set when an admin reset or the audio-first switch handed this kanji-component facet to another
+   * word (source.id): the word it came from. The new owner's stage logic ignores it (see
+   * ReviewProgressService.getSequenceFacets); it's still reviewed and counts for the kanji.
+   */
+  rehomedFrom?: string;
   /** Vocab meaning card: the usages proven correct at the current SRS stage (cleared when it moves up). */
   provenUsageIds?: string[];
   data?: any;

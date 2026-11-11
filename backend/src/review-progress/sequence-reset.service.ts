@@ -11,22 +11,6 @@ import { FacetStore } from '../facets/facet-store';
 import { ReviewProgressService } from './review-progress.service';
 
 /**
- * Whether an enrolled word can take over another word's kanji-component facet. It must have
- * reached that stage itself: a word still waiting for its lesson (status 'learning', no facets)
- * would stop being served by Start Learning, and a word below the stage would find the facet
- * at its next stage and skip creating the rest of it. Legacy words (no currentStage) are
- * enrolled and past their stages, so they qualify.
- */
-export function canOwnKanjiFacet(
-  uku: { status?: string; currentStage?: number },
-  facetStage: number | undefined,
-): boolean {
-  if (uku.status === 'learning') return false;
-  if (uku.currentStage === undefined) return true;
-  return uku.currentStage >= (facetStage ?? 1);
-}
-
-/**
  * Admin tools that tear down a word's facet sequence: reset it (optionally after regenerating
  * the lesson) or send it back to lessons to be relearned audio-first. Rebuilding goes through
  * ReviewProgressService.initializeSequence; this service only depends on it, never the reverse.
@@ -80,8 +64,9 @@ export class SequenceResetService {
 
     const { stage, facetsCreated } = await this.reviewProgress.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
     if (facetsCreated === 0) {
-      // initializeSequence returned before writing a variant (no applicable stage): don't
-      // leave the old one on a word that's now waiting, or it would steer its next enrolment.
+      // Nothing rebuilt (no applicable stage, or every stage deduped), so the word is back to
+      // waiting for its lesson. Don't leave the old variant on it: it would steer that enrolment,
+      // which chooses afresh.
       await this.userKnowledgeUnitsService.update(uid, kuId, { sequenceVariant: FieldValue.delete() });
       await this.learningProgressService.recomputeAndCache(uid, kuId);
     }
@@ -151,7 +136,7 @@ export class SequenceResetService {
   private async rehomeKanjiFacets(uid: string, kuId: string): Promise<number> {
     const rehome = await this.planKanjiRehoming(uid, kuId, await this.facetStore.forKu(uid, kuId));
     for (const [facetId, { toKuId, kanjiKuId }] of rehome) {
-      await this.facetStore.doc(uid, facetId).update({ 'source.id': toKuId });
+      await this.facetStore.doc(uid, facetId).update({ 'source.id': toKuId, rehomedFrom: kuId });
       const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, kanjiKuId);
       if (kanjiUku?.source?.type === 'lesson' && kanjiUku.source.id === kuId) {
         await this.userKnowledgeUnitsService.update(uid, kanjiKuId, { source: { type: 'lesson', id: toKuId } });
@@ -198,7 +183,10 @@ export class SequenceResetService {
    * For each kanji-component facet in this word's sequence, another enrolled default-sequence
    * Vocab word containing the same kanji (oldest enrolment first) that should own it instead.
    * Facets with no such word aren't in the map (they're deleted with the word's sequence).
-   * The new owner must already be at the facet's stage (see canOwnKanjiFacet).
+   * The owner must be studied: at least one facet testing it. That rules out a word waiting for
+   * its lesson (a facet would make it look learned, so Start Learning would never serve it) and a
+   * stale UKU whose facets were deleted. Its stage doesn't matter: the moved facet is marked
+   * rehomedFrom, which the owner's stage logic ignores.
    */
   private async planKanjiRehoming(
     uid: string,
@@ -214,13 +202,26 @@ export class SequenceResetService {
     const ukus = (await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get()).docs.map(d => d.data());
     const enrolled = new Map(ukus.filter(u => u.kuId && u.kuId !== kuId && u.sequenceVariant !== 'audio-first').map(u => [u.kuId as string, u]));
     const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+    const studied = new Map<string, boolean>();
+    const isStudied = async (wordId: string) => {
+      if (!studied.has(wordId)) {
+        const own = await this.facetStore.query(uid).where('kuId', '==', wordId).limit(1).get();
+        studied.set(wordId, !own.empty);
+      }
+      return studied.get(wordId)!;
+    };
     for (const f of kanjiFacets) {
       const char = f.data.content as string;
       const words = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).where('data.kanji', 'array-contains', char).get();
-      const owner = words.docs
-        .filter(w => w.data().type === 'Vocab' && enrolled.has(w.id) && canOwnKanjiFacet(enrolled.get(w.id)!, f.sequenceStage))
-        .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt))[0];
-      if (owner) plan.set(f.id!, { toKuId: owner.id, kanjiKuId: f.kuId });
+      const candidates = words.docs
+        .filter(w => w.data().type === 'Vocab' && enrolled.has(w.id))
+        .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt));
+      for (const w of candidates) {
+        if (await isStudied(w.id)) {
+          plan.set(f.id!, { toKuId: w.id, kanjiKuId: f.kuId });
+          break;
+        }
+      }
     }
     return plan;
   }
