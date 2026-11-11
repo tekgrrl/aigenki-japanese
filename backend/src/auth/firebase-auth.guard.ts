@@ -3,12 +3,13 @@ import { Reflector } from '@nestjs/core';
 import * as admin from 'firebase-admin';
 import { UserService } from '../users/user.service';
 import { ALLOW_INCOMPLETE_PROFILE } from './allow-incomplete-profile.decorator';
+import { devFlag } from '../lib/dev-flags';
 
 /**
- * The local dev bypass: requests without a token are let in. Opt-in with DEV_AUTH_BYPASS=true in
- * backend/.env, and never in production whatever the flag says.
+ * The local dev bypass: requests without a token are let in. Opt-in with DEV_AUTH_BYPASS=true and
+ * NODE_ENV=development in backend/.env (see devFlag).
  */
-export const devAuthBypass = () => process.env.DEV_AUTH_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
+export const devAuthBypass = () => devFlag('DEV_AUTH_BYPASS');
 
 /**
  * Verifies the Firebase ID token and sets `request.user`. A verified user who hasn't completed

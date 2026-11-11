@@ -5,6 +5,7 @@ import { FirebaseAuthGuard } from './firebase-auth.guard';
 import { AllowIncompleteProfile } from './allow-incomplete-profile.decorator';
 import { UserService, isProfileComplete } from '../users/user.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { setEnv } from '../testing/env';
 
 class Routes {
   gated() {}
@@ -61,10 +62,12 @@ describe('profile gate (FirebaseAuthGuard)', () => {
 
   describe('dev auth bypass', () => {
     const saved = { bypass: process.env.DEV_AUTH_BYPASS, env: process.env.NODE_ENV };
+    beforeEach(() => {
+      process.env.NODE_ENV = 'development'; // the bypass only applies in development
+    });
     afterEach(() => {
-      if (saved.bypass === undefined) delete process.env.DEV_AUTH_BYPASS;
-      else process.env.DEV_AUTH_BYPASS = saved.bypass;
-      process.env.NODE_ENV = saved.env;
+      setEnv('DEV_AUTH_BYPASS', saved.bypass);
+      setEnv('NODE_ENV', saved.env);
     });
 
     it('with DEV_AUTH_BYPASS, a request with no token acts as user_default and skips the gate', async () => {
@@ -95,9 +98,9 @@ describe('profile gate (FirebaseAuthGuard)', () => {
       expect(request.user).toBeUndefined();
     });
 
-    it('ignores the flag in production', async () => {
+    it.each([['production'], ['test'], [undefined]])('ignores the flag unless NODE_ENV is development (%s)', async nodeEnv => {
       process.env.DEV_AUTH_BYPASS = 'true';
-      process.env.NODE_ENV = 'production';
+      setEnv('NODE_ENV', nodeEnv);
       await expect(guard.canActivate(ctx('gated', {}).context)).rejects.toThrow(UnauthorizedException);
     });
   });

@@ -1,19 +1,21 @@
 import { FakeFirestore } from '../testing/fake-firestore';
 import { UserService, jlptLevelOf } from './user.service';
+import { setEnv } from '../testing/env';
 
 describe('UserService preferences and admin', () => {
   let db: FakeFirestore;
   let users: UserService;
-  const savedAdminAll = process.env.ADMIN_ALL;
+  const saved = { adminAll: process.env.ADMIN_ALL, nodeEnv: process.env.NODE_ENV };
 
   beforeEach(() => {
     db = new FakeFirestore();
     users = new UserService(db as any);
     delete process.env.ADMIN_ALL;
+    process.env.NODE_ENV = 'development'; // ADMIN_ALL only applies in development
   });
   afterAll(() => {
-    if (savedAdminAll === undefined) delete process.env.ADMIN_ALL;
-    else process.env.ADMIN_ALL = savedAdminAll;
+    setEnv('ADMIN_ALL', saved.adminAll);
+    setEnv('NODE_ENV', saved.nodeEnv);
   });
 
   it('returns preferences with the level filled in: N5 when it was never set', async () => {
@@ -82,15 +84,10 @@ describe('UserService preferences and admin', () => {
     expect(await users.isAdmin('learner')).toBe(true);
   });
 
-  it('isAdmin: ADMIN_ALL is ignored in production', async () => {
-    const savedEnv = process.env.NODE_ENV;
+  it.each([['production'], ['test'], [undefined]])('isAdmin: ADMIN_ALL is ignored unless NODE_ENV is development (%s)', async nodeEnv => {
     process.env.ADMIN_ALL = 'true';
-    process.env.NODE_ENV = 'production';
-    try {
-      await db.collection('users').doc('learner').set({ isAdmin: false });
-      expect(await users.isAdmin('learner')).toBe(false);
-    } finally {
-      process.env.NODE_ENV = savedEnv;
-    }
+    setEnv('NODE_ENV', nodeEnv);
+    await db.collection('users').doc('learner').set({ isAdmin: false });
+    expect(await users.isAdmin('learner')).toBe(false);
   });
 });
