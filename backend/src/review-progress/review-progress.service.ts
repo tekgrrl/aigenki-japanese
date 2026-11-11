@@ -59,7 +59,7 @@ export class ReviewProgressService {
    * Called when a user completes a lesson. Creates the first applicable stage's
    * facets and records currentStage on the UKU.
    *
-   * `resetFrom` (resetSequence only): the variant the word had before the reset, which
+   * `resetFrom` (SequenceResetService.resetSequence only): the variant the word had before the reset, which
    * the reset keeps when it can, so the experiment flag never converts words in progress.
    */
   async initializeSequence(
@@ -142,13 +142,18 @@ export class ReviewProgressService {
     return { stage: result.stage.stage, facetsCreated: result.facetsCreated };
   }
 
+  /** For the admin switch (SequenceResetService.audioFirstStatus): always checks the experiment flag. */
+  audioFirstSwitchBlocker(uid: string, kuId: string): Promise<string | null> {
+    return this.audioFirstBlocker(uid, kuId, { checkFlag: true });
+  }
+
   /**
    * Why a Vocab word can't be audio-first right now, or null if it can. The one source of
    * truth for chooseVariant (enrollment) and audioFirstStatus (the admin switch), so a word
    * the switch accepts is always enrolled audio-first. `checkFlag: false` is the reset path,
    * which keeps an existing audio-first word's variant whatever the flag says.
    */
-  async audioFirstBlocker(uid: string, kuId: string, { checkFlag }: { checkFlag: boolean }): Promise<string | null> {
+  private async audioFirstBlocker(uid: string, kuId: string, { checkFlag }: { checkFlag: boolean }): Promise<string | null> {
     if (checkFlag) {
       if ((await this.userService.getPreferences(uid)).audioFirstExperiment !== true) return 'The audio-first experiment is off in your profile';
     }

@@ -84,7 +84,7 @@ export class SequenceResetService {
     if (uku.sequenceVariant === 'audio-first') return no('Already audio-first');
     const facets = await this.facetStore.forKu(uid, kuId);
     const facetCount = facets.length - (await this.planKanjiRehoming(uid, kuId, facets)).size; // exactly what the switch deletes
-    const blocker = await this.reviewProgress.audioFirstBlocker(uid, kuId, { checkFlag: true });
+    const blocker = await this.reviewProgress.audioFirstSwitchBlocker(uid, kuId);
     if (blocker) return no(blocker, facetCount);
     if (facets.length === 0) return no('Already waiting in your lessons: it will be taught audio-first');
     return { eligible: true, facetCount };
