@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ReviewProgressService } from './review-progress.service';
-import { SequenceResetService } from './sequence-reset.service';
+import { SequenceResetService, canOwnKanjiFacet } from './sequence-reset.service';
 import { FakeFirestore } from '../testing/fake-firestore';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
@@ -47,7 +47,7 @@ function setup() {
     await ukuCol.doc('word2').set({ kuId: 'word2', createdAt: { seconds: 5 } });
     ukus.set('word2', { kuId: 'word2', facet_count: 4 });
   };
-  return { db, service, ukus, facets, seed, tutorContext, shareKanji, learningProgress };
+  return { db, service, reviewProgress, ukus, facets, ukuCol, seed, tutorContext, shareKanji, learningProgress };
 }
 
 describe('audioFirstStatus', () => {
@@ -114,5 +114,74 @@ describe('returnToLessonsAsAudioFirst', () => {
     ukus.set(WORD, { kuId: WORD, currentStage: 1, sequenceVariant: 'audio-first' });
     await expect(service.returnToLessonsAsAudioFirst(UID, WORD)).rejects.toBeInstanceOf(BadRequestException);
     expect(db.store(`users/${UID}/review-facets`).size).toBe(2);
+  });
+});
+
+describe('canOwnKanjiFacet', () => {
+  it.each([
+    ['a word at the facet\'s stage', { status: 'reviewing', currentStage: 1 }, 1, true],
+    ['a word past it', { status: 'reviewing', currentStage: 3 }, 1, true],
+    ['a word below it', { status: 'reviewing', currentStage: 1 }, 2, false],
+    ['a word waiting for its lesson', { status: 'learning', currentStage: 0 }, 1, false],
+    ['a waiting word with no stage', { status: 'learning' }, 1, false],
+    ['a legacy word (no currentStage)', { status: 'reviewing' }, 1, true],
+    ['a facet with no stage, word at stage 1', { status: 'reviewing', currentStage: 1 }, undefined, true],
+  ])('%s', (_name, uku, stage, expected) => {
+    expect(canOwnKanjiFacet(uku, stage as number | undefined)).toBe(expected);
+  });
+});
+
+describe('kanji hand-off only goes to a word that has reached the stage', () => {
+  it('the switch deletes the kanji facet rather than handing it to a word waiting for its lesson', async () => {
+    const { service, seed, db, shareKanji, ukuCol } = setup();
+    await seed();
+    await shareKanji();
+    await ukuCol.doc('word2').update({ status: 'learning', currentStage: 0 });
+    expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 2 });
+    expect(db.store(`users/${UID}/review-facets`).size).toBe(0);
+  });
+
+  it('the switch deletes the kanji facet rather than handing it to a word below its stage', async () => {
+    const { service, seed, db, shareKanji, ukuCol, facets } = setup();
+    await seed();
+    await shareKanji();
+    await facets.doc('f2').update({ sequenceStage: 2 });
+    await ukuCol.doc('word2').update({ status: 'reviewing', currentStage: 1 });
+    expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 2 });
+    expect(db.store(`users/${UID}/review-facets`).size).toBe(0);
+  });
+});
+
+describe('resetSequence', () => {
+  it('hands a shared kanji facet to another enrolled word before rebuilding', async () => {
+    const { service, reviewProgress, seed, db, shareKanji, ukus } = setup();
+    await seed();
+    await shareKanji();
+    jest.spyOn(reviewProgress, 'initializeSequence').mockResolvedValue({ stage: 1, facetsCreated: 1 });
+    expect(await service.resetSequence(UID, WORD)).toMatchObject({ facetsDeleted: 1 });
+    const left = db.store(`users/${UID}/review-facets`);
+    expect([...left.keys()]).toEqual(['f2']);
+    expect(left.get('f2')!.source.id).toBe('word2');
+    expect(ukus.get(KANJI)!.source).toEqual({ type: 'lesson', id: 'word2' });
+  });
+
+  it('clears the old sequence variant when nothing could be rebuilt', async () => {
+    const { service, reviewProgress, seed, ukus } = setup();
+    await seed();
+    ukus.set(WORD, { ...ukus.get(WORD), sequenceVariant: 'audio-first' });
+    jest.spyOn(reviewProgress, 'initializeSequence').mockResolvedValue({ stage: 0, facetsCreated: 0 });
+    await service.resetSequence(UID, WORD);
+    expect(ukus.get(WORD)!.sequenceVariant).not.toBe('audio-first'); // FieldValue.delete() sentinel
+  });
+
+  it('keeps the variant initializeSequence wrote when it rebuilt the word', async () => {
+    const { service, reviewProgress, seed, ukus } = setup();
+    await seed();
+    jest.spyOn(reviewProgress, 'initializeSequence').mockImplementation(async (_uid, kuId) => {
+      ukus.set(kuId, { ...ukus.get(kuId), sequenceVariant: 'audio-first' });
+      return { stage: 1, facetsCreated: 2 };
+    });
+    await service.resetSequence(UID, WORD);
+    expect(ukus.get(WORD)!.sequenceVariant).toBe('audio-first');
   });
 });
