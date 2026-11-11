@@ -1,3 +1,4 @@
+import { QuestionText, alreadyUsedNote, sameQuestion } from './distinct-question';
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TutorContextService } from '../tutor-context/tutor-context.service';
 import { Firestore } from 'firebase-admin/firestore';
@@ -52,6 +53,14 @@ type QuestionResponse = {
 
 /** A Vocab usage to ask about, and whether it's the word's only usage (then older, usage-less questions fit too). */
 type TargetUsage = { usage: VocabUsage; only: boolean };
+
+/** A question as the generation prompts return it (questionResponseSchema). */
+type GeneratedQuestion = {
+  question: string;
+  answer: string;
+  context?: string;
+  accepted_alternatives?: string[];
+};
 
 @Injectable()
 export class QuestionsService {
@@ -307,19 +316,14 @@ export class QuestionsService {
     };
 
     const userMessage = buildVocabQuestionUserMessage(topic, reading, meaning);
-    const parsed = await this.geminiService.generateWithTools<{
-      question: string;
-      answer: string;
-      context?: string;
-      accepted_alternatives?: string[];
-    }>(
-      userMessage,
+    const parsed = await this.generateDistinct(kuId, topic, note => this.geminiService.generateWithTools<GeneratedQuestion>(
+      [userMessage, note].filter(Boolean).join('\n\n'),
       systemPrompt,
       [GET_USER_LEVEL_DECLARATION],
       toolHandlers,
       this.questionResponseSchema,
       { route: '/questions/generate', topic: topic, kuId },
-    );
+    ));
 
     const ref = this.db.collection(QUESTIONS_COLLECTION).doc();
     const newQuestion: QuestionItem = {
@@ -363,19 +367,14 @@ export class QuestionsService {
       },
     };
 
-    const parsed = await this.geminiService.generateWithTools<{
-      question: string;
-      answer: string;
-      context?: string;
-      accepted_alternatives?: string[];
-    }>(
-      '',
+    const parsed = await this.generateDistinct(kuId, pattern, note => this.geminiService.generateWithTools<GeneratedQuestion>(
+      note,
       systemPrompt,
       [GET_USER_LEVEL_DECLARATION],
       toolHandlers,
       this.questionResponseSchema,
       { route: '/questions/generate', topic: pattern, kuId },
-    );
+    ));
 
     const ref = this.db.collection(QUESTIONS_COLLECTION).doc();
     const newQuestion: QuestionItem = {
@@ -418,19 +417,14 @@ export class QuestionsService {
       },
     };
 
-    const parsed = await this.geminiService.generateWithTools<{
-      question: string;
-      answer: string;
-      context?: string;
-      accepted_alternatives?: string[];
-    }>(
-      '',
+    const parsed = await this.generateDistinct(kuId, mechanic.goalTitle, note => this.geminiService.generateWithTools<GeneratedQuestion>(
+      note,
       systemPrompt,
       [GET_USER_LEVEL_DECLARATION],
       toolHandlers,
       this.questionResponseSchema,
       { route: '/questions/generate', topic: mechanic.goalTitle, kuId },
-    );
+    ));
 
     const ref = this.db.collection(QUESTIONS_COLLECTION).doc();
     const newQuestion: QuestionItem = {
@@ -458,6 +452,40 @@ export class QuestionsService {
     }
 
     return this.toResponse(newQuestion, true);
+  }
+
+  /** The word's existing questions, newest first: what a new question must not repeat. */
+  private async existingQuestions(kuId: string): Promise<QuestionText[]> {
+    const snap = await this.db.collection(QUESTIONS_COLLECTION).where('kuId', '==', kuId).get();
+    const millis = (t: unknown) => {
+      if (typeof t === 'string') return Date.parse(t) || 0;
+      const ts = t as { toMillis?: () => number } | undefined;
+      return typeof ts?.toMillis === 'function' ? ts.toMillis() : 0;
+    };
+    return snap.docs
+      .map(d => d.data() as QuestionItem)
+      .filter(q => q.data?.question && q.data?.answer)
+      .sort((a, b) => millis(b.createdAt) - millis(a.createdAt))
+      .map(q => ({ question: q.data.question, answer: q.data.answer }));
+  }
+
+  /**
+   * Generates a question that doesn't repeat one the word already has: `generate` gets a note
+   * listing the existing ones (alreadyUsedNote). If the result still repeats one (sameQuestion),
+   * it retries once with that question named; a second repeat is saved anyway, with a warning.
+   */
+  private async generateDistinct(kuId: string, topic: string, generate: (note: string) => Promise<GeneratedQuestion>): Promise<GeneratedQuestion> {
+    const existing = await this.existingQuestions(kuId);
+    const first = await generate(alreadyUsedNote(existing));
+    const repeated = existing.find(q => sameQuestion(first, q));
+    if (!repeated) return first;
+
+    this.logger.warn(`Generated question repeats an existing one for "${topic}" (kuId=${kuId}); retrying once`);
+    const second = await generate(`${alreadyUsedNote(existing)}\nYour previous attempt repeated this one, so write something else: ${repeated.question}`);
+    if (existing.some(q => sameQuestion(second, q))) {
+      this.logger.warn(`Retry still repeats an existing question for "${topic}" (kuId=${kuId}); saving it anyway`);
+    }
+    return second;
   }
 
   async recordAnswer(uid: string, questionId: string, kuId: string, result: 'pass' | 'fail', facetType?: string) {
