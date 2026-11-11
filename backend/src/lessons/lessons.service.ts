@@ -161,12 +161,15 @@ export class LessonsService {
           ? ku.data.definition.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0)
           : [];
 
+        // The KU says Vocab, so the model was asked for a Vocab lesson.
+        const vocabLesson = lessonJson as VocabLesson;
+
         // Ensure definitions array exists
-        if (!Array.isArray((lessonJson as any).definitions)) {
-          (lessonJson as any).definitions = [];
+        if (!Array.isArray(vocabLesson.definitions)) {
+          vocabLesson.definitions = [];
         }
 
-        const aiDefinitions = (lessonJson as any).definitions || [];
+        const aiDefinitions = vocabLesson.definitions || [];
 
         // Deduplicate (case-insensitive)
         const combined = [...userDefinitions, ...aiDefinitions];
@@ -177,11 +180,11 @@ export class LessonsService {
           return acc;
         }, []);
 
-        (lessonJson as any).definitions = uniqueDefinitions;
+        vocabLesson.definitions = uniqueDefinitions;
 
         // Backward compatibility for definition field
-        if ((lessonJson as any).definitions.length > 0) {
-          (lessonJson as any).definition = (lessonJson as any).definitions.join(', ');
+        if (vocabLesson.definitions.length > 0) {
+          vocabLesson.definition = vocabLesson.definitions.join(', ');
         }
 
         // Safety net: the prompt already instructs the model to leave component_kanji
@@ -190,26 +193,26 @@ export class LessonsService {
         // kanji (呉) that doesn't appear anywhere in the word's own kana spelling. Any
         // listed "component" kanji that isn't actually a character in the vocab string
         // is definitionally wrong, so filter those out regardless of what the model said.
-        const vocabText: string = (lessonJson as any).vocab ?? '';
-        const componentKanji = (lessonJson as any).component_kanji;
+        const vocabText: string = vocabLesson.vocab ?? '';
+        const componentKanji = vocabLesson.component_kanji;
         if (Array.isArray(componentKanji)) {
           const { kept, dropped } = splitComponentKanji(vocabText, componentKanji);
           if (dropped.length > 0) {
             this.logger.warn(
               `Dropping invalid component_kanji for "${vocabText}" (kuId=${kuId}): ` +
-              `${dropped.map((k: any) => k?.kanji).join(', ')} not found in the word itself`,
+              `${dropped.map(k => k?.kanji).join(', ')} not found in the word itself`,
             );
           }
-          (lessonJson as any).component_kanji = kept;
+          vocabLesson.component_kanji = kept;
         }
 
         // Stronger enforcement than the heuristic above: kanaOnly is an explicit
         // "never use this word's kanji breakdown" decision (AI-set at generation time,
         // or curated manually via the admin editor). Don't trust that the model actually
         // left component_kanji empty just because it also set kanaOnly — force it.
-        if ((lessonJson as any).kanaOnly === true && Array.isArray((lessonJson as any).component_kanji) && (lessonJson as any).component_kanji.length > 0) {
+        if (vocabLesson.kanaOnly === true && Array.isArray(vocabLesson.component_kanji) && vocabLesson.component_kanji.length > 0) {
           this.logger.warn(`kanaOnly=true but component_kanji was non-empty for "${vocabText}" (kuId=${kuId}) — clearing`);
-          (lessonJson as any).component_kanji = [];
+          vocabLesson.component_kanji = [];
         }
       }
 
