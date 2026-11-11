@@ -9,6 +9,7 @@ import {
 import { AiToolCall } from './providers/ai-provider.interface';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { ScenariosService } from '../scenarios/scenarios.service';
+import { ScenarioKnowledgeService } from '../scenarios/scenario-knowledge.service';
 import { getLevelSeed } from './level-seed.data';
 import { FacetType, Lesson, UserRoot } from '../types';
 import { dropStrayComponentKanji } from '../lessons/lessons.service';
@@ -28,6 +29,7 @@ export class TutorToolExecutor {
     private readonly facetStore: FacetStore,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
     private readonly scenariosService: ScenariosService,
+    private readonly scenarioKnowledge: ScenarioKnowledgeService,
     private readonly tutorContext: TutorContextService,
   ) {}
 
@@ -74,7 +76,7 @@ export class TutorToolExecutor {
       case 'get_level_seed':
         return getLevelSeed(call.args.jlptLevel as string);
       case 'get_grammar_patterns':
-        return this.scenariosService.getGrammarPatterns(uid, call.args.jlptLevel as string);
+        return this.scenarioKnowledge.buildGrammarToolHandlers(uid).get_grammar_patterns({ jlptLevel: call.args.jlptLevel });
       case 'create_scenario':
         return this.scenariosService.saveFromTutor(uid, call.args);
       default:

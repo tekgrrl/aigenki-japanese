@@ -14,7 +14,7 @@ import { QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsa
 import { usagesOf } from '../lessons/vocab-usages';
 import { GeminiService } from '../gemini/gemini.service';
 import { FacetStore } from '../facets/facet-store';
-import { jlptLevelOf } from '../users/user.service';
+import { jlptLevelOf, excludedContentOf } from '../users/user.service';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import {
   VOCAB_QUESTION_OPTIONS,
@@ -239,8 +239,7 @@ export class QuestionsService {
         const level = jlptLevelOf(userData);
         // Resolved from enrolled KU ids at call time — always current content + title.
         const allowedGrammar = await this.tutorContext.getAllowedGrammar(uid, userData);
-        const excludedVocab: string[] = userData?.tutorContext?.excludedVocab ?? [];
-        const excludedGrammar: string[] = userData?.tutorContext?.excludedGrammar ?? [];
+        const { excludedVocab, excludedGrammar } = excludedContentOf(userData);
         return { jlptLevel: level, allowedGrammar, excludedVocab, excludedGrammar };
       },
     };

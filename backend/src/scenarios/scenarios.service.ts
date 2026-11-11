@@ -8,26 +8,25 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import { Firestore, CollectionReference, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import { Scenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioEvaluation, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt } from '../types/scenario';
+import { Scenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt, GrammarMatch } from '../types/scenario';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
-import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { LessonsService } from '../lessons/lessons.service';
 import { UserService } from '../users/user.service';
-import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION, USER_KUS_SUBCOLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
-import { ALLOWED_USER_ROLES, ALLOWED_AI_ROLES, buildArchitectPrompt, buildImportPrompt, buildChatSystemPrompt, buildLiveExtractionPrompt, SCENARIO_RESPONSE_SCHEMA } from '../prompts/scenario.prompts';
+import { buildArchitectPrompt, buildImportPrompt, SCENARIO_RESPONSE_SCHEMA } from '../prompts/scenario.prompts';
 import { GET_GRAMMAR_PATTERNS_DECLARATION } from '../prompts/curriculum';
-import { GrammarMatch } from '../types/scenario';
 import { GrammarSectionsService } from '../grammar-sections/grammar-sections.service';
 
 import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
+import { ScenarioKnowledgeService } from './scenario-knowledge.service';
+import { ScenarioChatService } from './scenario-chat.service';
 import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { FacetStore } from '../facets/facet-store';
 import { stripFurigana } from '../lib/furigana-text';
-import { jlptLevelOf } from '../users/user.service';
+import { jlptLevelOf, excludedContentOf } from '../users/user.service';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
@@ -41,12 +40,12 @@ export class ScenariosService {
     private readonly facetStore: FacetStore,
     private readonly geminiService: GeminiService,
     private readonly knowledgeUnitsService: KnowledgeUnitsService,
-    private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
-    private readonly lessonsService: LessonsService,
     private readonly userService: UserService,
     private readonly validationService: ValidationService,
     private readonly grammarSectionsService: GrammarSectionsService,
     private readonly pictureRenderer: PictureRenderer,
+    private readonly scenarioKnowledge: ScenarioKnowledgeService,
+    private readonly scenarioChat: ScenarioChatService,
   ) {}
 
   /** Scene drawings in progress ("uid/scenarioId"), and the last failure per scenario. */
@@ -58,119 +57,6 @@ export class ScenariosService {
       return this.db.collection(SCENARIOS_COLLECTION);
     }
     return this.db.collection('users').doc(uid).collection(SCENARIOS_COLLECTION);
-  }
-
-  async getGrammarPatterns(uid: string, jlptLevel: string): Promise<unknown> {
-    return this.buildGrammarToolHandlers(uid).get_grammar_patterns({ jlptLevel });
-  }
-
-  /** Content the user explicitly flagged "not now" — see issue #222. */
-  private async getExcludedContent(uid: string): Promise<{ excludedVocab: string[]; excludedGrammar: string[] }> {
-    const user = await this.userService.findById(uid);
-    return {
-      excludedVocab: user?.tutorContext?.excludedVocab ?? [],
-      excludedGrammar: user?.tutorContext?.excludedGrammar ?? [],
-    };
-  }
-
-  private buildGrammarToolHandlers(uid: string) {
-    return {
-      get_grammar_patterns: async (args: Record<string, unknown>) => {
-        const jlptLevel = (args.jlptLevel as string) || await this.userService.getJlptLevel(uid);
-
-        // Fetch only grammar KUs the user has enrolled (and are not above their level)
-        // Filtered in code, not with where('aboveLevel', '!=', true): Firestore's != skips
-        // documents without the field (older enrolments, and new ones until the flag is written).
-        const ukuSnap = await this.db
-          .collection('users').doc(uid)
-          .collection(USER_KUS_SUBCOLLECTION)
-          .get();
-
-        const enrolledKuIds = ukuSnap.docs.filter(d => d.data().aboveLevel !== true).map(d => d.data().kuId as string);
-        if (enrolledKuIds.length === 0) {
-          this.logger.log(`get_grammar_patterns(${jlptLevel}) → 0 enrolled patterns for uid=${uid}`);
-          return { patterns: [] };
-        }
-
-        // Batch-fetch global KUs for enrolled IDs, filter to Grammar at the requested level
-        const kuRefs = enrolledKuIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id));
-        const kuDocs = await this.db.getAll(...kuRefs);
-
-        const patterns = kuDocs
-          .filter(doc => {
-            if (!doc.exists) return false;
-            const d = doc.data()!;
-            return d.type === 'Grammar' && (d.data as any)?.jlptLevel === jlptLevel;
-          })
-          .map(doc => {
-            const d = doc.data()!;
-            return {
-              kuId: doc.id,
-              content: d.content as string,
-              title: (d.data as any)?.title ?? '',
-              corpusNotes: (d.data as any)?.corpusNotes ?? '',
-            };
-          });
-
-        this.logger.log(`get_grammar_patterns(${jlptLevel}) → ${patterns.length} enrolled patterns for uid=${uid}`);
-        return { patterns };
-      },
-    };
-  }
-
-  /** Find-or-create the global Vocab KU for an extracted KU and enroll it for this user. Idempotent. */
-  private async linkVocabKu(uid: string, scenario: Scenario, ku: ExtractedKU): Promise<ExtractedKU> {
-    try {
-      let kuId = ku.kuId;
-
-      if (!kuId) {
-        const globalKu = await this.knowledgeUnitsService.findByContent(ku.content, 'Vocab');
-
-        if (globalKu) {
-          this.logger.log(`Linking "${ku.content}" to existing global KU ${globalKu.id}`);
-          kuId = globalKu.id;
-        } else {
-          this.logger.log(`No global KU found for "${ku.content}" — creating new KU with level hint ${ku.jlptLevel ?? 'none'}`);
-          kuId = await this.knowledgeUnitsService.ensureVocab(ku.content, {
-            reading: ku.reading,
-            definition: ku.meaning,
-            jlptLevel: ku.jlptLevel,
-          });
-        }
-      }
-
-      // Always ensure enrollment, even when kuId was already known — create() is
-      // idempotent, and this is what makes the "known globally, new to this user"
-      // case (the whole point of live-chat extraction's new-to-user filter) actually
-      // enroll a UserKnowledgeUnit instead of silently no-op-ing.
-      await this.userKnowledgeUnitsService.create(uid, kuId, { type: 'scenario', id: scenario.id });
-      return { ...ku, kuId, status: 'learning' };
-    } catch (error) {
-      this.logger.error(`Failed to process KU "${ku.content}" during linking`, error);
-      return ku;
-    }
-  }
-
-  /** Enroll a matched Grammar KU and write its context-example lesson. Idempotent (deterministic doc id). */
-  private async linkGrammarMatch(
-    uid: string,
-    scenario: Scenario,
-    match: GrammarMatch,
-    sourceType: 'scenario' | 'scenario-live' = 'scenario',
-  ): Promise<boolean> {
-    try {
-      await this.userKnowledgeUnitsService.create(uid, match.kuId, { type: 'scenario', id: scenario.id });
-      await this.lessonsService.createUserGrammarLesson(
-        uid,
-        match.kuId,
-        { sourceType, sourceId: scenario.id, sourceTitle: scenario.title },
-        match.exampleFromConversation,
-      );
-      return true;
-    } catch (err) {
-      this.logger.error(`Failed to link grammar match kuId="${match.kuId}"`, err);
-      return false;
-    }
   }
 
   async getAllScenarios(userId: string, limitDays?: number, state?: string): Promise<Scenario[]> {
@@ -301,18 +187,14 @@ export class ScenariosService {
       this.logger.warn(`generateScenario: sourceSectionId=${resolvedDto.sourceSectionId} not found — generating without the grammar-pattern directive`);
     }
 
-    const prompt = buildArchitectPrompt(
-      resolvedDto,
-      user?.tutorContext?.excludedVocab ?? [],
-      user?.tutorContext?.excludedGrammar ?? [],
-      grammarSection,
-    );
+    const { excludedVocab, excludedGrammar } = excludedContentOf(user ?? undefined);
+    const prompt = buildArchitectPrompt(resolvedDto, excludedVocab, excludedGrammar, grammarSection);
 
     try {
       const data = await this.geminiService.generateScenario(
         prompt,
         [GET_GRAMMAR_PATTERNS_DECLARATION],
-        this.buildGrammarToolHandlers(userId),
+        this.scenarioKnowledge.buildGrammarToolHandlers(userId),
         SCENARIO_RESPONSE_SCHEMA,
       );
 
@@ -502,7 +384,7 @@ export class ScenariosService {
       const data = await this.geminiService.generateScenario(
         prompt,
         [GET_GRAMMAR_PATTERNS_DECLARATION],
-        this.buildGrammarToolHandlers(uid),
+        this.scenarioKnowledge.buildGrammarToolHandlers(uid),
         SCENARIO_RESPONSE_SCHEMA,
       );
 
@@ -574,7 +456,7 @@ export class ScenariosService {
         if (scenario.extractedKUs && scenario.extractedKUs.length > 0) {
           const updatedKUs: ExtractedKU[] = [];
           for (const ku of scenario.extractedKUs) {
-            updatedKUs.push(await this.linkVocabKu(uid, scenario, ku));
+            updatedKUs.push(await this.scenarioKnowledge.linkVocabKu(uid, scenario, ku));
           }
           updateData.extractedKUs = updatedKUs;
         }
@@ -583,7 +465,7 @@ export class ScenariosService {
         if (scenario.grammarMatches && scenario.grammarMatches.length > 0) {
           let linked = 0;
           for (const match of scenario.grammarMatches) {
-            if (await this.linkGrammarMatch(uid, scenario, match, 'scenario')) linked++;
+            if (await this.scenarioKnowledge.linkGrammarMatch(uid, scenario, match, 'scenario')) linked++;
           }
           this.logger.log(`Grammar matches: linked ${linked}/${scenario.grammarMatches.length} for scenarioId=${scenario.id}`);
         } else if (scenario.grammarNotes && scenario.grammarNotes.length > 0) {
@@ -594,7 +476,7 @@ export class ScenariosService {
               const kuId = await this.knowledgeUnitsService.ensureGrammarKU(note);
               if (!kuId) continue;
               const synthetic: GrammarMatch = { kuId, exampleFromConversation: note.exampleInContext };
-              if (await this.linkGrammarMatch(uid, scenario, synthetic, 'scenario')) matched++;
+              if (await this.scenarioKnowledge.linkGrammarMatch(uid, scenario, synthetic, 'scenario')) matched++;
             } catch (err) {
               this.logger.error(`Failed to process grammar note "${note.title}"`, err);
             }
@@ -607,7 +489,7 @@ export class ScenariosService {
       case 'drill':
         newState = 'simulate';
         // Seed chat history if AI speaks first
-        const initialHistory = this.getInitialChatHistory(scenario);
+        const initialHistory = this.scenarioChat.initialChatHistory(scenario);
         if (initialHistory.length > 0) {
           updateData.chatHistory = initialHistory;
         }
@@ -626,14 +508,14 @@ export class ScenariosService {
       // GENERATE EVALUATION
       if (scenario.chatHistory && scenario.chatHistory.length > 0) {
         try {
-          const evaluation = await this.generateEvaluation(scenario);
+          const evaluation = await this.scenarioChat.evaluate(scenario);
           if (evaluation) {
             updateData.evaluation = evaluation;
             this.writeProgressUpdate(scenario, evaluation.rating, updateData);
           }
 
           try {
-            const { extractedKUs, grammarMatches } = await this.extractLiveChatKnowledge(uid, scenario, evaluation);
+            const { extractedKUs, grammarMatches } = await this.scenarioChat.extractLiveChatKnowledge(uid, scenario, evaluation);
             updateData.liveExtractedKUs = extractedKUs;
             updateData.liveGrammarMatches = grammarMatches;
           } catch (e) {
@@ -658,7 +540,7 @@ export class ScenariosService {
 
     const updateData: any = {
       state: 'simulate',
-      chatHistory: this.getInitialChatHistory(scenario), // Reset to initial seed if applicable
+      chatHistory: this.scenarioChat.initialChatHistory(scenario), // Reset to initial seed if applicable
       evaluation: FieldValue.delete(), // clear evaluation
       completedAt: FieldValue.delete(), // clear completedAt
       isObjectiveMet: false, // Reset objective met status
@@ -689,248 +571,25 @@ export class ScenariosService {
     const scenario = await this.getScenario(uid, id);
     if (!scenario) throw new NotFoundException('Scenario not found');
 
-    // 1. Construct User Message
-    const userMsgObj: ChatMessage = {
-      speaker: 'user',
-      text: userMessage,
-      timestamp: Date.now(),
-    };
+    const { userMsg, aiMsg } = await this.scenarioChat.reply(uid, scenario, userMessage);
 
-    // 2. Format History
-    let historyLines = "No previous conversation.";
-    if (scenario.chatHistory && scenario.chatHistory.length > 0) {
-      historyLines = scenario.chatHistory.map(msg => {
-        const role = msg.speaker === 'user' ? 'User' : 'AI';
-        return `${role}: ${msg.text}`;
-      }).join('\n');
-    }
-
-    // 3. Build Prompt
-    // 3a. Format Reference Script
-    let referenceScript = "No reference script available.";
-    if (scenario.dialogue && scenario.dialogue.length > 0) {
-      referenceScript = scenario.dialogue.map(line => {
-        return `${line.speaker}: ${line.text} (${line.translation || ''})`;
-      }).join('\n');
-    }
-
-    let userRole = scenario.roles?.user;
-    let aiRoles: string | string[] | undefined = scenario.roles?.ai;
-
-    if (!userRole || !aiRoles) {
-      // Fallback for older scenarios that lack the 'roles' field
-      const roles = this.determineRoles(scenario.setting.participants);
-      userRole = roles.userRole;
-      aiRoles = roles.aiRole;
-    }
-
-    const { excludedVocab, excludedGrammar } = await this.getExcludedContent(uid);
-    const systemPrompt = buildChatSystemPrompt(scenario, aiRoles, userRole, referenceScript, historyLines, excludedVocab, excludedGrammar);
-
-    // 3. Get AI Response
-    const aiResponse = await this.geminiService.generateChatResponse(
-      systemPrompt,
-      userMessage,
-      { scenarioId: id, topic: scenario.title }
-    );
-
-    if (!aiResponse) {
-      throw new InternalServerErrorException("Failed to generate AI response");
-    }
-
-    // 4. Construct AI Message
-    const aiMsgObj: ChatMessage = {
-      speaker: 'ai',
-      text: aiResponse.message,
-      timestamp: Date.now(),
-      correction: aiResponse.correction,
-      sceneFinished: aiResponse.sceneFinished,
-      roleName: aiResponse.speaker || undefined,
-    };
-
-    // 5. Persist to Firestore (Atomic Update)
+    // Persist to Firestore (atomic append)
     const updateData: Record<string, any> = {
-      chatHistory: FieldValue.arrayUnion(userMsgObj, aiMsgObj)
+      chatHistory: FieldValue.arrayUnion(userMsg, aiMsg)
     };
 
     // If the AI says the scene is finished, update isObjectiveMet
-    if (aiResponse.sceneFinished) {
+    if (aiMsg.sceneFinished) {
       updateData.isObjectiveMet = true;
       updateData.isActive = false; // Auto-deactivate
     }
 
     await this.scenariosColRef(uid).doc(id).update(updateData);
 
-    // 6. Return Full History (so frontend can sync)
-    // We assume the frontend has the previous state, but returning full history is safer for sync
-    const currentHistory = scenario.chatHistory || [];
-    return [...currentHistory, userMsgObj, aiMsgObj];
+    // Return the full history so the frontend can sync
+    return [...(scenario.chatHistory || []), userMsg, aiMsg];
   }
 
-
-  private getInitialChatHistory(scenario: Scenario): ChatMessage[] {
-    if (!scenario.dialogue || scenario.dialogue.length === 0) return [];
-
-    const firstLine = scenario.dialogue[0];
-
-    // Primary signal: explicit speakerRole, set directly by the generation
-    // prompt — unambiguous regardless of what language/name the model chose
-    // for the free-text `speaker` label. Fixes GitHub #213 (fuzzy string
-    // matching between `speaker` and `roles.ai`/`roles.user` failed silently
-    // whenever the two were in different languages, e.g. "店員" vs "Shop Assistant").
-    if (firstLine.speakerRole) {
-      if (firstLine.speakerRole === 'user') return [];
-      return [{
-        speaker: 'ai',
-        text: firstLine.text,
-        timestamp: Date.now(),
-        roleName: firstLine.speaker,
-      }];
-    }
-
-    // Fallback for scenarios generated before speakerRole existed.
-    this.logger.warn(`getInitialChatHistory: dialogue[0] has no speakerRole (scenario ${scenario.id}, predates #213 fix) — falling back to fuzzy speaker-name matching`);
-
-    let userRole: string;
-    let aiRolesRaw: string | string[];
-
-    if (scenario.roles?.user && scenario.roles?.ai) {
-      userRole = scenario.roles.user;
-      aiRolesRaw = scenario.roles.ai;
-    } else {
-      const roles = this.determineRoles(scenario.setting.participants);
-      userRole = roles.userRole;
-      aiRolesRaw = roles.aiRole;
-    }
-
-    const aiRoles = Array.isArray(aiRolesRaw) ? aiRolesRaw : [aiRolesRaw];
-    const speaker = firstLine.speaker.toLowerCase();
-    const user = userRole.toLowerCase();
-
-    if (user.includes(speaker) || speaker.includes(user)) {
-      return [];
-    }
-
-    const matchedAiRole = aiRoles.find(r => {
-      const ai = r.toLowerCase();
-      return ai.includes(speaker) || speaker.includes(ai);
-    });
-
-    if (matchedAiRole) {
-      return [{
-        speaker: 'ai',
-        text: firstLine.text,
-        timestamp: Date.now(),
-        roleName: matchedAiRole,
-      }];
-    }
-
-    return [];
-  }
-
-  // Helper method for evaluation
-  private async generateEvaluation(scenario: Scenario): Promise<ScenarioEvaluation> {
-    // 1. Determine Roles for Context
-    let userRole = scenario.roles?.user;
-    let aiRole = scenario.roles?.ai;
-
-    if (!userRole || !aiRole) {
-      const roles = this.determineRoles(scenario.setting.participants);
-      userRole = roles.userRole;
-      aiRole = roles.aiRole;
-    }
-
-    // 2. Prepare Context for Gemini Service
-    const aiRoleStr = Array.isArray(aiRole) ? aiRole.join(', ') : aiRole;
-    const context = {
-      title: scenario.title,
-      goal: scenario.setting.goal,
-      difficulty: scenario.difficultyLevel,
-      isObjectiveMet: scenario.isObjectiveMet ?? false,
-      userRole,
-      aiRole: aiRoleStr,
-    };
-
-    // 3. Prepare History (Map ChatMessage[] to simpler structure if needed, though interfaces align)
-    const history = (scenario.chatHistory || []).map(msg => ({
-      speaker: msg.speaker,
-      text: msg.text
-    }));
-
-    // 4. Delegate to Gemini Service
-    const evaluation = await this.geminiService.evaluateScenario(history, context);
-
-    // 5. Apply Business Logic for Outcome
-    // IF success AND rating >= 3 -> Passed
-    // ELSE -> Failed
-    if (evaluation.success && evaluation.rating >= 3) {
-      evaluation.outcome = 'passed';
-      evaluation.recommendedAction = 'replay_chat'; // or maybe just 'practice_roleplay'
-    } else {
-      evaluation.outcome = 'failed';
-      evaluation.recommendedAction = 'repeat_lesson';
-    }
-
-    return evaluation;
-  }
-
-  /**
-   * Mines new vocab/grammar from what the user actually said during the live
-   * 'simulate' chat (as opposed to the AI-scripted 'encounter' dialogue), and
-   * enrolls anything genuinely new via the same linking helpers 'encounter'
-   * uses. Deliberately conservative: does not touch SRS/leech state, does not
-   * create review facets — stops at the same enrollment depth 'encounter'
-   * already stops at (UserKnowledgeUnit + UserGrammarLesson).
-   */
-  private async extractLiveChatKnowledge(
-    uid: string,
-    scenario: Scenario,
-    evaluation: ScenarioEvaluation,
-  ): Promise<{ extractedKUs: ExtractedKU[]; grammarMatches: GrammarMatch[] }> {
-    const userLines = (scenario.chatHistory || [])
-      .filter(msg => msg.speaker === 'user')
-      .map(msg => msg.text);
-
-    if (userLines.length === 0) {
-      return { extractedKUs: [], grammarMatches: [] };
-    }
-
-    const prompt = buildLiveExtractionPrompt(scenario, userLines, evaluation.corrections ?? []);
-
-    const data = await this.geminiService.generateWithTools<{ extractedKUs?: any[]; grammarMatches?: any[] }>(
-      prompt,
-      '',
-      [GET_GRAMMAR_PATTERNS_DECLARATION],
-      this.buildGrammarToolHandlers(uid),
-      undefined,
-      { route: '/scenarios/extract-live', topic: scenario.title },
-    );
-
-    const candidateKUs: ExtractedKU[] = Array.isArray(data.extractedKUs) ? data.extractedKUs : [];
-    const candidateMatches: GrammarMatch[] = Array.isArray(data.grammarMatches) ? data.grammarMatches : [];
-
-    // "New to this user" filter — grammar is already scoped to the user's own
-    // enrolled pool by get_grammar_patterns, but vocab has no such scoping, so
-    // skip anything the user already has a UserKnowledgeUnit for.
-    const extractedKUs: ExtractedKU[] = [];
-    for (const ku of candidateKUs) {
-      const globalKu = await this.knowledgeUnitsService.findByContent(ku.content, 'Vocab');
-      if (globalKu) {
-        const existingUku = await this.userKnowledgeUnitsService.findByKuId(uid, globalKu.id);
-        if (existingUku) continue;
-      }
-      extractedKUs.push(await this.linkVocabKu(uid, scenario, { ...ku, kuId: globalKu?.id }));
-    }
-
-    const grammarMatches: GrammarMatch[] = [];
-    for (const match of candidateMatches) {
-      if (await this.linkGrammarMatch(uid, scenario, match, 'scenario-live')) {
-        grammarMatches.push(match);
-      }
-    }
-
-    return { extractedKUs, grammarMatches };
-  }
 
   private progressStatusFromStars(stars: number): ProgressStatus {
     if (stars <= 0) return 'reviewing';
@@ -964,42 +623,6 @@ export class ScenariosService {
 
     updateData[`progress.${level}`] = updated;
     updateData.currentLevelStatus = newStatus;
-  }
-
-  private determineRoles(participants: string[]): { aiRole: string; userRole: string } {
-    if (!participants || participants.length === 0) {
-      return { aiRole: 'Partner', userRole: 'Traveler' };
-    }
-
-    let userRole = participants.find(p => ALLOWED_USER_ROLES.some(k => p.toLowerCase().includes(k.toLowerCase())));
-    let aiRole: string;
-
-    if (userRole) {
-      // AI is the other participant
-      aiRole = participants.find(p => p !== userRole) || 'Partner';
-    } else {
-      // Try to find AI Role first
-      const foundAiRole = participants.find(p => ALLOWED_AI_ROLES.some(k => p.toLowerCase().includes(k.toLowerCase())));
-
-      if (foundAiRole && !userRole) {
-        aiRole = foundAiRole;
-        userRole = participants.find(p => p !== aiRole) || 'Traveler';
-      } else {
-        // Fallback: Assume index 1 is user (common in generated scenarios like ["Staff", "Traveler"])
-        if (participants.length > 1) {
-          userRole = participants[1];
-          aiRole = participants[0];
-        } else {
-          // Only 1 participant?
-          userRole = 'Traveler'; // Default
-          aiRole = participants[0] || 'Partner';
-        }
-      }
-    }
-
-    this.logger.log(`AI Role: ${aiRole}, User Role: ${userRole}`);
-
-    return { aiRole, userRole };
   }
 
   async checkAndSetVocabReady(uid: string, scenarioId: string): Promise<void> {
