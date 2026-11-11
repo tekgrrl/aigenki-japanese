@@ -9,6 +9,7 @@ import {
     VOCAB_QUESTION_OPTIONS,
     CONCEPT_QUESTION_OPTIONS,
 } from '../prompts/quiz.prompts';
+import { buildConceptPrompt } from '../prompts/concept.prompts';
 import { UserService } from '../users/user.service';
 
 const QUESTION_RESPONSE_SCHEMA = {
@@ -71,8 +72,9 @@ export class ApilogController {
         uid?: string;
         responseSchema?: Record<string, unknown>;
         model?: string;
+        temperature?: number;
     }) {
-        const { systemPrompt, userMessage = '', useTools = false, uid, responseSchema, model } = body;
+        const { systemPrompt = '', userMessage = '', useTools = false, uid, responseSchema, model, temperature } = body;
 
         const toolDeclarations = useTools ? [GET_USER_LEVEL_DECLARATION] : [];
         const toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>> = {};
@@ -92,12 +94,29 @@ export class ApilogController {
             toolHandlers,
             responseSchema,
             model,
+            temperature,
         });
+    }
+
+    @Get('prompt-test/models')
+    getPromptTestModels() {
+        return this.geminiService.promptTestModels();
     }
 
     @Get('prompt-presets')
     getPromptPresets() {
         return [
+            {
+                // Matches ConceptsService.generate: no system prompt, the whole prompt is the user message.
+                id: 'concept-generate',
+                name: 'Concept: Generate page',
+                systemPrompt: '',
+                exampleUserMessage: buildConceptPrompt('Relative Clauses', 'N5'),
+                useTools: false,
+                model: 'concept',
+                temperature: 0.5,
+                description: 'The real Concept generation prompt (topic "Relative Clauses", N5). The app sends it as the user message with no system prompt, temperature 0.5, JSON output.',
+            },
             {
                 id: 'vocab-conjugation',
                 name: 'Vocab: Conjugation',

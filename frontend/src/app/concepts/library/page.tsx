@@ -6,20 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-client";
 import { ConceptKnowledgeUnit } from "@/types";
 
-interface CoreConceptEntry {
-  id: string;
-  title: string;
-  description: string;
-}
-
-const CORE_CONCEPTS: CoreConceptEntry[] = [
-  {
-    id: "BGhZpwDbyM1Px57wiMxP",
-    title: "Relative Clauses",
-    description: "How to modify nouns using verb and adjective clauses in Japanese.",
-  },
-];
-
 interface UserConceptEntry {
   id: string;
   conceptId: string;
@@ -51,9 +37,23 @@ function ConceptLibraryContent() {
     router.replace(`/concepts/library?${params.toString()}`);
   };
 
+  const [allConcepts, setAllConcepts] = useState<(ConceptKnowledgeUnit & { id: string })[]>([]);
+  const [allLoading, setAllLoading] = useState(true);
   const [myConcepts, setMyConcepts] = useState<UserConceptEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
+
+  // Core Library: every concept in the shared collection, newest first.
+  useEffect(() => {
+    apiFetch("/api/concepts")
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: (ConceptKnowledgeUnit & { id: string })[]) => setAllConcepts(data))
+      .catch((err) => console.error("[ConceptLibrary] Failed to fetch concepts:", err))
+      .finally(() => setAllLoading(false));
+  }, []);
 
   useEffect(() => {
     apiFetch("/api/user-concepts")
@@ -120,20 +120,23 @@ function ConceptLibraryContent() {
         </nav>
       </div>
 
-      {loading && activeTab === "mine" ? (
+      {(loading && activeTab === "mine") || (allLoading && activeTab === "core") ? (
         <p className="text-center py-20 text-shodo-ink/30 animate-pulse">Loading…</p>
       ) : (
         <main>
           {activeTab === "core" && (
             <div className="space-y-3">
-              {CORE_CONCEPTS.map((concept) => (
+              {allConcepts.length === 0 && (
+                <p className="text-center py-10 text-shodo-ink/40">No concepts in the library yet.</p>
+              )}
+              {allConcepts.map((concept) => (
                 <div
                   key={concept.id}
                   className="border border-shodo-ink/10 rounded-xl px-6 py-5 flex flex-col md:flex-row gap-4 md:items-center justify-between hover:border-shodo-ink/20 transition-colors"
                 >
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-shodo-ink">{concept.title}</h3>
-                    <p className="text-sm text-shodo-ink/50 mt-0.5">{concept.description}</p>
+                    <h3 className="font-semibold text-shodo-ink">{concept.data.title}</h3>
+                    <p className="text-sm text-shodo-ink/50 mt-0.5 line-clamp-2">{concept.data.overview}</p>
                   </div>
                   <button
                     onClick={() => handleLearn(concept.id)}

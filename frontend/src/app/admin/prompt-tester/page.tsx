@@ -11,6 +11,16 @@ interface Preset {
   useTools: boolean;
   responseSchema?: Record<string, unknown>;
   description: string;
+  /** A model role from /api/apilogs/prompt-test/models (e.g. "concept"). */
+  model?: string;
+  temperature?: number;
+}
+
+interface ModelOption {
+  label: string;
+  model: string;
+  /** The app roles this model fills: "flash", "pro", "concept". */
+  roles: string[];
 }
 
 interface ToolCall {
@@ -143,7 +153,10 @@ export default function PromptTesterPage() {
   const [useTools, setUseTools] = useState(false);
   const [uid, setUid] = useState("");
   const [schemaText, setSchemaText] = useState("");
-  const [model, setModel] = useState("gemini-3-flash-preview");
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [model, setModel] = useState("");
+  // Empty means the model's default temperature.
+  const [temperature, setTemperature] = useState("");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +166,14 @@ export default function PromptTesterPage() {
     apiFetch("/api/apilogs/prompt-presets")
       .then((r) => r.json())
       .then(setPresets)
+      .catch(console.error);
+    // The backend's configured models, so "flash" and "pro" match what the app calls.
+    apiFetch("/api/apilogs/prompt-test/models")
+      .then((r) => r.json())
+      .then((data: ModelOption[]) => {
+        setModels(data);
+        setModel((current) => current || data[0]?.model || "");
+      })
       .catch(console.error);
   }, []);
 
@@ -166,6 +187,9 @@ export default function PromptTesterPage() {
     setSchemaText(
       preset.responseSchema ? JSON.stringify(preset.responseSchema, null, 2) : "",
     );
+    setTemperature(preset.temperature !== undefined ? String(preset.temperature) : "");
+    const presetModel = models.find((m) => preset.model && m.roles.includes(preset.model));
+    if (presetModel) setModel(presetModel.model);
   };
 
   const handleGrammarLoad = (builtMessage: string) => {
@@ -195,6 +219,16 @@ export default function PromptTesterPage() {
       }
     }
 
+    let parsedTemperature: number | undefined;
+    if (temperature.trim()) {
+      parsedTemperature = Number(temperature);
+      if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
+        setError("Temperature must be a number from 0 to 2.");
+        setRunning(false);
+        return;
+      }
+    }
+
     try {
       const res = await apiFetch("/api/apilogs/prompt-test", {
         method: "POST",
@@ -205,7 +239,8 @@ export default function PromptTesterPage() {
           useTools,
           uid: uid || undefined,
           responseSchema: parsedSchema,
-          model,
+          model: model || undefined,
+          temperature: parsedTemperature,
         }),
       });
 
@@ -350,9 +385,23 @@ export default function PromptTesterPage() {
               onChange={(e) => setModel(e.target.value)}
               className="border border-gray-300 rounded-md px-2 py-2 text-sm font-mono text-gray-700"
             >
-              <option value="gemini-3-flash-preview">flash</option>
-              <option value="gemini-3.1-pro-preview">pro</option>
+              {models.map((m) => (
+                <option key={m.label} value={m.model}>
+                  {m.label} ({m.model})
+                </option>
+              ))}
             </select>
+            <label className="flex items-center gap-1 text-sm text-gray-700">
+              Temp
+              <input
+                type="text"
+                inputMode="decimal"
+                value={temperature}
+                onChange={(e) => setTemperature(e.target.value)}
+                placeholder="default"
+                className="w-20 border border-gray-300 rounded-md px-2 py-2 text-sm font-mono"
+              />
+            </label>
           </div>
         </div>
 

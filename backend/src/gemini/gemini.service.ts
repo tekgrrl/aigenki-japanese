@@ -45,6 +45,7 @@ export class GeminiService implements OnModuleInit {
   private client: GoogleGenAI;
   private modelName: string;
   private conceptModelName: string;
+  private proModelName: string;
   private imageModelName: string;
 
   constructor(
@@ -56,6 +57,7 @@ export class GeminiService implements OnModuleInit {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
     this.modelName = this.configService.get<string>('MODEL_GEMINI_FLASH') || 'gemini-3-flash-preview';
     this.conceptModelName = this.configService.get<string>('GEMINI_MODEL') || this.modelName;
+    this.proModelName = this.configService.get<string>('MODEL_GEMINI_PRO') || 'gemini-3.1-pro-preview';
     this.imageModelName = this.configService.get<string>('MODEL_GEMINI_IMAGE') || 'gemini-3.1-flash-image';
     this.logger.log(`Using Gemini model: ${this.modelName}`);
     this.logger.log(`Using Gemini concept model: ${this.conceptModelName}`);
@@ -744,6 +746,19 @@ export class GeminiService implements OnModuleInit {
     return conceptString;
   }
 
+  /** The models the admin Prompt Tester offers, named as the app configures them. */
+  // Roles that share a model become one option, e.g. "flash / concept".
+  promptTestModels(): Array<{ label: string; model: string; roles: string[] }> {
+    const roles: Array<[string, string]> = [
+      ['flash', this.modelName],
+      ['pro', this.proModelName],
+      ['concept', this.conceptModelName],
+    ];
+    const byModel = new Map<string, string[]>();
+    for (const [role, model] of roles) byModel.set(model, [...(byModel.get(model) ?? []), role]);
+    return [...byModel].map(([model, r]) => ({ label: r.join(' / '), model, roles: r }));
+  }
+
   async runPromptTest(opts: {
     systemPrompt: string;
     userMessage: string;
@@ -751,8 +766,11 @@ export class GeminiService implements OnModuleInit {
     toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<Record<string, unknown>>>;
     responseSchema?: Record<string, unknown>;
     model?: string;
+    temperature?: number;
   }): Promise<{ rawText: string; parsedJson: any; toolCalls: Array<{ fn: string; args: any; response: any }>; durationMs: number }> {
-    const { systemPrompt, userMessage, toolDeclarations, toolHandlers, responseSchema, model = this.modelName } = opts;
+    const { systemPrompt, userMessage, toolDeclarations, toolHandlers, responseSchema, model = this.modelName, temperature } = opts;
+    // An empty system prompt is left out, as the app's own calls do (e.g. Concept generation).
+    const systemInstruction = systemPrompt.trim() ? { parts: [{ text: systemPrompt }] } : undefined;
     const start = performance.now();
     const toolCallLog: Array<{ fn: string; args: any; response: any }> = [];
 
@@ -767,7 +785,8 @@ export class GeminiService implements OnModuleInit {
           model,
           contents,
           config: {
-            systemInstruction: { parts: [{ text: systemPrompt }] },
+            systemInstruction,
+            temperature,
             tools: [{ functionDeclarations: toolDeclarations }],
             toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
           },
@@ -795,9 +814,7 @@ export class GeminiService implements OnModuleInit {
     }
 
     // Final generation
-    const finalConfig: any = {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-    };
+    const finalConfig: any = { systemInstruction, temperature };
     if (responseSchema) {
       finalConfig.responseMimeType = 'application/json';
       finalConfig.responseSchema = responseSchema;
