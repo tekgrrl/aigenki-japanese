@@ -2,6 +2,7 @@ import { Controller, Post, Body, BadRequestException, Put, Param, Get, Query, Lo
 import { ReviewsService } from './reviews.service';
 import { FacetStore } from '../facets/facet-store';
 import { ReviewProgressService } from '../review-progress/review-progress.service';
+import { SequenceResetService } from '../review-progress/sequence-reset.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { UserId } from '../auth/user-id.decorator';
 import { AdminGuard } from '../auth/admin.guard';
@@ -17,6 +18,7 @@ export class ReviewsController {
     private readonly reviewsService: ReviewsService,
     private readonly facetStore: FacetStore,
     private readonly reviewProgressService: ReviewProgressService,
+    private readonly sequenceReset: SequenceResetService,
     private readonly scenarioFlashService: ScenarioFlashService,
   ) { }
 
@@ -47,21 +49,21 @@ export class ReviewsController {
   @UseGuards(AdminGuard)
   async regenerateAndReset(@UserId() uid: string, @Param('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
-    return this.reviewProgressService.regenerateAndReset(uid, kuId);
+    return this.sequenceReset.regenerateAndReset(uid, kuId);
   }
 
   /** Admin tool: can this enrolled Vocab word be sent back to lessons to be relearned audio-first? */
   @Get('audio-first/:kuId')
   @UseGuards(AdminGuard)
   async audioFirstStatus(@UserId() uid: string, @Param('kuId') kuId: string) {
-    return this.reviewProgressService.audioFirstStatus(uid, kuId);
+    return this.sequenceReset.audioFirstStatus(uid, kuId);
   }
 
   /** Admin tool: delete the word's facets and return it to lessons, to be enrolled audio-first. SRS progress is lost. */
   @Post('audio-first/:kuId')
   @UseGuards(AdminGuard)
   async returnToLessonsAsAudioFirst(@UserId() uid: string, @Param('kuId') kuId: string) {
-    return this.reviewProgressService.returnToLessonsAsAudioFirst(uid, kuId);
+    return this.sequenceReset.returnToLessonsAsAudioFirst(uid, kuId);
   }
 
   /** The user has seen a Flash card: hide it for the first SRS interval (8h). */

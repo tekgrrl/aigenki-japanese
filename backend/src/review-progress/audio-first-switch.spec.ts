@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ReviewProgressService } from './review-progress.service';
+import { SequenceResetService } from './sequence-reset.service';
 import { FakeFirestore } from '../testing/fake-firestore';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
@@ -8,7 +9,7 @@ const UID = 'u1';
 const WORD = 'word1';
 const KANJI = 'kanji1';
 
-/** ReviewProgressService over a fake Firestore, with in-memory KU and UKU stand-ins. */
+/** SequenceResetService (over a real ReviewProgressService) on a fake Firestore, with in-memory KU and UKU stand-ins. */
 function setup() {
   const db = new FakeFirestore();
   const kus: Record<string, any> = { [WORD]: { id: WORD, type: 'Vocab', content: '川' }, [KANJI]: { id: KANJI, type: 'Kanji', content: '川' } };
@@ -21,7 +22,9 @@ function setup() {
   };
   const learningProgress = { recomputeAndCache: jest.fn() };
   const tutorContext = { removeFromTutorVocab: jest.fn() };
-  const service = new ReviewProgressService(db as any, new FacetStore(db as any), knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, tutorContext as any, new UserService(db as any));
+  const facetStore = new FacetStore(db as any);
+  const reviewProgress = new ReviewProgressService(db as any, facetStore, knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, new UserService(db as any));
+  const service = new SequenceResetService(db as any, facetStore, knowledgeUnits as any, {} as any, userKus as any, learningProgress as any, tutorContext as any, reviewProgress);
 
   const facets = db.collection('users').doc(UID).collection('review-facets');
   const ukuCol = db.collection('users').doc(UID).collection('user-kus');
