@@ -280,10 +280,13 @@ export class QuestionsService {
 
     let systemPrompt: string;
     let fewShotTurns: Array<{ user: string; model: string }> | undefined;
+    let kind: string;
     if (isVerb) {
-      systemPrompt = buildVocabQuestionPrompt(pickRandomQuestionType(VOCAB_QUESTION_OPTIONS));
+      kind = pickRandomQuestionType(VOCAB_QUESTION_OPTIONS);
+      systemPrompt = buildVocabQuestionPrompt(kind);
     } else {
       const selectedType = pickRandomQuestionType(NOUN_QUESTION_OPTIONS);
+      kind = selectedType;
       if (selectedType === 'noun-particle') {
         systemPrompt = buildNounParticleQuestionPrompt();
         fewShotTurns = NOUN_PARTICLE_FEW_SHOT_TURNS;
@@ -324,6 +327,7 @@ export class QuestionsService {
       kuId,
       sourceCollection: 'knowledge-units',
       ...(usage ? { usageId: usage.id } : {}),
+      kind,
       data: {
         question: parsed.question,
         context: parsed.context,
@@ -378,6 +382,7 @@ export class QuestionsService {
       id: ref.id,
       kuId,
       sourceCollection: 'knowledge-units',
+      kind: questionType,
       data: {
         question: parsed.question,
         context: parsed.context,
@@ -432,6 +437,7 @@ export class QuestionsService {
       id: ref.id,
       kuId,
       sourceCollection: 'concepts',
+      kind: selectedType,
       data: {
         question: parsed.question,
         context: parsed.context,
