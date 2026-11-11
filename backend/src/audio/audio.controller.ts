@@ -12,6 +12,7 @@ export class AudioController {
     constructor(private readonly audioService: AudioService) { }
 
     @Post('speak')
+    @UseGuards(FirebaseAuthGuard)
     async speak(@Body('text') text: string, @Res() res: Response) {
         if (!text) {
             return res.status(400).send('Text is required');

@@ -35,7 +35,9 @@ export class KnowledgeUnitsController {
         return this.knowledgeUnitsService.findAll({ type, content, jlptLevel });
     }
 
+    /** Admin: global word data (shared by every learner), like the bulk routes and delete below. */
     @Put(':id')
+    @UseGuards(AdminGuard)
     async update(@Param('id') id: string, @Body() body: any) {
         return this.knowledgeUnitsService.update(id, body);
     }
@@ -94,6 +96,7 @@ export class KnowledgeUnitsController {
     }
 
     @Patch('bulk')
+    @UseGuards(AdminGuard)
     @HttpCode(200)
     async bulkUpdate(@Body() body: any) {
         if (!Array.isArray(body)) {
@@ -103,6 +106,7 @@ export class KnowledgeUnitsController {
     }
 
     @Post('bulk')
+    @UseGuards(AdminGuard)
     @HttpCode(200)
     async bulkIngest(@Body() body: any) {
         if (!Array.isArray(body)) {
@@ -112,6 +116,7 @@ export class KnowledgeUnitsController {
     }
 
     @Delete(':id')
+    @UseGuards(AdminGuard)
     async remove(@UserId() uid: string, @Param('id') id: string) {
         return this.knowledgeUnitsService.cascadeDelete(uid, id);
     }

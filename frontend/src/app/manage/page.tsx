@@ -5,6 +5,7 @@ import { KnowledgeUnit, ReviewFacet } from "@/types";
 import Link from "next/link";
 import EditKnowledgeUnitModal from "@/components/EditKnowledgeUnitModal";
 import { apiFetch } from "@/lib/api-client";
+import { useAuth } from "@/providers/AuthProvider";
 
 const kuTypes: KnowledgeUnit["type"][] = [
   "Vocab",
@@ -15,6 +16,8 @@ const kuTypes: KnowledgeUnit["type"][] = [
 ];
 
 export default function KnowledgeManagementPage() {
+  // Editing and deleting a word change global data shared by every learner: admins only.
+  const { isAdmin } = useAuth();
   const [kus, setKus] = useState<KnowledgeUnit[]>([]);
   const [facets, setFacets] = useState<ReviewFacet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -274,36 +277,40 @@ export default function KnowledgeManagementPage() {
                     Review lesson
                   </Link>
 
-                  <button
-                    onClick={() => handleEditClick(ku)}
-                    className="text-sm px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
-                  >
-                    Edit
-                  </button>
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => handleEditClick(ku)}
+                        className="text-sm px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                      >
+                        Edit
+                      </button>
 
-                  {confirmDeleteId === ku.id ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleDelete(ku.id)}
-                        disabled={deletingId === ku.id}
-                        className="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white rounded transition-colors"
-                      >
-                        {deletingId === ku.id ? "Deleting…" : "Confirm"}
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteId(null)}
-                        className="text-sm px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmDeleteId(ku.id)}
-                      className="text-sm px-3 py-1 bg-gray-700 hover:bg-red-700 text-gray-300 hover:text-white rounded transition-colors"
-                    >
-                      Delete
-                    </button>
+                      {confirmDeleteId === ku.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDelete(ku.id)}
+                            disabled={deletingId === ku.id}
+                            className="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white rounded transition-colors"
+                          >
+                            {deletingId === ku.id ? "Deleting…" : "Confirm"}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="text-sm px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteId(ku.id)}
+                          className="text-sm px-3 py-1 bg-gray-700 hover:bg-red-700 text-gray-300 hover:text-white rounded transition-colors"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
