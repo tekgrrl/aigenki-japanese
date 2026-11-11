@@ -71,3 +71,6 @@ scripts/jlptn4-5-kanji
 
 # Generated picture cards (local storage, see backend/src/pictures)
 backend/data/
+
+# Local agent guidance (kept out of the public repo)
+AGENTS.md

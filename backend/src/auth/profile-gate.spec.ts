@@ -1,10 +1,11 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import * as admin from 'firebase-admin';
 import { FirebaseAuthGuard } from './firebase-auth.guard';
 import { AllowIncompleteProfile } from './allow-incomplete-profile.decorator';
 import { UserService, isProfileComplete } from '../users/user.service';
 import { FakeFirestore } from '../testing/fake-firestore';
+import { setEnv } from '../testing/env';
 
 class Routes {
   gated() {}
@@ -59,10 +60,49 @@ describe('profile gate (FirebaseAuthGuard)', () => {
     await expect(guard.canActivate(ctx('gated').context)).resolves.toBe(true);
   });
 
-  it('skips the gate for the local dev bypass (no token)', async () => {
-    const { context, request } = ctx('gated', {});
-    await expect(guard.canActivate(context)).resolves.toBe(true);
-    expect(request.user.uid).toBe('user_default');
+  describe('dev auth bypass', () => {
+    const saved = { bypass: process.env.DEV_AUTH_BYPASS, env: process.env.NODE_ENV };
+    beforeEach(() => {
+      process.env.NODE_ENV = 'development'; // the bypass only applies in development
+    });
+    afterEach(() => {
+      setEnv('DEV_AUTH_BYPASS', saved.bypass);
+      setEnv('NODE_ENV', saved.env);
+    });
+
+    it('with DEV_AUTH_BYPASS, a request with no token acts as user_default and skips the gate', async () => {
+      process.env.DEV_AUTH_BYPASS = 'true';
+      const { context, request } = ctx('gated', {});
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(request.user.uid).toBe('user_default');
+    });
+
+    it('with DEV_AUTH_BYPASS, X-Dev-User-Id picks the uid', async () => {
+      process.env.DEV_AUTH_BYPASS = 'true';
+      const { context, request } = ctx('gated', { 'x-dev-user-id': 'u9' });
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(request.user.uid).toBe('u9');
+    });
+
+    it('without the flag, a request with no token is refused, header or not', async () => {
+      delete process.env.DEV_AUTH_BYPASS;
+      await expect(guard.canActivate(ctx('gated', {}).context)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx('gated', { 'x-dev-user-id': 'u9' }).context)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('refuses an invalid token even with the flag on (no fall-back to user_default)', async () => {
+      process.env.DEV_AUTH_BYPASS = 'true';
+      jest.spyOn(admin, 'auth').mockReturnValue({ verifyIdToken: jest.fn().mockRejectedValue(new Error('bad')) } as any);
+      const { context, request } = ctx('gated');
+      await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+      expect(request.user).toBeUndefined();
+    });
+
+    it.each([['production'], ['test'], [undefined]])('ignores the flag unless NODE_ENV is development (%s)', async nodeEnv => {
+      process.env.DEV_AUTH_BYPASS = 'true';
+      setEnv('NODE_ENV', nodeEnv);
+      await expect(guard.canActivate(ctx('gated', {}).context)).rejects.toThrow(UnauthorizedException);
+    });
   });
 
   it('isProfileComplete: only a valid stored level counts', () => {

@@ -18,6 +18,21 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Failing stub specs** (`*.controller.spec.ts`, `*.service.spec.ts` "should be defined" with no
   providers) fail on `main` too. They aren't regressions from the PR under review.
 
+## Security
+- **Dev-only switches** (`ADMIN_ALL`, `DEV_AUTH_BYPASS`) apply only when NODE_ENV is exactly `development`
+  (`lib/dev-flags.ts`), so a deploy that forgets NODE_ENV keeps them off. Without the bypass, dev refuses
+  requests with no token, like production; an invalid token is always refused. With the bypass on, the
+  backend listens on 127.0.0.1 only.
+- **The frontend's `NEXT_PUBLIC_DEV_SKIP_AUTH` always shows admin UI**, whatever `NEXT_PUBLIC_DEV_USER_ID`
+  says. Dev-only; the backend still enforces admin.
+- **Public on purpose:** `GET /` (health check) and `GET /pictures/:id/image` (loaded by `<img>`, which can't
+  send a token; pictures are app content, not user data).
+- **Learner AI routes have no quota yet** (lesson generate, label-usages, furigana, concept generate,
+  questions). That's deployment work (free/paid tiers, App Check), not a finding for now.
+- **Global word writes are admin-only** (`PUT`/`DELETE /knowledge-units/:id`, bulk, and creating a new word
+  through `POST /knowledge-units`; learners can still enrol an existing word there). Learners have no
+  "remove from my studies" yet; that's a separate feature.
+
 ## Profile gate
 - **The local dev bypass skips the profile gate** (`FirebaseAuthGuard`, no Bearer token / `user_default`),
   and so does `NEXT_PUBLIC_DEV_SKIP_AUTH` on the frontend. Real tokens in dev are gated.

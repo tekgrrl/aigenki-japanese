@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards } from '@nestjs/common';
 import { ApilogService } from './apilog.service';
 import { GeminiService } from '../gemini/gemini.service';
 import { GET_USER_LEVEL_DECLARATION, getCumulativeGrammar } from '../prompts/curriculum';
@@ -11,6 +11,7 @@ import {
 } from '../prompts/quiz.prompts';
 import { buildConceptPrompt } from '../prompts/concept.prompts';
 import { UserService } from '../users/user.service';
+import { AdminGuard } from '../auth/admin.guard';
 
 const QUESTION_RESPONSE_SCHEMA = {
     type: 'OBJECT',
@@ -37,7 +38,9 @@ const EXAMPLE_MECHANIC = {
     },
 };
 
+/** Admin tools: the API log viewer, latency stats and the Prompt Tester. */
 @Controller('apilogs')
+@UseGuards(AdminGuard)
 export class ApilogController {
     constructor(
         private readonly apilogService: ApilogService,

@@ -9,6 +9,7 @@ import { QuestionFeedbackModal } from "@/components/QuestionFeedbackModal";
 import EditKnowledgeUnitModal from "@/components/EditKnowledgeUnitModal";
 import { getSrsLevelName, getSrsLevelIndex } from "@/utils/srs";
 import { apiFetch } from "@/lib/api-client";
+import { useAuth } from "@/providers/AuthProvider";
 import { stripFurigana } from "@/lib/furigana";
 import { FuriganaText } from "@/components/FuriganaText";
 import SentenceAssemblyCard from "@/components/review/SentenceAssemblyCard";
@@ -36,6 +37,8 @@ const CUSTOM_CARDS = new Set(["sentence-assembly", "sentence-cloze", "picture-ch
 const isCustomCard = (facetType: string) => CUSTOM_CARDS.has(facetType);
 
 export default function ReviewPage() {
+  // Only admins may edit a word: it's global data shared by every learner.
+  const { isAdmin } = useAuth();
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -1286,12 +1289,14 @@ export default function ReviewPage() {
           )}
 
           <div className="mt-6 flex gap-4">
-            <button
-              onClick={handleEditClick}
-              className="px-4 py-3 bg-gray-600 text-white font-semibold rounded-md shadow-md hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-800"
-            >
-              Edit KU
-            </button>
+            {isAdmin && (
+              <button
+                onClick={handleEditClick}
+                className="px-4 py-3 bg-gray-600 text-white font-semibold rounded-md shadow-md hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-800"
+              >
+                Edit KU
+              </button>
+            )}
             <button
               ref={nextButtonRef}
               onClick={goToNextItem}

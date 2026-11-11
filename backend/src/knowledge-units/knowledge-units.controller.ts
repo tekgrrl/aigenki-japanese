@@ -1,8 +1,9 @@
-import { Controller, Get, Put, Patch, Delete, Param, Body, Query, Post, BadRequestException, NotFoundException, UseGuards, HttpCode, Logger } from '@nestjs/common';
+import { Controller, Get, Put, Patch, Delete, Param, Body, Query, Post, BadRequestException, NotFoundException, UseGuards, HttpCode, Logger, ForbiddenException } from '@nestjs/common';
 import { KnowledgeUnitsService } from './knowledge-units.service';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { UserService } from '../users/user.service';
 import { UserId } from '../auth/user-id.decorator';
 import { ParseArrayPipe } from '@nestjs/common/pipes';
 
@@ -15,6 +16,7 @@ export class KnowledgeUnitsController {
     constructor(
         private readonly knowledgeUnitsService: KnowledgeUnitsService,
         private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
+        private readonly userService: UserService,
     ) { }
 
     @Get('get-all')
@@ -35,7 +37,9 @@ export class KnowledgeUnitsController {
         return this.knowledgeUnitsService.findAll({ type, content, jlptLevel });
     }
 
+    /** Admin: global word data (shared by every learner), like the bulk routes and delete below. */
     @Put(':id')
+    @UseGuards(AdminGuard)
     async update(@Param('id') id: string, @Body() body: any) {
         return this.knowledgeUnitsService.update(id, body);
     }
@@ -94,6 +98,7 @@ export class KnowledgeUnitsController {
     }
 
     @Patch('bulk')
+    @UseGuards(AdminGuard)
     @HttpCode(200)
     async bulkUpdate(@Body() body: any) {
         if (!Array.isArray(body)) {
@@ -103,6 +108,7 @@ export class KnowledgeUnitsController {
     }
 
     @Post('bulk')
+    @UseGuards(AdminGuard)
     @HttpCode(200)
     async bulkIngest(@Body() body: any) {
         if (!Array.isArray(body)) {
@@ -112,6 +118,7 @@ export class KnowledgeUnitsController {
     }
 
     @Delete(':id')
+    @UseGuards(AdminGuard)
     async remove(@UserId() uid: string, @Param('id') id: string) {
         return this.knowledgeUnitsService.cascadeDelete(uid, id);
     }
@@ -137,6 +144,10 @@ export class KnowledgeUnitsController {
         return this.knowledgeUnitsService.migrateGrammarExplanationToCorpusNotes();
     }
 
+    /**
+     * Adds a word to the caller's studies. An existing word is enrolled for anyone; creating a new
+     * global word is admin-only, and takes only type, content and data from the body.
+     */
     @Post()
     async create(@UserId() uid: string, @Body() body: any) {
         if (!body.content || !body.type) {
@@ -152,7 +163,10 @@ export class KnowledgeUnitsController {
             kuId = existing.id;
             isNewKu = false;
         } else {
-            const created = await this.knowledgeUnitsService.create(body);
+            if (!(await this.userService.isAdmin(uid))) {
+                throw new ForbiddenException('Only an admin can add a new word to the library');
+            }
+            const created = await this.knowledgeUnitsService.create({ type: body.type, content: body.content, data: body.data });
             kuId = created.id;
             isNewKu = true;
         }

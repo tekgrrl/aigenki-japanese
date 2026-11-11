@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common';
+import { devFlag } from '../lib/dev-flags';
 import { Firestore } from 'firebase-admin/firestore';
 import { FIRESTORE_CONNECTION } from '../firebase/firebase.module';
 import { UserRoot } from '../types';
@@ -35,10 +36,10 @@ export const isProfileComplete = (user: Pick<UserRoot, 'preferences'> | undefine
   storedJlptLevel(user) !== undefined;
 
 /**
- * The dev switch that makes every user an admin (`.env`, never set in production). Applied when
- * admin status is read, never stored on a user doc.
+ * The dev switch that makes every user an admin (`.env`, needs NODE_ENV=development; see devFlag).
+ * Applied when admin status is read, never stored on a user doc.
  */
-const adminForAllUsers = () => process.env.ADMIN_ALL === 'true';
+const adminForAllUsers = () => devFlag('ADMIN_ALL');
 
 @Injectable()
 export class UserService {

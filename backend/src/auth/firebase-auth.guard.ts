@@ -3,11 +3,18 @@ import { Reflector } from '@nestjs/core';
 import * as admin from 'firebase-admin';
 import { UserService } from '../users/user.service';
 import { ALLOW_INCOMPLETE_PROFILE } from './allow-incomplete-profile.decorator';
+import { devFlag } from '../lib/dev-flags';
+
+/**
+ * The local dev bypass: requests without a token are let in. Opt-in with DEV_AUTH_BYPASS=true and
+ * NODE_ENV=development in backend/.env (see devFlag).
+ */
+export const devAuthBypass = () => devFlag('DEV_AUTH_BYPASS');
 
 /**
  * Verifies the Firebase ID token and sets `request.user`. A verified user who hasn't completed
  * their profile (chosen a level) is refused with 403 PROFILE_INCOMPLETE, except on routes marked
- * @AllowIncompleteProfile(). The local dev bypass (no token) skips that check.
+ * @AllowIncompleteProfile(). The local dev bypass (no token, see devAuthBypass) skips that check.
  */
 @Injectable()
 export class FirebaseAuthGuard implements CanActivate {
@@ -22,34 +29,21 @@ export class FirebaseAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
 
-    // Local dev bypass logic
-    if (process.env.NODE_ENV !== 'production') {
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        // Allow frontend dev bypass to specify an explicit UID via header.
-        // Falls back to user_default when the header is absent.
-        const devUid = request.headers['x-dev-user-id'] || 'user_default';
-        this.logger.warn(`Local dev mode: No Bearer token found. Injecting uid: ${devUid}`);
-        request.user = { uid: devUid };
-        return true;
-      }
-
-      try {
-        const token = authHeader.split('Bearer ')[1];
-        request.user = await admin.auth().verifyIdToken(token);
-      } catch (error) {
-        this.logger.warn(`Local dev mode: Token verification failed (${error.message}). Bypassing auth and injecting user_default.`);
-        request.user = { uid: 'user_default' };
-        return true;
-      }
-      return this.checkProfile(context, request.user.uid);
+    if (devAuthBypass() && (!authHeader || !authHeader.startsWith('Bearer '))) {
+      // Local dev bypass (NEXT_PUBLIC_DEV_SKIP_AUTH on the frontend): act as the uid in
+      // X-Dev-User-Id, or the admin account when the header is absent. Skips the profile gate.
+      const devUid = request.headers['x-dev-user-id'] || 'user_default';
+      this.logger.warn(`Dev auth bypass: no Bearer token, acting as ${devUid}`);
+      request.user = { uid: devUid };
+      return true;
     }
 
-    // Production logic
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       this.logger.error('No valid Bearer token provided in headers');
       throw new UnauthorizedException('Missing authentication token');
     }
 
+    // A token that fails verification is refused even with the dev bypass on.
     const token = authHeader.split('Bearer ')[1];
     try {
       request.user = await admin.auth().verifyIdToken(token);
