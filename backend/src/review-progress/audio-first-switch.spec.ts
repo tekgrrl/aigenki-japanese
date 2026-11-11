@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { ReviewProgressService } from './review-progress.service';
 import { SequenceResetService } from './sequence-reset.service';
+import { FieldValue } from 'firebase-admin/firestore';
 import { FakeFirestore } from '../testing/fake-firestore';
 import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
@@ -41,13 +42,14 @@ function setup() {
       await db.collection('pictures').doc(`pic${i}`).set({ kuId, status: 'approved', file: `${kuId}.png`, usage: 'u' });
     }
   };
-  /** A second enrolled default-sequence word that also contains 川. */
+  /** A second enrolled default-sequence word that also contains 川, being studied (it has a card of its own). */
   const shareKanji = async () => {
+    await facets.doc('w2-own').set({ kuId: 'word2', source: { id: 'word2' }, facetType: 'Content-to-Definition', sequenceStage: 2 });
     await db.collection('knowledge-units').doc('word2').set({ type: 'Vocab', content: '小川', data: { kanji: ['小', '川'] } });
     await ukuCol.doc('word2').set({ kuId: 'word2', createdAt: { seconds: 5 } });
     ukus.set('word2', { kuId: 'word2', facet_count: 4 });
   };
-  return { db, service, ukus, facets, seed, tutorContext, shareKanji, learningProgress };
+  return { db, service, reviewProgress, ukus, userKus, facets, ukuCol, seed, tutorContext, shareKanji, learningProgress };
 }
 
 describe('audioFirstStatus', () => {
@@ -102,8 +104,8 @@ describe('returnToLessonsAsAudioFirst', () => {
     expect((await service.audioFirstStatus(UID, WORD)).facetCount).toBe(1); // only f1 is deleted
     expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 1 });
     const left = db.store(`users/${UID}/review-facets`);
-    expect([...left.keys()]).toEqual(['f2']);
-    expect(left.get('f2')!.source.id).toBe('word2');
+    expect([...left.keys()].sort()).toEqual(['f2', 'w2-own']);
+    expect(left.get('f2')).toMatchObject({ source: { id: 'word2' }, rehomedFrom: WORD });
     expect(ukus.get(KANJI)!.source).toEqual({ type: 'lesson', id: 'word2' }); // kanji UKU kept, re-sourced
     expect(learningProgress.recomputeAndCache).toHaveBeenCalledWith(UID, 'word2');
   });
@@ -114,5 +116,70 @@ describe('returnToLessonsAsAudioFirst', () => {
     ukus.set(WORD, { kuId: WORD, currentStage: 1, sequenceVariant: 'audio-first' });
     await expect(service.returnToLessonsAsAudioFirst(UID, WORD)).rejects.toBeInstanceOf(BadRequestException);
     expect(db.store(`users/${UID}/review-facets`).size).toBe(2);
+  });
+});
+
+describe('who can take over a shared kanji facet', () => {
+  it('not a word waiting for its lesson (no cards of its own): the facet is deleted with the word', async () => {
+    const { service, seed, db, shareKanji, facets } = setup();
+    await seed();
+    await shareKanji();
+    await facets.doc('w2-own').delete();
+    expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 2 });
+    expect(db.store(`users/${UID}/review-facets`).size).toBe(0);
+  });
+
+  it('a studied word below the facet\'s stage can: the facet is marked so its stage logic ignores it', async () => {
+    const { service, seed, db, shareKanji, facets, ukuCol } = setup();
+    await seed();
+    await shareKanji();
+    await facets.doc('f2').update({ sequenceStage: 7 }); // kanji reading, the last Vocab stage
+    await ukuCol.doc('word2').update({ status: 'reviewing', currentStage: 5 }); // e.g. its own stage 7 was fully deduped
+    expect(await service.returnToLessonsAsAudioFirst(UID, WORD)).toEqual({ facetsDeleted: 1 });
+    expect(db.store(`users/${UID}/review-facets`).get('f2')).toMatchObject({ source: { id: 'word2' }, rehomedFrom: WORD, sequenceStage: 7 });
+  });
+
+  it("the new owner's sequence leaves the handed-over facet out of its stage logic", async () => {
+    const { service, reviewProgress, seed, shareKanji } = setup();
+    await seed();
+    await shareKanji();
+    await service.returnToLessonsAsAudioFirst(UID, WORD);
+    const own = await (reviewProgress as any).getSequenceFacets(UID, 'word2');
+    expect(own.map((f: any) => f.id)).toEqual(['w2-own']);
+  });
+});
+
+describe('resetSequence', () => {
+  it('hands a shared kanji facet to a studied word before rebuilding, and counts it there', async () => {
+    const { service, reviewProgress, seed, db, shareKanji, ukus, ukuCol } = setup();
+    await seed();
+    await shareKanji();
+    await ukuCol.doc('word2').update({ status: 'reviewing', currentStage: 2 });
+    jest.spyOn(reviewProgress, 'initializeSequence').mockResolvedValue({ stage: 1, facetsCreated: 1 });
+    expect(await service.resetSequence(UID, WORD)).toMatchObject({ facetsDeleted: 1 });
+    const left = db.store(`users/${UID}/review-facets`);
+    expect(left.get('f2')).toMatchObject({ source: { id: 'word2' }, rehomedFrom: WORD });
+    expect(ukus.get(KANJI)!.source).toEqual({ type: 'lesson', id: 'word2' });
+    expect(ukus.get('word2')!.facet_count).toEqual(FieldValue.increment(1));
+  });
+
+  it('clears the old sequence variant when nothing could be rebuilt', async () => {
+    const { service, reviewProgress, seed, userKus } = setup();
+    await seed();
+    jest.spyOn(reviewProgress, 'initializeSequence').mockResolvedValue({ stage: 0, facetsCreated: 0 });
+    await service.resetSequence(UID, WORD);
+    expect(userKus.update).toHaveBeenCalledWith(UID, WORD, { sequenceVariant: FieldValue.delete() });
+  });
+
+  it('keeps the variant initializeSequence wrote when it rebuilt the word', async () => {
+    const { service, reviewProgress, seed, ukus, userKus } = setup();
+    await seed();
+    jest.spyOn(reviewProgress, 'initializeSequence').mockImplementation(async (_uid, kuId) => {
+      ukus.set(kuId, { ...ukus.get(kuId), sequenceVariant: 'audio-first' });
+      return { stage: 1, facetsCreated: 2 };
+    });
+    await service.resetSequence(UID, WORD);
+    expect(ukus.get(WORD)!.sequenceVariant).toBe('audio-first');
+    expect(userKus.update).not.toHaveBeenCalledWith(UID, WORD, { sequenceVariant: FieldValue.delete() });
   });
 });

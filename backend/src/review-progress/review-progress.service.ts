@@ -351,9 +351,16 @@ export class ReviewProgressService {
    * (e.g. Kanji-Component-*) target a different KU's content than the one whose
    * sequence they gate, so kuId alone can't identify stage membership.
    */
+  /**
+   * The facets this word's own sequence created (by source.id). A kanji facet handed over from
+   * another word (rehomedFrom) is left out: its stage number is the other word's, so counting it
+   * would hold back this word's stage gate or make it skip creating a stage ("already exist").
+   */
   private async getSequenceFacets(uid: string, kuId: string): Promise<ReviewFacet[]> {
     const snapshot = await this.facetStore.query(uid).where('source.id', '==', kuId).get();
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }) as ReviewFacet);
+    return snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() }) as ReviewFacet)
+      .filter(f => !f.rehomedFrom);
   }
 
   /** The facets belonging to one sequence stage (see getSequenceFacets). */

@@ -55,17 +55,26 @@ export class SequenceResetService {
     uid: string,
     kuId: string,
   ): Promise<{ facetsDeleted: number; stage: number; facetsCreated: number }> {
+    // Same as the audio-first switch: shared kanji facets go to another word, not the bin.
+    // The rebuild below then skips that kanji (per-user dedup), as it would for any later word.
+    const rehomed = await this.rehomeKanjiFacets(uid, kuId);
     const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
     const previous = await this.userKnowledgeUnitsService.findByKuId(uid, kuId);
     await this.userKnowledgeUnitsService.update(uid, kuId, { currentStage: 0, facet_count: 0 });
 
     const { stage, facetsCreated } = await this.reviewProgress.initializeSequence(uid, kuId, 0, { variant: previous?.sequenceVariant });
-    if (facetsCreated === 0) await this.learningProgressService.recomputeAndCache(uid, kuId);
+    if (facetsCreated === 0) {
+      // Nothing rebuilt (no applicable stage, or every stage deduped), so the word is back to
+      // waiting for its lesson. Don't leave the old variant on it: it would steer that enrolment,
+      // which chooses afresh.
+      await this.userKnowledgeUnitsService.update(uid, kuId, { sequenceVariant: FieldValue.delete() });
+      await this.learningProgressService.recomputeAndCache(uid, kuId);
+    }
 
     await this.removeOrphanedComponentKanji(uid, kuId, countByKuId.keys());
 
     this.logger.log(
-      `resetSequence uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
+      `resetSequence uid=${uid} kuId=${kuId}: handed ${rehomed} kanji facets to other words, deleted ${facetsDeleted} facets (${JSON.stringify(Object.fromEntries(countByKuId))}), re-initialized stage=${stage} facets=${facetsCreated}`,
     );
     return { facetsDeleted, stage, facetsCreated };
   }
@@ -99,22 +108,7 @@ export class SequenceResetService {
     const status = await this.audioFirstStatus(uid, kuId);
     if (!status.eligible) throw new BadRequestException(status.reason);
 
-    // Kanji-component facets this word introduced are shared: another enrolled word with the
-    // same kanji skipped making its own (per-user dedup). Hand those to that word instead of
-    // deleting them, so its kanji stays reviewed.
-    const rehome = await this.planKanjiRehoming(uid, kuId, await this.facetStore.forKu(uid, kuId));
-    for (const [facetId, { toKuId, kanjiKuId }] of rehome) {
-      await this.facetStore.doc(uid, facetId).update({ 'source.id': toKuId });
-      const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, kanjiKuId);
-      if (kanjiUku?.source?.type === 'lesson' && kanjiUku.source.id === kuId) {
-        await this.userKnowledgeUnitsService.update(uid, kanjiKuId, { source: { type: 'lesson', id: toKuId } });
-      }
-      await this.userKnowledgeUnitsService.update(uid, toKuId, { facet_count: FieldValue.increment(1) });
-    }
-    for (const toKuId of new Set([...rehome.values()].map(r => r.toKuId))) {
-      await this.learningProgressService.recomputeAndCache(uid, toKuId);
-    }
-
+    const rehomed = await this.rehomeKanjiFacets(uid, kuId);
     const { facetsDeleted, countByKuId } = await this.deleteSequenceFacets(uid, kuId);
     await this.userKnowledgeUnitsService.update(uid, kuId, {
       status: 'learning', // waiting for its lesson again (recompute below agrees: no facets)
@@ -130,8 +124,29 @@ export class SequenceResetService {
     const ku = await this.knowledgeUnitsService.findOneById(kuId);
     if (ku?.content) await this.tutorContext.removeFromTutorVocab(uid, ku.content);
 
-    this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, handed ${rehome.size} kanji facets to other words, back in lessons`);
+    this.logger.log(`returnToLessonsAsAudioFirst uid=${uid} kuId=${kuId}: deleted ${facetsDeleted} facets, handed ${rehomed} kanji facets to other words, back in lessons`);
     return { facetsDeleted };
+  }
+
+  /**
+   * Kanji-component facets this word introduced are shared: another enrolled word with the
+   * same kanji skipped making its own (per-user dedup). Hands those to that word instead of
+   * letting the word's teardown delete them, so its kanji stays reviewed. Returns how many moved.
+   */
+  private async rehomeKanjiFacets(uid: string, kuId: string): Promise<number> {
+    const rehome = await this.planKanjiRehoming(uid, kuId, await this.facetStore.forKu(uid, kuId));
+    for (const [facetId, { toKuId, kanjiKuId }] of rehome) {
+      await this.facetStore.doc(uid, facetId).update({ 'source.id': toKuId, rehomedFrom: kuId });
+      const kanjiUku = await this.userKnowledgeUnitsService.findByKuId(uid, kanjiKuId);
+      if (kanjiUku?.source?.type === 'lesson' && kanjiUku.source.id === kuId) {
+        await this.userKnowledgeUnitsService.update(uid, kanjiKuId, { source: { type: 'lesson', id: toKuId } });
+      }
+      await this.userKnowledgeUnitsService.update(uid, toKuId, { facet_count: FieldValue.increment(1) });
+    }
+    for (const toKuId of new Set([...rehome.values()].map(r => r.toKuId))) {
+      await this.learningProgressService.recomputeAndCache(uid, toKuId);
+    }
+    return rehome.size;
   }
 
   /**
@@ -168,6 +183,10 @@ export class SequenceResetService {
    * For each kanji-component facet in this word's sequence, another enrolled default-sequence
    * Vocab word containing the same kanji (oldest enrolment first) that should own it instead.
    * Facets with no such word aren't in the map (they're deleted with the word's sequence).
+   * The owner must be studied: at least one facet testing it. That rules out a word waiting for
+   * its lesson (a facet would make it look learned, so Start Learning would never serve it) and a
+   * stale UKU whose facets were deleted. Its stage doesn't matter: the moved facet is marked
+   * rehomedFrom, which the owner's stage logic ignores.
    */
   private async planKanjiRehoming(
     uid: string,
@@ -183,13 +202,26 @@ export class SequenceResetService {
     const ukus = (await this.db.collection('users').doc(uid).collection(USER_KUS_SUBCOLLECTION).get()).docs.map(d => d.data());
     const enrolled = new Map(ukus.filter(u => u.kuId && u.kuId !== kuId && u.sequenceVariant !== 'audio-first').map(u => [u.kuId as string, u]));
     const millis = (t: any) => (typeof t?.toMillis === 'function' ? t.toMillis() : (t?.seconds ?? t?._seconds ?? 0) * 1000);
+    const studied = new Map<string, boolean>();
+    const isStudied = async (wordId: string) => {
+      if (!studied.has(wordId)) {
+        const own = await this.facetStore.query(uid).where('kuId', '==', wordId).limit(1).get();
+        studied.set(wordId, !own.empty);
+      }
+      return studied.get(wordId)!;
+    };
     for (const f of kanjiFacets) {
       const char = f.data.content as string;
       const words = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).where('data.kanji', 'array-contains', char).get();
-      const owner = words.docs
+      const candidates = words.docs
         .filter(w => w.data().type === 'Vocab' && enrolled.has(w.id))
-        .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt))[0];
-      if (owner) plan.set(f.id!, { toKuId: owner.id, kanjiKuId: f.kuId });
+        .sort((a, b) => millis(enrolled.get(a.id)!.createdAt) - millis(enrolled.get(b.id)!.createdAt));
+      for (const w of candidates) {
+        if (await isStudied(w.id)) {
+          plan.set(f.id!, { toKuId: w.id, kanjiKuId: f.kuId });
+          break;
+        }
+      }
     }
     return plan;
   }
