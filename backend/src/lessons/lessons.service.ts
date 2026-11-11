@@ -148,77 +148,76 @@ export class LessonsService {
       throw new Error("AI response was empty.");
     }
 
-    let lessonJson: Lesson | undefined;
-
+    let lessonJson: Lesson;
     try {
       lessonJson = JSON.parse(lessonString) as Lesson;
-      (lessonJson as VocabLesson | KanjiLesson).kuId = kuId;
-
-      // --- MERGE USER DEFINITIONS (if Vocab) ---
-      // Rely on the KnowledgeUnit type, which is the source of truth
-      if (ku.type === "Vocab") {
-        const userDefinitions = ku.data.definition
-          ? ku.data.definition.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0)
-          : [];
-
-        // Ensure definitions array exists
-        if (!Array.isArray((lessonJson as any).definitions)) {
-          (lessonJson as any).definitions = [];
-        }
-
-        const aiDefinitions = (lessonJson as any).definitions || [];
-
-        // Deduplicate (case-insensitive)
-        const combined = [...userDefinitions, ...aiDefinitions];
-        const uniqueDefinitions = combined.reduce<string[]>((acc, curr) => {
-          if (!acc.some(d => d.toLowerCase() === curr.toLowerCase())) {
-            acc.push(curr);
-          }
-          return acc;
-        }, []);
-
-        (lessonJson as any).definitions = uniqueDefinitions;
-
-        // Backward compatibility for definition field
-        if ((lessonJson as any).definitions.length > 0) {
-          (lessonJson as any).definition = (lessonJson as any).definitions.join(', ');
-        }
-
-        // Safety net: the prompt already instructs the model to leave component_kanji
-        // empty for words normally written in kana (and even names examples), but it
-        // doesn't reliably comply — seen in practice for くれる, which got a component
-        // kanji (呉) that doesn't appear anywhere in the word's own kana spelling. Any
-        // listed "component" kanji that isn't actually a character in the vocab string
-        // is definitionally wrong, so filter those out regardless of what the model said.
-        const vocabText: string = (lessonJson as any).vocab ?? '';
-        const componentKanji = (lessonJson as any).component_kanji;
-        if (Array.isArray(componentKanji)) {
-          const { kept, dropped } = splitComponentKanji(vocabText, componentKanji);
-          if (dropped.length > 0) {
-            this.logger.warn(
-              `Dropping invalid component_kanji for "${vocabText}" (kuId=${kuId}): ` +
-              `${dropped.map((k: any) => k?.kanji).join(', ')} not found in the word itself`,
-            );
-          }
-          (lessonJson as any).component_kanji = kept;
-        }
-
-        // Stronger enforcement than the heuristic above: kanaOnly is an explicit
-        // "never use this word's kanji breakdown" decision (AI-set at generation time,
-        // or curated manually via the admin editor). Don't trust that the model actually
-        // left component_kanji empty just because it also set kanaOnly — force it.
-        if ((lessonJson as any).kanaOnly === true && Array.isArray((lessonJson as any).component_kanji) && (lessonJson as any).component_kanji.length > 0) {
-          this.logger.warn(`kanaOnly=true but component_kanji was non-empty for "${vocabText}" (kuId=${kuId}) — clearing`);
-          (lessonJson as any).component_kanji = [];
-        }
-      }
-
     } catch (parseError) {
       this.logger.error("Failed to parse AI JSON response for lesson", {
         lessonString,
         parseError,
       });
       throw new Error("Failed to parse AI JSON response for lesson");
+    }
+    (lessonJson as VocabLesson | KanjiLesson).kuId = kuId;
+    // The KU type is the source of truth: a Vocab KU's prompt asks for a Vocab lesson.
+    const vocabLesson = ku.type === 'Vocab' ? (lessonJson as VocabLesson) : undefined;
+
+    // --- MERGE USER DEFINITIONS (if Vocab) ---
+    if (ku.type === 'Vocab' && vocabLesson) {
+      const userDefinitions = ku.data.definition
+        ? ku.data.definition.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0)
+        : [];
+
+      // Ensure definitions array exists
+      if (!Array.isArray(vocabLesson.definitions)) {
+        vocabLesson.definitions = [];
+      }
+
+      const aiDefinitions = vocabLesson.definitions;
+
+      // Deduplicate (case-insensitive)
+      const combined = [...userDefinitions, ...aiDefinitions];
+      const uniqueDefinitions = combined.reduce<string[]>((acc, curr) => {
+        if (!acc.some(d => d.toLowerCase() === curr.toLowerCase())) {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+
+      vocabLesson.definitions = uniqueDefinitions;
+
+      // Backward compatibility for definition field
+      if (vocabLesson.definitions.length > 0) {
+        vocabLesson.definition = vocabLesson.definitions.join(', ');
+      }
+
+      // Safety net: the prompt already instructs the model to leave component_kanji
+      // empty for words normally written in kana (and even names examples), but it
+      // doesn't reliably comply — seen in practice for くれる, which got a component
+      // kanji (呉) that doesn't appear anywhere in the word's own kana spelling. Any
+      // listed "component" kanji that isn't actually a character in the vocab string
+      // is definitionally wrong, so filter those out regardless of what the model said.
+      const vocabText = vocabLesson.vocab;
+      const componentKanji = vocabLesson.component_kanji;
+      if (Array.isArray(componentKanji)) {
+        const { kept, dropped } = splitComponentKanji(vocabText, componentKanji);
+        if (dropped.length > 0) {
+          this.logger.warn(
+            `Dropping invalid component_kanji for "${vocabText}" (kuId=${kuId}): ` +
+            `${dropped.map(k => k?.kanji).join(', ')} not found in the word itself`,
+          );
+        }
+        vocabLesson.component_kanji = kept;
+      }
+
+      // Stronger enforcement than the heuristic above: kanaOnly is an explicit
+      // "never use this word's kanji breakdown" decision (AI-set at generation time,
+      // or curated manually via the admin editor). Don't trust that the model actually
+      // left component_kanji empty just because it also set kanaOnly — force it.
+      if (vocabLesson.kanaOnly === true && Array.isArray(vocabLesson.component_kanji) && vocabLesson.component_kanji.length > 0) {
+        this.logger.warn(`kanaOnly=true but component_kanji was non-empty for "${vocabText}" (kuId=${kuId}) — clearing`);
+        vocabLesson.component_kanji = [];
+      }
     }
 
     // --- SAVE TO 'lessons' collection ---
@@ -227,14 +226,13 @@ export class LessonsService {
     // Build the word's usages before returning, so the lesson comes back with them (and Start
     // Learning's lazy build has nothing to do). Not for batch runs: their BulkWriter rewrites the
     // lesson (examples included) after this returns, which would drop the usage ids.
-    if (ku.type === 'Vocab' && !cachedContentName) {
+    if (vocabLesson && !cachedContentName) {
       try {
         const r = await this.buildVocabUsages(kuId);
         if (r.built) {
-          const vl = lessonJson as VocabLesson;
-          vl.usages = r.built.usages;
-          vl.usageSetAside = r.built.usageSetAside;
-          vl.context_examples = (vl.context_examples ?? []).map((e, i) => {
+          vocabLesson.usages = r.built.usages;
+          vocabLesson.usageSetAside = r.built.usageSetAside;
+          vocabLesson.context_examples = (vocabLesson.context_examples ?? []).map((e, i) => {
             const label = r.usages[i];
             const usage = r.built!.usages.find(u => u.label === label);
             return usage ? { ...e, usage: usage.label, usageId: usage.id } : e;
@@ -248,8 +246,7 @@ export class LessonsService {
     void this.validateAndFlagLesson(uid, kuId, ku.type, ku.content, lessonJson, jlptLevel);
 
     // --- UPDATE KU WITH LESSON DATA ---
-    if (ku.type === 'Vocab') {
-      const vocabLesson = lessonJson as VocabLesson;
+    if (vocabLesson) {
       const updates: Record<string, any> = {};
 
       // Use dot notation to update nested data fields without overwriting the map
