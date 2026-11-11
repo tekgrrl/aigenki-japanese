@@ -102,6 +102,16 @@ export class ScenarioKnowledgeService {
     }
   }
 
+  /**
+   * Live-chat extraction: links an extracted word only if it's new to this learner (no UKU yet).
+   * Returns null when they already have it. Looks the word up once and hands the id to linkVocabKu.
+   */
+  async linkVocabIfNew(uid: string, scenario: Scenario, ku: ExtractedKU): Promise<ExtractedKU | null> {
+    const globalKu = await this.knowledgeUnitsService.findByContent(ku.content, 'Vocab');
+    if (globalKu && await this.userKnowledgeUnitsService.findByKuId(uid, globalKu.id)) return null;
+    return this.linkVocabKu(uid, scenario, { ...ku, kuId: globalKu?.id });
+  }
+
   /** Enroll a matched Grammar KU and write its context-example lesson. Idempotent (deterministic doc id). */
   async linkGrammarMatch(
     uid: string,

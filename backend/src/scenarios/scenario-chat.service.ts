@@ -1,9 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Scenario, ExtractedKU, ChatMessage, ScenarioEvaluation, GrammarMatch } from '../types/scenario';
 import { GeminiService } from '../gemini/gemini.service';
-import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
-import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { UserService } from '../users/user.service';
+import { UserService, excludedContentOf } from '../users/user.service';
 import { buildChatSystemPrompt, buildLiveExtractionPrompt } from '../prompts/scenario.prompts';
 import { GET_GRAMMAR_PATTERNS_DECLARATION } from '../prompts/curriculum';
 import { ScenarioKnowledgeService } from './scenario-knowledge.service';
@@ -20,20 +18,9 @@ export class ScenarioChatService {
 
   constructor(
     private readonly geminiService: GeminiService,
-    private readonly knowledgeUnitsService: KnowledgeUnitsService,
-    private readonly userKnowledgeUnitsService: UserKnowledgeUnitsService,
     private readonly userService: UserService,
     private readonly scenarioKnowledge: ScenarioKnowledgeService,
   ) {}
-
-  /** Content the user explicitly flagged "not now" — see issue #222. */
-  private async getExcludedContent(uid: string): Promise<{ excludedVocab: string[]; excludedGrammar: string[] }> {
-    const user = await this.userService.findById(uid);
-    return {
-      excludedVocab: user?.tutorContext?.excludedVocab ?? [],
-      excludedGrammar: user?.tutorContext?.excludedGrammar ?? [],
-    };
-  }
 
   /** The learner's message and the AI's reply to it, ready to append to the chat history. */
   async reply(uid: string, scenario: Scenario, userMessage: string): Promise<{ userMsg: ChatMessage; aiMsg: ChatMessage }> {
@@ -60,7 +47,7 @@ export class ScenarioChatService {
 
     const { userRole, aiRole } = scenarioRoles(scenario);
 
-    const { excludedVocab, excludedGrammar } = await this.getExcludedContent(uid);
+    const { excludedVocab, excludedGrammar } = excludedContentOf((await this.userService.findById(uid)) ?? undefined);
     const systemPrompt = buildChatSystemPrompt(scenario, aiRole, userRole, referenceScript, historyLines, excludedVocab, excludedGrammar);
 
     const aiResponse = await this.geminiService.generateChatResponse(
@@ -107,7 +94,7 @@ export class ScenarioChatService {
     }
 
     // Fallback for scenarios generated before speakerRole existed.
-    this.logger.warn(`getInitialChatHistory: dialogue[0] has no speakerRole (scenario ${scenario.id}, predates #213 fix) — falling back to fuzzy speaker-name matching`);
+    this.logger.warn(`initialChatHistory: dialogue[0] has no speakerRole (scenario ${scenario.id}, predates #213 fix) — falling back to fuzzy speaker-name matching`);
 
     const { userRole, aiRole: aiRolesRaw } = scenarioRoles(scenario);
 
@@ -209,12 +196,8 @@ export class ScenarioChatService {
     // skip anything the user already has a UserKnowledgeUnit for.
     const extractedKUs: ExtractedKU[] = [];
     for (const ku of candidateKUs) {
-      const globalKu = await this.knowledgeUnitsService.findByContent(ku.content, 'Vocab');
-      if (globalKu) {
-        const existingUku = await this.userKnowledgeUnitsService.findByKuId(uid, globalKu.id);
-        if (existingUku) continue;
-      }
-      extractedKUs.push(await this.scenarioKnowledge.linkVocabKu(uid, scenario, { ...ku, kuId: globalKu?.id }));
+      const linked = await this.scenarioKnowledge.linkVocabIfNew(uid, scenario, ku);
+      if (linked) extractedKUs.push(linked);
     }
 
     const grammarMatches: GrammarMatch[] = [];

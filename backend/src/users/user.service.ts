@@ -21,6 +21,12 @@ export const storedJlptLevel = (user: Pick<UserRoot, 'preferences'> | undefined)
 export const jlptLevelOf = (user: Pick<UserRoot, 'preferences'> | undefined): JlptLevel =>
   storedJlptLevel(user) ?? DEFAULT_JLPT_LEVEL;
 
+/** Vocab and grammar the learner flagged "not now" (issue #222), from an already-read user doc. */
+export const excludedContentOf = (user: { tutorContext?: Partial<Pick<UserRoot['tutorContext'], 'excludedVocab' | 'excludedGrammar'>> } | undefined): { excludedVocab: string[]; excludedGrammar: string[] } => ({
+  excludedVocab: user?.tutorContext?.excludedVocab ?? [],
+  excludedGrammar: user?.tutorContext?.excludedGrammar ?? [],
+});
+
 /**
  * A profile is complete once a valid level is stored. Until then the learner is sent to
  * /profile and the API refuses everything but the profile itself (FirebaseAuthGuard).

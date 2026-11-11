@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import { Firestore, CollectionReference, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import { Scenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt } from '../types/scenario';
+import { Scenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt, GrammarMatch } from '../types/scenario';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserService } from '../users/user.service';
 import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
@@ -17,7 +17,6 @@ import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
 import { buildArchitectPrompt, buildImportPrompt, SCENARIO_RESPONSE_SCHEMA } from '../prompts/scenario.prompts';
 import { GET_GRAMMAR_PATTERNS_DECLARATION } from '../prompts/curriculum';
-import { GrammarMatch } from '../types/scenario';
 import { GrammarSectionsService } from '../grammar-sections/grammar-sections.service';
 
 import { ScenarioTemplate, SCENARIO_TEMPLATES } from './templates';
@@ -27,7 +26,7 @@ import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { FacetStore } from '../facets/facet-store';
 import { stripFurigana } from '../lib/furigana-text';
-import { jlptLevelOf } from '../users/user.service';
+import { jlptLevelOf, excludedContentOf } from '../users/user.service';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
@@ -58,10 +57,6 @@ export class ScenariosService {
       return this.db.collection(SCENARIOS_COLLECTION);
     }
     return this.db.collection('users').doc(uid).collection(SCENARIOS_COLLECTION);
-  }
-
-  async getGrammarPatterns(uid: string, jlptLevel: string): Promise<unknown> {
-    return this.scenarioKnowledge.buildGrammarToolHandlers(uid).get_grammar_patterns({ jlptLevel });
   }
 
   async getAllScenarios(userId: string, limitDays?: number, state?: string): Promise<Scenario[]> {
@@ -192,12 +187,8 @@ export class ScenariosService {
       this.logger.warn(`generateScenario: sourceSectionId=${resolvedDto.sourceSectionId} not found — generating without the grammar-pattern directive`);
     }
 
-    const prompt = buildArchitectPrompt(
-      resolvedDto,
-      user?.tutorContext?.excludedVocab ?? [],
-      user?.tutorContext?.excludedGrammar ?? [],
-      grammarSection,
-    );
+    const { excludedVocab, excludedGrammar } = excludedContentOf(user ?? undefined);
+    const prompt = buildArchitectPrompt(resolvedDto, excludedVocab, excludedGrammar, grammarSection);
 
     try {
       const data = await this.geminiService.generateScenario(

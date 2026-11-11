@@ -23,6 +23,6 @@ import { PicturesModule } from '../pictures/pictures.module';
   ],
   controllers: [ScenariosController],
   providers: [ScenariosService, ScenarioChatService, ScenarioKnowledgeService],
-  exports: [ScenariosService],
+  exports: [ScenariosService, ScenarioKnowledgeService],
 })
 export class ScenariosModule { }
