@@ -81,4 +81,16 @@ describe('UserService preferences and admin', () => {
     process.env.ADMIN_ALL = 'true';
     expect(await users.isAdmin('learner')).toBe(true);
   });
+
+  it('isAdmin: ADMIN_ALL is ignored in production', async () => {
+    const savedEnv = process.env.NODE_ENV;
+    process.env.ADMIN_ALL = 'true';
+    process.env.NODE_ENV = 'production';
+    try {
+      await db.collection('users').doc('learner').set({ isAdmin: false });
+      expect(await users.isAdmin('learner')).toBe(false);
+    } finally {
+      process.env.NODE_ENV = savedEnv;
+    }
+  });
 });
