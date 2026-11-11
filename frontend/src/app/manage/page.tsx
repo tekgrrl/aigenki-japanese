@@ -385,169 +385,172 @@ export default function KnowledgeManagementPage() {
         </div>
       )}
 
-      {/* "Encounter & Capture" (Journey 1.1) form */}
-      <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
-        <h2 className="text-2xl font-semibold mb-4 text-white">
-          Add New Knowledge Unit
-        </h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* --- Core Fields --- */}
-          <div>
-            <label
-              htmlFor="kuType"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Type
-            </label>
-            <select
-              id="kuType"
-              value={newKuType}
-              onChange={(e) =>
-                setNewKuType(e.target.value as KnowledgeUnit["type"])
-              }
-              className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-            >
-              {kuTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </div>
+      {/* "Encounter & Capture" (Journey 1.1) form. Creating a new global word is admin-only;
+          learners add existing words through Search below. */}
+      {isAdmin && (
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
+          <h2 className="text-2xl font-semibold mb-4 text-white">
+            Add New Knowledge Unit
+          </h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* --- Core Fields --- */}
+            <div>
+              <label
+                htmlFor="kuType"
+                className="block text-sm font-medium text-gray-300 mb-1"
+              >
+                Type
+              </label>
+              <select
+                id="kuType"
+                value={newKuType}
+                onChange={(e) =>
+                  setNewKuType(e.target.value as KnowledgeUnit["type"])
+                }
+                className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              >
+                {kuTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div>
-            <label
-              htmlFor="kuContent"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Content
-            </label>
-            <input
-              type="text"
-              id="kuContent"
-              value={newKuContent}
-              onChange={(e) => setNewKuContent(e.target.value)}
-              placeholder="e.g., 食べる, 家族, 〜なければならない"
-              className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              required // --- VALIDATION ---
-            />
-          </div>
+            <div>
+              <label
+                htmlFor="kuContent"
+                className="block text-sm font-medium text-gray-300 mb-1"
+              >
+                Content
+              </label>
+              <input
+                type="text"
+                id="kuContent"
+                value={newKuContent}
+                onChange={(e) => setNewKuContent(e.target.value)}
+                placeholder="e.g., 食べる, 家族, 〜なければならない"
+                className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                required // --- VALIDATION ---
+              />
+            </div>
 
-          {/* --- Conditional Fields: Vocab --- */}
-          {newKuType === "Vocab" && (
-            <>
-              <div>
-                <label
-                  htmlFor="kuReading"
-                  className="block text-sm font-medium text-gray-300 mb-1"
-                >
-                  Reading (Hiragana)
-                </label>
-                <input
-                  type="text"
-                  id="kuReading"
-                  value={newKuReading}
-                  onChange={(e) => setNewKuReading(e.target.value)}
-                  placeholder="e.g., たべる, かぞく"
-                  className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  // required removed
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="kuDefinition"
-                  className="block text-sm font-medium text-gray-300 mb-1"
-                >
-                  Definition
-                </label>
-                <input
-                  type="text"
-                  id="kuDefinition"
-                  value={newKuDefinition}
-                  onChange={(e) => setNewKuDefinition(e.target.value)}
-                  placeholder="e.g., To eat, Family"
-                  className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  // required removed
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            {/* --- Conditional Fields: Vocab --- */}
+            {newKuType === "Vocab" && (
+              <>
                 <div>
                   <label
-                    htmlFor="kuJlptLevel"
+                    htmlFor="kuReading"
                     className="block text-sm font-medium text-gray-300 mb-1"
                   >
-                    JLPT Level
-                  </label>
-                  <select
-                    id="kuJlptLevel"
-                    value={newKuJlptLevel}
-                    onChange={(e) => setNewKuJlptLevel(e.target.value)}
-                    className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">None</option>
-                    <option value="N5">N5</option>
-                    <option value="N4">N4</option>
-                    <option value="N3">N3</option>
-                    <option value="N2">N2</option>
-                    <option value="N1">N1</option>
-                  </select>
-                </div>
-                <div>
-                  <label
-                    htmlFor="kuWanikaniLevel"
-                    className="block text-sm font-medium text-gray-300 mb-1"
-                  >
-                    WaniKani Level
+                    Reading (Hiragana)
                   </label>
                   <input
-                    type="number"
-                    id="kuWanikaniLevel"
-                    min="1"
-                    max="60"
-                    placeholder="1-60"
-                    value={newKuWanikaniLevel}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setNewKuWanikaniLevel(val === "" ? "" : Number(val));
-                    }}
+                    type="text"
+                    id="kuReading"
+                    value={newKuReading}
+                    onChange={(e) => setNewKuReading(e.target.value)}
+                    placeholder="e.g., たべる, かぞく"
                     className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                    // required removed
                   />
                 </div>
-              </div>
-            </>
-          )}
+                <div>
+                  <label
+                    htmlFor="kuDefinition"
+                    className="block text-sm font-medium text-gray-300 mb-1"
+                  >
+                    Definition
+                  </label>
+                  <input
+                    type="text"
+                    id="kuDefinition"
+                    value={newKuDefinition}
+                    onChange={(e) => setNewKuDefinition(e.target.value)}
+                    placeholder="e.g., To eat, Family"
+                    className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                    // required removed
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      htmlFor="kuJlptLevel"
+                      className="block text-sm font-medium text-gray-300 mb-1"
+                    >
+                      JLPT Level
+                    </label>
+                    <select
+                      id="kuJlptLevel"
+                      value={newKuJlptLevel}
+                      onChange={(e) => setNewKuJlptLevel(e.target.value)}
+                      className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">None</option>
+                      <option value="N5">N5</option>
+                      <option value="N4">N4</option>
+                      <option value="N3">N3</option>
+                      <option value="N2">N2</option>
+                      <option value="N1">N1</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="kuWanikaniLevel"
+                      className="block text-sm font-medium text-gray-300 mb-1"
+                    >
+                      WaniKani Level
+                    </label>
+                    <input
+                      type="number"
+                      id="kuWanikaniLevel"
+                      min="1"
+                      max="60"
+                      placeholder="1-60"
+                      value={newKuWanikaniLevel}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewKuWanikaniLevel(val === "" ? "" : Number(val));
+                      }}
+                      className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
-          {/* --- Common Fields --- */}
-          <div>
-            <label
-              htmlFor="kuUserNotes"
-              className="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2"
+            {/* --- Common Fields --- */}
+            <div>
+              <label
+                htmlFor="kuUserNotes"
+                className="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2"
+              >
+                Corpus Notes
+                <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-normal normal-case">
+                  AI Context
+                </span>
+              </label>
+              <textarea
+                id="kuUserNotes"
+                value={newUserNotes}
+                onChange={(e) => setNewUserNotes(e.target.value)}
+                rows={2}
+                placeholder="Context instructions for Gemini (e.g., 'Focus on polite forms')..."
+                className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              // --- VALIDATION ---
+              disabled={!isFormValid}
+              className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-500 disabled:cursor-not-allowed" // --- VALIDATION ---
             >
-              Corpus Notes
-              <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-normal normal-case">
-                AI Context
-              </span>
-            </label>
-            <textarea
-              id="kuUserNotes"
-              value={newUserNotes}
-              onChange={(e) => setNewUserNotes(e.target.value)}
-              rows={2}
-              placeholder="Context instructions for Gemini (e.g., 'Focus on polite forms')..."
-              className="w-full p-3 bg-gray-700 border-gray-600 text-white rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <button
-            type="submit"
-            // --- VALIDATION ---
-            disabled={!isFormValid}
-            className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:bg-gray-500 disabled:cursor-not-allowed" // --- VALIDATION ---
-          >
-            Add Unit
-          </button>
-        </form>
-      </div>
+              Add Unit
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Search & Enroll */}
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
