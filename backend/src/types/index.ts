@@ -598,6 +598,14 @@ export interface QuestionItem {
   };
   /** Vocab: the usage this question tests (a VocabLesson usage id). Absent on older questions. */
   usageId?: string;
+  /**
+   * Which kind of question the prompt asked for: a key of VOCAB_, NOUN_, GRAMMAR_ or
+   * CONCEPT_QUESTION_OPTIONS (e.g. 'error-correction'). Absent on questions made before
+   * 2026-11-11; the admin page guesses those from the text (lib/question-kind.ts).
+   */
+  kind?: string;
+  /** When the admin marked it reviewed on the Questions page (cleared when unmarked). */
+  reviewedAt?: string | Timestamp;
   rank: number;        // 0–100, starts at 50; suitable threshold is 30
   rejectionCount: number; // tracked for observability; not used for ranking
   createdAt: string | Timestamp;

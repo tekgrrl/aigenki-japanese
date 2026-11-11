@@ -46,6 +46,14 @@ export class FakeFirestore {
   nextId() {
     return `auto${++this.autoId}`;
   }
+  /** Ids of a collection's documents, including ones that only have subcollections (as Firestore's listDocuments). */
+  docIdsUnder(col: string): string[] {
+    const ids = new Set(this.store(col).keys());
+    for (const name of this.stores.keys()) {
+      if (name.startsWith(`${col}/`)) ids.add(name.slice(col.length + 1).split('/')[0]);
+    }
+    return [...ids];
+  }
   async getAll(...refs: FakeDocRef[]) {
     return Promise.all(refs.map(r => r.get()));
   }
@@ -123,4 +131,5 @@ class FakeQuery {
 class FakeCollection extends FakeQuery {
   doc(id?: string) { return new FakeDocRef(this.db, this.col, id ?? this.db.nextId()); }
   async add(data: Data) { const ref = this.doc(); await ref.set(data); return ref; }
+  async listDocuments() { return this.db.docIdsUnder(this.col).map(id => this.doc(id)); }
 }

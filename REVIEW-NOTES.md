@@ -107,6 +107,14 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Existing reading cards for words without kanji** (Content-to-Reading on katakana words, made
   before the no-kanji rule) are left alone, not deleted by a migration. Only new cards are stopped.
 
+## AI questions and the admin Questions page
+- **Admin edits change the shared question** for every learner whose card shows it (global data, changed
+  through the admin dashboard). Reassigning moves it to another word and drops its usage.
+- **`kind` is stored only on questions made from 2026-11-11.** Older ones show a kind guessed from their
+  text (`guessQuestionKind`), display only and never written back.
+- **Grammar questions stay 50/50** between translation and error correction until new question kinds are
+  added. Rank isn't used for anything on the admin page (too few learners for it to mean much).
+
 ## Vocab usages and the meaning card
 - **The usage set is what the lesson's examples show.** Definitions no example shows are set aside, not
   turned into usages, and missing senses are added by hand later. Accepted by the owner, including words
