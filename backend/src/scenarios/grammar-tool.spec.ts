@@ -1,13 +1,12 @@
-import { ScenariosService } from './scenarios.service';
+import { ScenarioKnowledgeService } from './scenario-knowledge.service';
 import { FakeFirestore } from '../testing/fake-firestore';
-import { FacetStore } from '../facets/facet-store';
 import { UserService } from '../users/user.service';
 
 describe('get_grammar_patterns (scenario generation tool)', () => {
   async function setup() {
     const db = new FakeFirestore();
     const none = {} as any;
-    const svc = new ScenariosService(db as any, new FacetStore(db as any), none, none, none, none, new UserService(db as any), none, none, none);
+    const svc = new ScenarioKnowledgeService(db as any, none, none, none, new UserService(db as any));
     const kus = db.collection('knowledge-units');
     await kus.doc('g-flag-false').set({ type: 'Grammar', content: 'A', data: { jlptLevel: 'N5' } });
     await kus.doc('g-no-flag').set({ type: 'Grammar', content: 'B', data: { jlptLevel: 'N5' } });
@@ -18,7 +17,7 @@ describe('get_grammar_patterns (scenario generation tool)', () => {
     await ukus.doc('2').set({ kuId: 'g-no-flag' }); // older enrolment, or the flag isn't written yet
     await ukus.doc('3').set({ kuId: 'g-above', aboveLevel: true });
     await ukus.doc('4').set({ kuId: 'g-n4', aboveLevel: false });
-    const tool = (svc as any).buildGrammarToolHandlers('u1').get_grammar_patterns;
+    const tool = svc.buildGrammarToolHandlers('u1').get_grammar_patterns;
     return { tool, db };
   }
 
