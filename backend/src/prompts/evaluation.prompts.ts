@@ -124,8 +124,8 @@ export function buildScenarioEvaluatorPrompt(
         - User Role: ${context.userRole || 'User'} (The person being evaluated)
         - AI Role: ${context.aiRole || 'AI'} (The conversation partner)
         - OBJECTIVE MET: ${context.isObjectiveMet}${context.simulationBrief ? `
-        - EXTENDED SITUATION the partner introduced: ${context.simulationBrief}
-          (Include in the feedback how the learner handled it.)` : ''}
+        - EXTENDED SITUATION the partner was asked to bring in: ${context.simulationBrief}
+          (If it came up in the transcript, include in the feedback how the learner handled it. If it never came up, don't mention it.)` : ''}
 
         TRANSCRIPT:
         ${historyText}

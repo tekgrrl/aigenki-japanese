@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { stripFurigana } from "@/lib/furigana";
 import type { ScenarioDialogueLine } from "@/types/scenario";
 
 interface Props {
@@ -33,7 +34,7 @@ export default function ScenePlayer({ dialogue, userRole, title = "Script" }: Pr
           const res = await apiFetch("/api/audio/speak", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: dialogue[i].text }),
+            body: JSON.stringify({ text: stripFurigana(dialogue[i].text) }), // TTS mustn't read the [readings]
           });
           return res.ok ? URL.createObjectURL(await res.blob()) : null;
         } catch {
@@ -57,8 +58,8 @@ export default function ScenePlayer({ dialogue, userRole, title = "Script" }: Pr
       setCurrent(i);
       lineRefs.current[i]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       const url = await urlFor(i);
+      if (run !== runId.current) return; // paused, replayed or unmounted while it loaded
       if (i + 1 < dialogue.length) void urlFor(i + 1);
-      if (run !== runId.current) return;
       if (!url) continue; // no audio for this line: move on
       const audio = new Audio(url);
       audioRef.current = audio;

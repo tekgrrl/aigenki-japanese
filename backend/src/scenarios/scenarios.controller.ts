@@ -46,6 +46,13 @@ export class ScenariosController {
     return this.scenariosService.startPoolScenario(uid, poolId);
   }
 
+  /** Admin: a pool scenario's brief and script-word count, for the admin panel. */
+  @Get('pool/:poolId')
+  @UseGuards(AdminGuard)
+  poolAdminSummary(@Param('poolId') poolId: string) {
+    return this.scenariosService.poolAdminSummary(poolId);
+  }
+
   /** Admin: set a pool scenario's simulation brief (the extension the role play adds). */
   @Put('pool/:poolId')
   @UseGuards(AdminGuard)

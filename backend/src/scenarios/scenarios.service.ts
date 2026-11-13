@@ -128,26 +128,45 @@ export class ScenariosService {
     if (!already.empty) throw new BadRequestException(`Already published to the pool as ${already.docs[0].id}`);
     const ref = col.doc();
     const pool = poolContentOf(scenario, { uid, scenarioId }, ref.id);
-    // Script words are a nice-to-have: a failed call doesn't stop the publish (backfill later).
-    const secondaryKUs = await this.scriptWordsFor(pool).catch(err => {
-      this.logger.error(`Script words for ${ref.id} failed; publish without them`, err);
-      return undefined;
-    });
-    await ref.set({ ...pool, ...(secondaryKUs ? { secondaryKUs } : {}) });
+    // Written before the slow script-words call, so a second publish soon after sees it.
+    await ref.set(pool);
     this.logger.log(`Published scenario ${scenarioId} (uid=${uid}) to the pool as ${ref.id}`);
+    // Script words are a nice-to-have: a failed call doesn't undo the publish (backfill later).
+    try {
+      await ref.update({ secondaryKUs: await this.scriptWordsFor(pool) });
+    } catch (err) {
+      this.logger.error(`Script words for ${ref.id} failed; published without them`, err);
+    }
     return { poolId: ref.id };
   }
 
-  /** The script's other content words (not Key Vocabulary), as unlinked extracted KUs. One Gemini call. */
+  /**
+   * The script's other content words (not Key Vocabulary), one Gemini call. Admin-only (publish,
+   * rebuild): each word is resolved to its global KU here, created if new, so learners who opt in
+   * only enrol existing words (global word writes are admin-only).
+   */
   private async scriptWordsFor(scenario: Pick<Scenario, 'title' | 'dialogue' | 'extractedKUs'>): Promise<ExtractedKU[]> {
     const lines = (scenario.dialogue ?? []).map(l => stripFurigana(l.text));
-    const key = (scenario.extractedKUs ?? []).map(k => k.content);
+    const key = (scenario.extractedKUs ?? []).map(k => k.content.trim());
     const words = await this.geminiService.extractScriptVocab(lines, key, scenario.title);
-    const keySet = new Set(key);
-    const seen = new Set<string>();
-    return words
-      .filter(w => w.content && !keySet.has(w.content) && !seen.has(w.content) && seen.add(w.content))
-      .map(w => ({ content: w.content.trim(), reading: w.reading, meaning: w.meaning, type: 'vocab' as const, status: 'new' as const, jlptLevel: w.jlptLevel }));
+    const skip = new Set(key);
+    const kept: ExtractedKU[] = [];
+    for (const w of words) {
+      const content = (w.content ?? '').trim();
+      if (!content || skip.has(content)) continue;
+      skip.add(content);
+      const kuId = await this.knowledgeUnitsService.ensureVocab(content, { reading: w.reading, definition: w.meaning, jlptLevel: w.jlptLevel });
+      kept.push({ content, reading: w.reading, meaning: w.meaning, type: 'vocab', status: 'new', jlptLevel: w.jlptLevel, kuId });
+    }
+    return kept;
+  }
+
+  /** Admin: a pool scenario's own brief and script-word count (not a learner's merged copy). */
+  async poolAdminSummary(poolId: string): Promise<{ simulationBrief: string; scriptWords: number }> {
+    const doc = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId).get();
+    if (!doc.exists) throw new NotFoundException('Pool scenario not found');
+    const pool = doc.data() as PoolScenario;
+    return { simulationBrief: pool.simulationBrief ?? '', scriptWords: pool.secondaryKUs?.length ?? 0 };
   }
 
   /** Admin: (re)build a pool scenario's script words. */
@@ -589,12 +608,13 @@ export class ScenariosService {
 
         // Opted in: the script's other words go to the learning queue too, but not into the gate.
         // Linked last, so Start Learning (oldest first) serves the Key items before them.
+        // Only words already resolved to a KU (at publish or rebuild): a learner never creates one.
         if (opts.includeScriptWords && scenario.secondaryKUs?.length) {
-          const linked: ExtractedKU[] = [];
-          for (const ku of scenario.secondaryKUs) {
-            linked.push(await this.scenarioKnowledge.linkVocabKu(uid, scenario, ku));
+          const resolved = scenario.secondaryKUs.filter(ku => ku.kuId);
+          if (resolved.length < scenario.secondaryKUs.length) {
+            this.logger.warn(`Scenario ${scenario.id}: ${scenario.secondaryKUs.length - resolved.length} script word(s) have no KU yet (rebuild script words); skipped`);
           }
-          updateData.secondaryKUs = linked;
+          updateData.secondaryKUs = await Promise.all(resolved.map(ku => this.scenarioKnowledge.linkVocabKu(uid, scenario, ku)));
         }
 
         newState = 'drill';

@@ -542,11 +542,12 @@ export default function ScenarioPage({
       </header>
 
       {isAdmin && scenario.poolId && (
-        <PoolAdminPanel poolId={scenario.poolId} brief={scenario.simulationBrief ?? ""} scriptWords={scenario.secondaryKUs?.length ?? 0} onChanged={fetchScenario} />
+        <PoolAdminPanel poolId={scenario.poolId} onChanged={fetchScenario} />
       )}
 
       {/* The learner can always go back to the play-through */}
-      {(scenario.state === "simulate" || scenario.state === "completed") && (
+      {/* (A completed scenario without an evaluation falls through to the script view below.) */}
+      {(scenario.state === "simulate" || (scenario.state === "completed" && scenario.evaluation)) && (
         <details className="rounded-xl border border-slate-200 bg-white p-4">
           <summary className="cursor-pointer font-medium text-slate-700">Watch the scene again</summary>
           <div className="mt-4">
@@ -1045,16 +1046,27 @@ export default function ScenarioPage({
   );
 }
 
-/** Admin, on a pool scenario: write its simulation brief and (re)build its script words. */
-function PoolAdminPanel({ poolId, brief, scriptWords, onChanged }: {
-  poolId: string;
-  brief: string;
-  scriptWords: number;
-  onChanged: () => unknown;
-}) {
-  const [draft, setDraft] = useState(brief);
+/**
+ * Admin, on a pool scenario: write its simulation brief and (re)build its script words. Reads the
+ * pool doc itself, not this page's merged copy (the admin's own progress could hide the pool's list).
+ */
+function PoolAdminPanel({ poolId, onChanged }: { poolId: string; onChanged: () => unknown }) {
+  const [brief, setBrief] = useState("");
+  const [scriptWords, setScriptWords] = useState(0);
+  const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const res = await apiFetch(`/api/scenarios/pool/${poolId}`);
+    if (!res.ok) return;
+    const body = await res.json();
+    setBrief(body.simulationBrief ?? "");
+    setDraft(body.simulationBrief ?? "");
+    setScriptWords(body.scriptWords ?? 0);
+  }, [poolId]);
+
+  useEffect(() => { void load(); }, [load]);
 
   const run = async (label: string, call: () => Promise<Response>, done: (body: any) => string) => {
     setBusy(true);
@@ -1063,7 +1075,7 @@ function PoolAdminPanel({ poolId, brief, scriptWords, onChanged }: {
       const res = await call();
       const body = await res.json().catch(() => ({}));
       setStatus(res.ok ? done(body) : `Failed: ${body.message ?? res.status}`);
-      if (res.ok) await onChanged();
+      if (res.ok) await Promise.all([load(), onChanged()]);
     } catch (e) {
       setStatus(`Failed: ${(e as Error).message}`);
     } finally {

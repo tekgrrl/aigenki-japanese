@@ -23,27 +23,28 @@ function setup(words: { content: string; reading: string; meaning: string; jlptL
   };
   const linked: string[] = [];
   const knowledge = {
-    linkVocabKu: jest.fn(async (_uid: string, _s: Scenario, ku: any) => { linked.push(ku.content); return { ...ku, kuId: `k-${ku.content}`, status: 'learning' }; }),
+    linkVocabKu: jest.fn(async (_uid: string, _s: Scenario, ku: any) => { linked.push(ku.content); return { ...ku, kuId: ku.kuId ?? `k-${ku.content}`, status: 'learning' }; }),
     linkGrammarMatch: jest.fn(async () => true),
   };
+  const kus = { ensureVocab: jest.fn(async (content: string) => `ku-${content}`) };
   const none = {} as any;
-  const service = new (ScenariosService as any)(db, none, gemini, none, none, none, none, none, knowledge, none) as ScenariosService;
+  const service = new (ScenariosService as any)(db, none, gemini, kus, none, none, none, none, knowledge, none) as ScenariosService;
   return { db, service, gemini, linked };
 }
 
 describe('script words (secondary Vocab)', () => {
-  it('are found at publish: plain script lines, Key Vocabulary and repeats left out', async () => {
+  it('are found at publish: plain script lines, Key Vocabulary and repeats left out (after trimming), each resolved to a KU', async () => {
     const { db, service, gemini } = setup([
       { content: '電車', reading: 'でんしゃ', meaning: 'train', jlptLevel: 'N5' },
-      { content: '駅', reading: 'えき', meaning: 'station', jlptLevel: 'N5' },
-      { content: '電車', reading: 'でんしゃ', meaning: 'train', jlptLevel: 'N5' },
+      { content: ' 駅', reading: 'えき', meaning: 'station', jlptLevel: 'N5' },
+      { content: '電車 ', reading: 'でんしゃ', meaning: 'train', jlptLevel: 'N5' },
     ]);
     await db.collection('users').doc('a1').collection('scenarios').doc('s0').set(scenario);
     const { poolId } = await service.publishToPool('a1', 's0');
 
     expect(gemini.extractScriptVocab).toHaveBeenCalledWith(['電車は三番線です。'], ['駅'], 'At the station');
     const pool = (await db.collection('scenario-pool').doc(poolId).get()).data()!;
-    expect(pool.secondaryKUs).toEqual([{ content: '電車', reading: 'でんしゃ', meaning: 'train', type: 'vocab', status: 'new', jlptLevel: 'N5' }]);
+    expect(pool.secondaryKUs).toEqual([{ content: '電車', reading: 'でんしゃ', meaning: 'train', type: 'vocab', status: 'new', jlptLevel: 'N5', kuId: 'ku-電車' }]);
   });
 
   it("don't stop a publish when the call fails", async () => {
@@ -62,7 +63,10 @@ describe('script words (secondary Vocab)', () => {
     const { db, service, linked } = setup([]);
     await db.collection('scenario-pool').doc('p1').set({
       ...scenario, id: 'p1', publishedFrom: { uid: 'a1', scenarioId: 's0' },
-      secondaryKUs: [{ content: '電車', reading: 'でんしゃ', meaning: 'train', type: 'vocab', status: 'new' }],
+      secondaryKUs: [
+        { content: '電車', reading: 'でんしゃ', meaning: 'train', type: 'vocab', status: 'new', kuId: 'ku-電車' },
+        { content: '番線', reading: 'ばんせん', meaning: 'platform', type: 'vocab', status: 'new' }, // not resolved yet: skipped
+      ],
     });
     await service.startPoolScenario('u1', 'p1');
     await service.advanceState('u1', 'p1', { includeScriptWords });
@@ -70,7 +74,7 @@ describe('script words (secondary Vocab)', () => {
     expect(linked).toEqual(expected);
     const learner = (await db.collection('users').doc('u1').collection('scenarios').doc('p1').get()).data()!;
     expect(learner.state).toBe('drill');
-    expect(learner.secondaryKUs?.map((k: any) => k.kuId)).toEqual(includeScriptWords ? ['k-電車'] : undefined);
+    expect(learner.secondaryKUs?.map((k: any) => k.kuId)).toEqual(includeScriptWords ? ['ku-電車'] : undefined);
   });
 });
 
@@ -95,5 +99,6 @@ describe('simulation brief', () => {
     const ctx = { title: 't', goal: 'g', difficulty: 'N5', isObjectiveMet: true };
     expect(buildScenarioEvaluatorPrompt([], { ...ctx, simulationBrief: 'The train is delayed.' })).toContain('The train is delayed.');
     expect(buildScenarioEvaluatorPrompt([], ctx)).not.toContain('EXTENDED SITUATION');
+    expect(buildScenarioEvaluatorPrompt([], { ...ctx, simulationBrief: 'x' })).toContain('If it came up');
   });
 });
