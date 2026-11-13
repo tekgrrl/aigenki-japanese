@@ -10,7 +10,7 @@ import { apiFetch } from "@/lib/api-client";
 import ScenePicture from "@/components/scenarios/ScenePicture";
 import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
 
-const API_BASE_URL = "http://localhost:3000/api";
+const API_BASE_URL = "/api";
 
 const ROLEPLAY_MIN_SRS_STAGE = 3; // default until ku-status answers: every item at Familiar (stage 3) before role-playing
 

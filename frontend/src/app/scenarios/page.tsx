@@ -7,7 +7,7 @@ import { Scenario, ScenarioDifficulty } from "@/types/scenario";
 import { apiFetch } from "@/lib/api-client";
 
 // TODO Configuration for API URL - adjust if using env vars
-const API_BASE_URL = "http://localhost:3000/api";
+const API_BASE_URL = "/api";
 
 export default function ScenariosDashboard() {
   const router = useRouter();
