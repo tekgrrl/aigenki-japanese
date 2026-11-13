@@ -5,10 +5,11 @@
  * the blanks assembly card the backend builds from them (POST /lessons/assembly-card, no AI).
  * An experiment harness: nothing here touches learners' review cards.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as wanakana from "wanakana";
 import { apiFetch } from "@/lib/api-client";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { normalizeAssemblyAnswer as normalize } from "@/lib/assembly-answer";
 import type { GrammarLesson, KnowledgeUnit } from "@/types";
 
 type Example = GrammarLesson["examples"][number];
@@ -23,9 +24,6 @@ interface AssemblyCard {
 }
 
 const LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
-
-/** Same rule as SentenceAssemblyCard: trailing punctuation and spaces don't count. */
-const normalize = (s: string) => s.replace(/[。、！？!?\.]+$/u, "").replace(/[\s　]+/g, "").trim();
 
 function shuffled(n: number): number[] {
   const a = Array.from({ length: n }, (_, i) => i);
@@ -44,6 +42,8 @@ export default function AssemblyLabPage() {
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [trial, setTrial] = useState<{ index: number; card: AssemblyCard; key: number } | null>(null);
+  // The lesson most recently asked for: a slower response for an earlier click is ignored.
+  const requested = useRef<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -59,9 +59,10 @@ export default function AssemblyLabPage() {
     setTrial(null);
     setDirty(false);
     setStatus(null);
+    requested.current = id;
     const res = await apiFetch(`/api/lessons?kuId=${id}`);
     const lesson = res.ok ? await res.json() : null;
-    setExamples(lesson?.examples ?? []);
+    if (requested.current === id) setExamples(lesson?.examples ?? []);
   }, [dirty]);
 
   const changeExample = (index: number, change: Partial<Example>) => {
@@ -96,10 +97,23 @@ export default function AssemblyLabPage() {
   const save = async () => {
     if (!kuId || !examples) return;
     setStatus("Saving…");
+    // Write only what the lab changes (fragments and marks) onto the lesson as it is now, so
+    // anything stored since it was loaded (e.g. furigana, an editor change) isn't overwritten.
+    const latest = await apiFetch(`/api/lessons?kuId=${kuId}`);
+    const current: Example[] | undefined = latest.ok ? (await latest.json())?.examples : undefined;
+    if (!current || current.length !== examples.length || current.some((ex, i) => ex.japanese !== examples[i].japanese)) {
+      setStatus("The lesson's examples changed since you opened it. Reopen it and mark again.");
+      return;
+    }
+    const merged = current.map((ex, i) => {
+      const { patternFragments: _old, ...rest } = ex;
+      const marks = examples[i].patternFragments;
+      return { ...rest, fragments: examples[i].fragments, ...(marks ? { patternFragments: marks } : {}) };
+    });
     const res = await apiFetch(`/api/lessons/${kuId}/global`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ updates: { examples } }),
+      body: JSON.stringify({ updates: { examples: merged } }),
     });
     setStatus(res.ok ? "Saved." : `Save failed (HTTP ${res.status})`);
     if (res.ok) setDirty(false);
@@ -161,7 +175,7 @@ export default function AssemblyLabPage() {
 
           {examples?.map((ex, i) => (
             <ExampleRow
-              key={i}
+              key={`${kuId}-${i}`}
               index={i}
               example={ex}
               onToggle={f => toggleMark(i, f)}
@@ -263,7 +277,8 @@ function Trial({ card }: { card: AssemblyCard }) {
   const [pool, setPool] = useState<number[]>(() => shuffled(card.pieces.length));
   const [placed, setPlaced] = useState<number[]>([]);
   const [orderResult, setOrderResult] = useState<string | null>(null);
-  const [typed, setTyped] = useState<string[]>(() => card.blanks.map(() => ""));
+  // What's typed in each blank chip, keyed by the chip, so it moves with the chip when re-placed.
+  const [typed, setTyped] = useState<Record<number, string>>({});
   const [blankResults, setBlankResults] = useState<boolean[] | null>(null);
   const speech = useSpeechRecognition();
   const [speechResult, setSpeechResult] = useState<string | null>(null);
@@ -285,9 +300,17 @@ function Trial({ card }: { card: AssemblyCard }) {
     setOrderResult(matchesSentence(joined) ? "✓ Order accepted" : `✗ Order not accepted: ${joined}`);
   };
 
+  // The chip standing for each blank of the sentence (inverse of blankAt).
+  const chipFor = useMemo(() => {
+    const chips: number[] = [];
+    blankAt.forEach((k, p) => { chips[k] = p; });
+    return chips;
+  }, [blankAt]);
+  const typedFor = (k: number) => typed[chipFor[k]] ?? "";
+
   const checkBlanks = () => {
     setBlankResults(card.blanks.map((b, k) =>
-      b.accept.some(a => wanakana.toHiragana(normalize(a)) === wanakana.toHiragana(normalize(typed[k]))),
+      b.accept.some(a => wanakana.toHiragana(normalize(a)) === wanakana.toHiragana(normalize(typedFor(k)))),
     ));
   };
 
@@ -316,8 +339,8 @@ function Trial({ card }: { card: AssemblyCard }) {
             return (
               <span key={p} className="flex items-center gap-1">
                 <input
-                  value={typed[k]}
-                  onChange={e => { const v = wanakana.toKana(e.target.value, { IMEMode: true }); setTyped(prev => prev.map((x, j) => (j === k ? v : x))); setBlankResults(null); }}
+                  value={typed[p] ?? ""}
+                  onChange={e => { const v = wanakana.toKana(e.target.value, { IMEMode: true }); setTyped(prev => ({ ...prev, [p]: v })); setBlankResults(null); }}
                   placeholder="＿＿"
                   className={`w-24 rounded border px-2 py-1 text-base bg-shodo-paper ${blankResults ? (blankResults[k] ? "border-shodo-matcha" : "border-shodo-stamp-red") : "border-dashed border-shodo-ink-faint"}`}
                 />
@@ -343,7 +366,7 @@ function Trial({ card }: { card: AssemblyCard }) {
         {blankResults && (
           <ul className="text-sm mt-1 text-shodo-ink">
             {card.blanks.map((b, k) => (
-              <li key={k}>{blankResults[k] ? "✓" : "✗"} blank {k + 1}: typed “{typed[k]}”, accepts {b.accept.map(a => `“${a}”`).join(" or ")}</li>
+              <li key={k}>{blankResults[k] ? "✓" : "✗"} blank {k + 1}: typed “{typedFor(k)}”, accepts {b.accept.map(a => `“${a}”`).join(" or ")}</li>
             ))}
           </ul>
         )}

@@ -44,21 +44,37 @@ export class AssemblyError extends Error {}
 const FINAL_PUNCTUATION = /[。！？!?.]+$/u;
 const KANJI_RUN = /[\u4e00-\u9faf\u3005]+/u;
 
-/** Katakana → hiragana; everything else unchanged. */
+/** Katakana → hiragana; everything else unchanged. ヵ/ヶ are left alone (in 3ヶ月 they read か/が). */
 export function toHiragana(text: string): string {
-  return text.replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  return text.replace(/[\u30a1-\u30f4]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 }
 
-/** Pattern marks are usable: at least one, none repeated or out of range, and not every fragment. */
+/**
+ * The fragments as the card shows them: sentence-final punctuation stripped from the last one
+ * (it would give away which piece goes last), and `kept` = indices of pieces left to place
+ * (a lone 。 piece disappears).
+ */
+function displayPieces(fragments: string[]): { texts: string[]; kept: number[] } {
+  const texts = [...fragments];
+  texts[texts.length - 1] = texts[texts.length - 1].replace(FINAL_PUNCTUATION, '');
+  return { texts, kept: texts.map((_, i) => i).filter(i => texts[i].trim() !== '') };
+}
+
+/**
+ * Pattern marks can build a card: at least one, none repeated or out of range, none on a lone
+ * final 。, and at least one piece left unmarked. The card builder and the save-time backstop
+ * (dropInvalidPatternMarks) both use this, so saved marks always build.
+ */
 export function validPatternMarks(fragments: unknown, marks: unknown): boolean {
-  if (!Array.isArray(fragments) || !Array.isArray(marks) || marks.length === 0) return false;
-  if (marks.length >= fragments.length) return false;
+  if (!Array.isArray(fragments) || fragments.length === 0 || fragments.some(f => typeof f !== 'string')) return false;
+  if (!Array.isArray(marks) || marks.length === 0) return false;
+  const { kept } = displayPieces(fragments);
   const seen = new Set<number>();
   for (const m of marks) {
-    if (!Number.isInteger(m) || m < 0 || m >= fragments.length || seen.has(m)) return false;
+    if (!Number.isInteger(m) || !kept.includes(m) || seen.has(m)) return false;
     seen.add(m);
   }
-  return true;
+  return seen.size < kept.length;
 }
 
 /**
@@ -107,15 +123,9 @@ export function buildAssemblyCard(example: AssemblyExampleInput): AssemblyCard {
     throw new AssemblyError('Mark at least one fragment as the pattern, and leave at least one unmarked');
   }
 
-  // Sentence-final punctuation would give away which piece goes last; a lone 。 piece is dropped.
   const offsets = fragments.map((_, i) => fragments.slice(0, i).join('').length);
-  const texts = [...fragments];
-  texts[texts.length - 1] = texts[texts.length - 1].replace(FINAL_PUNCTUATION, '');
-  const kept = texts.map((t, i) => i).filter(i => texts[i].trim() !== '');
-  const marked = new Set(example.patternFragments!.filter(i => kept.includes(i)));
-  if (marked.size === 0 || marked.size === kept.length) {
-    throw new AssemblyError('Mark at least one fragment as the pattern, and leave at least one unmarked');
-  }
+  const { texts, kept } = displayPieces(fragments);
+  const marked = new Set(example.patternFragments!);
 
   const units = readingUnits(japanese, example.furigana);
   const pieces: AssemblyPiece[] = [];

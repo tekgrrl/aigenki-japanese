@@ -71,6 +71,12 @@ describe('buildAssemblyCard', () => {
 });
 
 describe('validPatternMarks', () => {
+  it('agrees with the card builder about a lone final 。', () => {
+    expect(validPatternMarks(['行き', 'ます', '。'], [0, 1])).toBe(false); // nothing left to place
+    expect(validPatternMarks(['行き', 'ます', '。'], [2])).toBe(false);    // marks the 。 itself
+    expect(validPatternMarks(['行き', 'ます', '。'], [1])).toBe(true);
+  });
+
   it('rejects repeats and non-integers', () => {
     expect(validPatternMarks(['a', 'b', 'c'], [1, 1])).toBe(false);
     expect(validPatternMarks(['a', 'b', 'c'], [0.5])).toBe(false);
@@ -81,5 +87,6 @@ describe('validPatternMarks', () => {
 describe('toHiragana', () => {
   it('converts katakana and leaves the rest', () => {
     expect(toHiragana('テレビを見ます')).toBe('てれびを見ます');
+    expect(toHiragana('ヴ3ヶ月')).toBe('ゔ3ヶ月');
   });
 });

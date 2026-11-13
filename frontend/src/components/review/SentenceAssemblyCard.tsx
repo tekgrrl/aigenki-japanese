@@ -6,6 +6,7 @@ import { Volume2 } from "lucide-react";
 import { ReviewFacet } from "@/types";
 import { apiFetch } from "@/lib/api-client";
 import ReviewActionButtons from "./ReviewActionButtons";
+import { normalizeAssemblyAnswer } from "@/lib/assembly-answer";
 
 const LONG_PRESS_MS = 500;
 
@@ -74,7 +75,7 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
   );
   const { fragments, answer = "", english, accepted_alternatives, learnableTerms } = example;
 
-  const normalize = (s: string) => s.replace(/[。、！？!?\.]+$/u, "").replace(/[\s　]+/g, "").trim();
+  const normalize = normalizeAssemblyAnswer;
   const missingData = !Array.isArray(fragments) || fragments.length === 0 || !answer;
   const [available, setAvailable] = useState<string[]>(() =>
     shuffleArray(Array.isArray(fragments) ? stripFinalPunctuation(fragments) : []),
