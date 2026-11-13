@@ -1,4 +1,4 @@
-import {
+import { HttpCode,
   Controller,
   Get,
   Post,
@@ -29,6 +29,26 @@ export class ScenariosController {
   @Get('templates')
   getTemplates() {
     return this.scenariosService.getTemplates();
+  }
+
+  /** The shared scenario pool learners choose from (content only). */
+  @Get('pool')
+  listPool() {
+    return this.scenariosService.listPool();
+  }
+
+  /** Start a pool scenario: the learner's own progress doc (id = pool id); idempotent. */
+  @Post('pool/:poolId/start')
+  @HttpCode(200)
+  startPoolScenario(@UserId() uid: string, @Param('poolId') poolId: string) {
+    return this.scenariosService.startPoolScenario(uid, poolId);
+  }
+
+  /** Admin: publish one of their own scenarios to the pool. */
+  @Post(':id/publish')
+  @UseGuards(AdminGuard)
+  publishToPool(@UserId() uid: string, @Param('id') id: string) {
+    return this.scenariosService.publishToPool(uid, id);
   }
 
   @Get('roles')

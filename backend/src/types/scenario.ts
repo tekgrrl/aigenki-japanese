@@ -146,9 +146,28 @@ export interface Scenario {
     progress?: Record<string, LevelProgress>;
     currentLevelStatus?: ProgressStatus;
 
+    /**
+     * Set on a learner's copy of a pool scenario (doc id = pool id): the shared content comes from
+     * `scenario-pool/{poolId}` and this doc holds the learner's progress (scenarios/pool.ts).
+     */
+    poolId?: string;
+
     /** Set to true when all linked vocab KUs have minSrsStage >= VOCAB_READY_MIN_STAGE (3), Key Grammar included. Written by ReviewOutcomeService.onGraded after a review. Used for dashboard queries. */
     vocabReady?: boolean;
 }
+
+/**
+ * A shared scenario in the pre-created pool (`scenario-pool/{id}`): content only, no progress.
+ * Learners start it into their own scenario doc; see scenarios/pool.ts for how the two combine.
+ */
+export type PoolScenario = Pick<Scenario,
+    'title' | 'description' | 'difficultyLevel' | 'setting' | 'roles' | 'dialogue' | 'extractedKUs' | 'grammarMatches' | 'grammarNotes'
+> & {
+    id: string;
+    /** The admin's scenario it was published from. */
+    publishedFrom: { uid: string; scenarioId: string };
+    createdAt: Timestamp;
+};
 
 export interface ScenarioTemplate {
     id: string;

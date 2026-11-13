@@ -7,6 +7,7 @@ import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { Volume2, Mic, MicOff } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { useAuth } from "@/providers/AuthProvider";
 import ScenePicture from "@/components/scenarios/ScenePicture";
 import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
 
@@ -33,6 +34,8 @@ export default function ScenarioPage({
   const { id } = use(params);
 
   const [scenario, setScenario] = useState<Scenario | null>(null);
+  const { isAdmin } = useAuth();
+  const [publishStatus, setPublishStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -318,6 +321,14 @@ export default function ScenarioPage({
     }
   };
 
+  /** Admin: copy this scenario's content into the shared pool learners choose from. */
+  const handlePublish = async () => {
+    setPublishStatus("Publishing…");
+    const res = await apiFetch(`/api/scenarios/${id}/publish`, { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    setPublishStatus(res.ok ? `Published to the pool (${body.poolId})` : `Publish failed: ${body.message ?? res.status}`);
+  };
+
   const handleReset = async (archive: boolean) => {
     if (
       !confirm(
@@ -482,6 +493,18 @@ export default function ScenarioPage({
               {scenario.description}
             </p>
           </div>
+          {isAdmin && !scenario.poolId && (
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <button
+                onClick={handlePublish}
+                disabled={publishStatus === "Publishing…"}
+                className="text-sm px-3 py-1.5 rounded bg-shodo-ink text-shodo-paper disabled:opacity-50"
+              >
+                Publish to pool
+              </button>
+              {publishStatus && <span className="text-xs text-slate-500">{publishStatus}</span>}
+            </div>
+          )}
           {/* Session Controls */}
           {scenario.state === "simulate" && (
             <button

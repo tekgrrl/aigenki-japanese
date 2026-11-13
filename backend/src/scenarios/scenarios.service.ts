@@ -8,10 +8,11 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import { Firestore, CollectionReference, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import { Scenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt, GrammarMatch } from '../types/scenario';
+import { Scenario, PoolScenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt, GrammarMatch } from '../types/scenario';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserService } from '../users/user.service';
-import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
+import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, SCENARIO_POOL_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
+import { mergePoolScenario, newLearnerDoc, poolContentOf } from './pool';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
@@ -75,7 +76,53 @@ export class ScenariosService {
     }
 
     const snapshot = await query.get();
-    return snapshot.docs.map(doc => doc.data() as Scenario);
+    return this.withPoolContent(snapshot.docs.map(doc => doc.data() as Scenario));
+  }
+
+  /** Fills in the shared content of learners' pool scenarios (one read for all the pool docs). */
+  private async withPoolContent(scenarios: Scenario[]): Promise<Scenario[]> {
+    const poolIds = [...new Set(scenarios.map(s => s.poolId).filter((id): id is string => !!id))];
+    if (poolIds.length === 0) return scenarios;
+    const pool = this.db.collection(SCENARIO_POOL_COLLECTION);
+    const docs = await this.db.getAll(...poolIds.map(id => pool.doc(id)));
+    const byId = new Map(docs.filter(d => d.exists).map(d => [d.id, d.data() as PoolScenario]));
+    return scenarios.map(s => (s.poolId ? mergePoolScenario(byId.get(s.poolId), s) : s));
+  }
+
+  /** The pool scenarios a learner can start, by level then title (content only, no progress). */
+  async listPool(): Promise<Pick<PoolScenario, 'id' | 'title' | 'description' | 'difficultyLevel' | 'setting'>[]> {
+    const snap = await this.db.collection(SCENARIO_POOL_COLLECTION).get();
+    const rank = (l: string) => ['N5', 'N4', 'N3', 'N2', 'N1'].indexOf(l);
+    return snap.docs
+      .map(d => d.data() as PoolScenario)
+      .sort((a, b) => rank(a.difficultyLevel) - rank(b.difficultyLevel) || (a.title ?? '').localeCompare(b.title ?? ''))
+      .map(p => ({ id: p.id, title: p.title, description: p.description, difficultyLevel: p.difficultyLevel, setting: p.setting }));
+  }
+
+  /**
+   * Starts a pool scenario for a learner: their own doc (id = pool id) holding progress only.
+   * Already started → the existing doc is kept (Reset handles another attempt).
+   */
+  async startPoolScenario(uid: string, poolId: string): Promise<{ id: string }> {
+    const poolDoc = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId).get();
+    if (!poolDoc.exists) throw new NotFoundException('Pool scenario not found');
+    const ref = this.scenariosColRef(uid).doc(poolId);
+    await this.db.runTransaction(async tx => {
+      if (!(await tx.get(ref)).exists) tx.set(ref, newLearnerDoc(poolId, uid));
+    });
+    return { id: poolId };
+  }
+
+  /** Admin: publish one of their own standalone scenarios to the pool (its content fields only). */
+  async publishToPool(uid: string, scenarioId: string): Promise<{ poolId: string }> {
+    const scenario = await this.getScenario(uid, scenarioId);
+    if (!scenario) throw new NotFoundException('Scenario not found');
+    if (scenario.poolId) throw new BadRequestException('This scenario is already from the pool');
+    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc();
+    const pool = poolContentOf(scenario, { uid, scenarioId }, ref.id);
+    await ref.set(Object.fromEntries(Object.entries(pool).filter(([, v]) => v !== undefined)));
+    this.logger.log(`Published scenario ${scenarioId} (uid=${uid}) to the pool as ${ref.id}`);
+    return { poolId: ref.id };
   }
 
   async getScenariosBySourceKuId(userId: string, sourceKuId: string): Promise<Pick<Scenario, 'id' | 'title' | 'sourceContextSentence' | 'createdAt'>[]> {
@@ -166,7 +213,10 @@ export class ScenariosService {
   async getScenario(uid: string, id: string): Promise<Scenario | null> {
     const doc = await this.scenariosColRef(uid).doc(id).get();
     if (!doc.exists) return null;
-    return doc.data() as Scenario;
+    const scenario = doc.data() as Scenario;
+    if (!scenario.poolId) return scenario;
+    const pool = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(scenario.poolId).get();
+    return mergePoolScenario(pool.exists ? (pool.data() as PoolScenario) : null, scenario);
   }
 
   async generateScenario(userId: string, dto: GenerateScenarioDto): Promise<string> {
