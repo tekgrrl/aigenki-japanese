@@ -73,8 +73,8 @@ export const PILL_TOKEN_MAP: Record<string, PillStyle> = (() => {
     Cl: clause,
     "Cl-A": clauseA,
     "Cl-B": clauseB,
-    // Numbers before a counter or で (e.g. {Quantity}人, {Quantity}で)
-    Quantity: quantity,
+    // Numbers before a counter or で (e.g. {Qty}人, {Qty}で)
+    Qty: quantity,
     // A bare number
     Num: number,
   };

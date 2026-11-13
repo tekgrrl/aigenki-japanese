@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Let phones and other machines on the home network use the dev server (Next blocks
+  // cross-origin dev requests such as hot reload unless the origin is listed).
+  allowedDevOrigins: ["192.168.1.*", "grond-linux.local"],
   experimental: {
     // The /api rewrite proxy defaults to ~30s, but some backend calls (lesson
     // regeneration, scenario generation) legitimately take longer; a timeout made

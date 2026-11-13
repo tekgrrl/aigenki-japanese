@@ -168,10 +168,11 @@ export class KnowledgeUnitsService {
      * Admin browsing: search and/or filter the whole corpus (from the in-memory cache, so
      * every KU, wk-* included) and return one page with the total. With a query, prefix
      * matches come first; otherwise results are in content order. Each item carries
-     * `hasPicture` (an approved picture is attached to it).
+     * `hasPicture` (an approved picture is attached to it) and `hasLesson` (a usable stored
+     * lesson exists; Kanji lessons are never stored, so a Kanji is always false).
      */
     async browse(opts: { q?: string; type?: string; jlptLevel?: string; page?: number; pageSize?: number }): Promise<{
-        items: (KnowledgeUnit & { hasPicture: boolean })[];
+        items: (KnowledgeUnit & { hasPicture: boolean; hasLesson: boolean })[];
         total: number;
         page: number;
         pageSize: number;
@@ -197,11 +198,25 @@ export class KnowledgeUnitsService {
         const slice = matches.slice((page - 1) * pageSize, page * pageSize);
 
         const pictured = new Set<string>();
+        const withLesson = new Set<string>();
         if (slice.length > 0) {
-            const pics = await this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get();
+            const lessonCol = this.db.collection(LESSONS_COLLECTION);
+            const [pics, lessons] = await Promise.all([
+                this.db.collection(PICTURES_COLLECTION).where('status', '==', 'approved').select('kuId').get(),
+                this.db.getAll(...slice.map(ku => lessonCol.doc(ku.id))),
+            ]);
             pics.forEach(d => { const id = d.data().kuId; if (id) pictured.add(id); });
+            // Same rule as LessonsService.generateLesson: a 'completed' lesson, or a legacy one with no
+            // status. A failed or still-generating doc isn't a lesson yet.
+            lessons.forEach(d => {
+                const status = d.data()?.status;
+                if (d.exists && (status === 'completed' || !status)) withLesson.add(d.id);
+            });
         }
-        return { items: slice.map(ku => ({ ...ku, hasPicture: pictured.has(ku.id) })), total, page, pageSize };
+        return {
+            items: slice.map(ku => ({ ...ku, hasPicture: pictured.has(ku.id), hasLesson: withLesson.has(ku.id) })),
+            total, page, pageSize,
+        };
     }
 
     async search(query: string, type?: string, jlptLevel?: string, excludeType?: string): Promise<KnowledgeUnit[]> {

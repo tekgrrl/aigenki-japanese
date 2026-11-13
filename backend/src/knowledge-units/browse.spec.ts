@@ -10,6 +10,9 @@ function setup() {
   kus.set('g', { type: 'Grammar', content: '～まで', data: { jlptLevel: 'N5', scenarioReady: true } });
   db.store('pictures').set('p', { kuId: 'wk-1', status: 'approved' });
   db.store('pictures').set('r', { kuId: 'a', status: 'rejected' });
+  db.store('lessons').set('a', { type: 'Vocab', status: 'completed' });
+  db.store('lessons').set('b', { type: 'Vocab', status: 'failed' });
+  db.store('lessons').set('g', { type: 'Grammar' }); // legacy lesson, no status
   const service = new (KnowledgeUnitsService as any)(db) as KnowledgeUnitsService;
   return { service };
 }
@@ -39,5 +42,11 @@ describe('KnowledgeUnitsService.browse', () => {
     const { service } = setup();
     const r = await service.browse({ type: 'Vocab' });
     expect(Object.fromEntries(r.items.map(k => [k.content, k.hasPicture]))).toEqual({ あめ: false, いぬ: true, こいぬ: false });
+  });
+
+  it('flags KUs with a usable lesson: completed or legacy, not failed or missing', async () => {
+    const { service } = setup();
+    const r = await service.browse({});
+    expect(Object.fromEntries(r.items.map(k => [k.content, k.hasLesson]))).toEqual({ あめ: true, いぬ: false, こいぬ: false, '～まで': true });
   });
 });

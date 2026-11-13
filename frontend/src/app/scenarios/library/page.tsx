@@ -7,7 +7,7 @@ import { Scenario, ScenarioDifficulty } from "@/types/scenario";
 import { apiFetch } from "@/lib/api-client";
 
 // TODO: Align with dashboard config
-const API_BASE_URL = "http://localhost:3000/api";
+const API_BASE_URL = "/api";
 
 const JLPT_LEVELS: { value: ScenarioDifficulty; label: string }[] = [
   { value: "N5", label: "N5 — Beginner" },
