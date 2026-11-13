@@ -144,6 +144,9 @@ export function AvatarMenu() {
               <Link href="/admin/pictures" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
                 Picture Cards
               </Link>
+              <Link href="/admin/assembly-lab" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Assembly Lab
+              </Link>
             </>
           )}
 

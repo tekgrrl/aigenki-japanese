@@ -312,6 +312,13 @@ export interface GrammarLesson {
      * absent on lessons not yet shown.
      */
     furigana?: string;
+    /**
+     * Indices into `fragments` hand-marked as the grammar pattern this example teaches (the
+     * pieces that become blanks; see lib/sentence-assembly.ts). The lesson editor clears them when
+     * the sentence or fragments are edited; saving drops marks that can't build a card. Other writers
+     * that change fragments (scripts, regeneration) must clear them too.
+     */
+    patternFragments?: number[];
   }[];
 }
 

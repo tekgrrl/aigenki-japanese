@@ -8,6 +8,7 @@ import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { GrammarKnowledgeUnit } from '../types';
 import { UserService } from '../users/user.service';
 import { LearningQueueService } from '../learning-progress/learning-queue.service';
+import { AssemblyError, AssemblyExampleInput, buildAssemblyCard } from '../lib/sentence-assembly';
 
 @Controller('lessons')
 @UseGuards(FirebaseAuthGuard)
@@ -115,6 +116,23 @@ export class LessonsController {
   async addFurigana(@Param('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
     return this.lessonsService.addGrammarFurigana(kuId);
+  }
+
+  /**
+   * Admin (the assembly lab): build a blanks assembly card from one example, saved or not.
+   * Pure code (lib/sentence-assembly.ts), no AI; a 400 says why the example can't be used.
+   */
+  @Post('assembly-card')
+  @UseGuards(AdminGuard)
+  @HttpCode(200)
+  assemblyCard(@Body() body: { example: AssemblyExampleInput }) {
+    if (!body?.example) throw new BadRequestException('example is required');
+    try {
+      return buildAssemblyCard(body.example);
+    } catch (e) {
+      if (e instanceof AssemblyError) throw new BadRequestException(e.message);
+      throw e;
+    }
   }
 
   /** Admin: rebuild a Vocab lesson's usages from scratch, even if already built. */
