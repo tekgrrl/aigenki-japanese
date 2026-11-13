@@ -3,6 +3,7 @@ import {
   HttpCode,
   Get,
   Post,
+  Put,
   Body,
   Query,
   Param,
@@ -43,6 +44,23 @@ export class ScenariosController {
   @HttpCode(200)
   startPoolScenario(@UserId() uid: string, @Param('poolId') poolId: string) {
     return this.scenariosService.startPoolScenario(uid, poolId);
+  }
+
+  /** Admin: set a pool scenario's simulation brief (the extension the role play adds). */
+  @Put('pool/:poolId')
+  @UseGuards(AdminGuard)
+  async updatePoolScenario(@Param('poolId') poolId: string, @Body() body: { simulationBrief?: string }) {
+    if (typeof body?.simulationBrief !== 'string') throw new BadRequestException('simulationBrief is required');
+    await this.scenariosService.setSimulationBrief(poolId, body.simulationBrief);
+    return { success: true };
+  }
+
+  /** Admin: (re)build a pool scenario's script words (one Gemini call). */
+  @Post('pool/:poolId/script-words')
+  @UseGuards(AdminGuard)
+  @HttpCode(200)
+  rebuildScriptWords(@Param('poolId') poolId: string) {
+    return this.scenariosService.rebuildScriptWords(poolId);
   }
 
   /** Admin: publish one of their own scenarios to the pool. */
@@ -137,8 +155,8 @@ export class ScenariosController {
   }
 
   @Post(':id/advance')
-  async advanceState(@UserId() uid: string, @Param('id') id: string) {
-    return this.scenariosService.advanceState(uid, id);
+  async advanceState(@UserId() uid: string, @Param('id') id: string, @Body() body: { includeScriptWords?: boolean } = {}) {
+    return this.scenariosService.advanceState(uid, id, { includeScriptWords: body?.includeScriptWords === true });
   }
 
   @Post(':id/reset')
