@@ -63,6 +63,10 @@ export class UserKnowledgeUnitsService {
         // UKU state fields — projected onto the KU shape for the client
         ukuStatus: uku.status,
         ukuFacetCount: uku.facet_count,
+        // Where it came from (e.g. a scenario) and when it was enrolled: the Lessons view groups
+        // and orders by these (Start Learning serves the oldest waiting items first).
+        ukuSource: uku.source ?? null,
+        ukuCreatedAt: typeof (uku.createdAt as any)?.toDate === 'function' ? (uku.createdAt as any).toDate().toISOString() : null,
       } as unknown as KnowledgeUnit);
     }
 
