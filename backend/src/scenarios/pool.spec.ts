@@ -84,6 +84,24 @@ describe('ScenariosService: the pool', () => {
     expect(published.chatHistory).toBeUndefined();
   });
 
+  it('publishes a scenario only once, and leaves out the admin\'s drawn scene', async () => {
+    const { db, service } = setup();
+    const own = db.collection('users').doc('a1').collection('scenarios');
+    await own.doc('s0').set({ ...pool, id: 's0', setting: { ...pool.setting, picture: { file: 'scenarios/a1/s0-x.png' } } });
+    const { poolId } = await service.publishToPool('a1', 's0');
+    const published = (await db.collection('scenario-pool').doc(poolId).get()).data()!;
+    expect(published.setting).toEqual(pool.setting);
+    await expect(service.publishToPool('a1', 's0')).rejects.toThrow(`Already published to the pool as ${poolId}`);
+  });
+
+  it("treats a learner's copy as gone once its pool scenario is deleted", async () => {
+    const { db, service } = setup();
+    await db.collection('scenario-pool').doc('p1').set(pool);
+    await service.startPoolScenario('u1', 'p1');
+    await db.collection('scenario-pool').doc('p1').delete();
+    expect(await service.getScenario('u1', 'p1')).toBeNull();
+  });
+
   it('refuses to publish a scenario that came from the pool', async () => {
     const { db, service } = setup();
     await db.collection('scenario-pool').doc('p1').set(pool);

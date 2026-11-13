@@ -31,6 +31,11 @@ export function poolContentOf(scenario: Scenario, publishedFrom: { uid: string; 
   const content: Record<string, unknown> = Object.fromEntries(POOL_CONTENT_FIELDS.filter(f => scenario[f] !== undefined).map(f => [f, scenario[f]]));
   // The admin may have played it already: their per-item status isn't a learner's starting point.
   if (Array.isArray(scenario.extractedKUs)) content.extractedKUs = scenario.extractedKUs.map(ku => ({ ...ku, status: 'new' }));
+  // The admin's drawn scene lives in their own folder and is deleted if they redraw it: don't share it.
+  if (scenario.setting) {
+    const { picture: _own, ...setting } = scenario.setting;
+    content.setting = setting;
+  }
   return { ...content, id, publishedFrom, createdAt: Timestamp.now() } as PoolScenario;
 }
 

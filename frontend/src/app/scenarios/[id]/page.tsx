@@ -324,9 +324,13 @@ export default function ScenarioPage({
   /** Admin: copy this scenario's content into the shared pool learners choose from. */
   const handlePublish = async () => {
     setPublishStatus("Publishing…");
-    const res = await apiFetch(`/api/scenarios/${id}/publish`, { method: "POST" });
-    const body = await res.json().catch(() => ({}));
-    setPublishStatus(res.ok ? `Published to the pool (${body.poolId})` : `Publish failed: ${body.message ?? res.status}`);
+    try {
+      const res = await apiFetch(`/api/scenarios/${id}/publish`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      setPublishStatus(res.ok ? `Published to the pool (${body.poolId})` : `Publish failed: ${body.message ?? res.status}`);
+    } catch (e) {
+      setPublishStatus(`Publish failed: ${(e as Error).message}`);
+    }
   };
 
   const handleReset = async (archive: boolean) => {

@@ -135,7 +135,7 @@ export interface Scenario {
 }
 
 /** A shared pool scenario as GET /scenarios/pool lists it (content only). */
-export type PoolScenarioSummary = Pick<Scenario, "title" | "description" | "difficultyLevel" | "setting"> & { id: string };
+export type PoolScenarioSummary = Pick<Scenario, "title" | "description" | "difficultyLevel"> & { id: string };
 
 export interface ScenarioTemplate {
   id: string;

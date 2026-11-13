@@ -13,6 +13,7 @@ import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.servic
 import { UserService } from '../users/user.service';
 import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, SCENARIO_POOL_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
 import { mergePoolScenario, newLearnerDoc, poolContentOf } from './pool';
+import { JLPT_LEVEL_ORDER, JlptLevel } from '../prompts/curriculum';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
@@ -86,17 +87,21 @@ export class ScenariosService {
     const pool = this.db.collection(SCENARIO_POOL_COLLECTION);
     const docs = await this.db.getAll(...poolIds.map(id => pool.doc(id)));
     const byId = new Map(docs.filter(d => d.exists).map(d => [d.id, d.data() as PoolScenario]));
-    return scenarios.map(s => (s.poolId ? mergePoolScenario(byId.get(s.poolId), s) : s));
+    // A learner doc whose pool scenario was deleted has no content left to show: leave it out.
+    return scenarios
+      .filter(s => !s.poolId || byId.has(s.poolId))
+      .map(s => (s.poolId ? mergePoolScenario(byId.get(s.poolId), s) : s));
   }
 
   /** The pool scenarios a learner can start, by level then title (content only, no progress). */
-  async listPool(): Promise<Pick<PoolScenario, 'id' | 'title' | 'description' | 'difficultyLevel' | 'setting'>[]> {
-    const snap = await this.db.collection(SCENARIO_POOL_COLLECTION).get();
-    const rank = (l: string) => ['N5', 'N4', 'N3', 'N2', 'N1'].indexOf(l);
+  async listPool(): Promise<Pick<PoolScenario, 'id' | 'title' | 'description' | 'difficultyLevel'>[]> {
+    const snap = await this.db.collection(SCENARIO_POOL_COLLECTION).select('id', 'title', 'description', 'difficultyLevel').get();
+    // Unknown levels sort last.
+    const rank = (l: string) => { const i = JLPT_LEVEL_ORDER.indexOf(l as JlptLevel); return i < 0 ? JLPT_LEVEL_ORDER.length : i; };
     return snap.docs
       .map(d => d.data() as PoolScenario)
       .sort((a, b) => rank(a.difficultyLevel) - rank(b.difficultyLevel) || (a.title ?? '').localeCompare(b.title ?? ''))
-      .map(p => ({ id: p.id, title: p.title, description: p.description, difficultyLevel: p.difficultyLevel, setting: p.setting }));
+      .map(p => ({ id: p.id, title: p.title, description: p.description, difficultyLevel: p.difficultyLevel }));
   }
 
   /**
@@ -118,9 +123,11 @@ export class ScenariosService {
     const scenario = await this.getScenario(uid, scenarioId);
     if (!scenario) throw new NotFoundException('Scenario not found');
     if (scenario.poolId) throw new BadRequestException('This scenario is already from the pool');
-    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc();
-    const pool = poolContentOf(scenario, { uid, scenarioId }, ref.id);
-    await ref.set(Object.fromEntries(Object.entries(pool).filter(([, v]) => v !== undefined)));
+    const col = this.db.collection(SCENARIO_POOL_COLLECTION);
+    const already = await col.where('publishedFrom.uid', '==', uid).where('publishedFrom.scenarioId', '==', scenarioId).limit(1).get();
+    if (!already.empty) throw new BadRequestException(`Already published to the pool as ${already.docs[0].id}`);
+    const ref = col.doc();
+    await ref.set(poolContentOf(scenario, { uid, scenarioId }, ref.id));
     this.logger.log(`Published scenario ${scenarioId} (uid=${uid}) to the pool as ${ref.id}`);
     return { poolId: ref.id };
   }
@@ -216,7 +223,12 @@ export class ScenariosService {
     const scenario = doc.data() as Scenario;
     if (!scenario.poolId) return scenario;
     const pool = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(scenario.poolId).get();
-    return mergePoolScenario(pool.exists ? (pool.data() as PoolScenario) : null, scenario);
+    if (!pool.exists) {
+      // Progress alone isn't a scenario: treat it as gone rather than serve a doc with no content.
+      this.logger.warn(`Pool scenario ${scenario.poolId} is gone; uid=${uid}'s copy can't be shown`);
+      return null;
+    }
+    return mergePoolScenario(pool.data() as PoolScenario, scenario);
   }
 
   async generateScenario(userId: string, dto: GenerateScenarioDto): Promise<string> {
@@ -327,6 +339,10 @@ export class ScenariosService {
     const old = await this.getScenario(flag.userId, flag.sourceId);
     if (!old) {
       throw new NotFoundException(`Scenario ${flag.sourceId} not found for uid=${flag.userId}`);
+    }
+    if (old.poolId) {
+      // Regenerating would give only the flagger a private copy; the shared content needs the fix.
+      throw new BadRequestException(`Scenario ${flag.sourceId} is shared from the pool: fix scenario-pool/${old.poolId} instead`);
     }
 
     const dto: GenerateScenarioDto = {
