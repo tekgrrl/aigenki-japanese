@@ -11,6 +11,8 @@ export const API_LOGS_COLLECTION = "api-logs";
 export const QUESTIONS_COLLECTION = "questions";
 export const USER_STATS_COLLECTION = 'user-stats';
 export const SCENARIOS_COLLECTION = 'scenarios';
+/** Shared, pre-created scenarios (content only); learners start them into users/{uid}/scenarios. */
+export const SCENARIO_POOL_COLLECTION = 'scenario-pool';
 export const CONCEPTS_COLLECTION = 'concepts';
 export const GRAMMAR_SECTIONS_COLLECTION = 'grammar-sections';
 export const USER_KUS_SUBCOLLECTION = 'user-kus';

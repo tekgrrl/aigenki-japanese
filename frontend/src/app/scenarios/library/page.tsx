@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Scenario, ScenarioDifficulty } from "@/types/scenario";
+import { PoolScenarioSummary, Scenario, ScenarioDifficulty } from "@/types/scenario";
 import { apiFetch } from "@/lib/api-client";
 
 // TODO: Align with dashboard config
@@ -58,6 +58,8 @@ function ScenarioLibraryContent() {
   // Data State
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([]);
   const [archives, setArchives] = useState<Scenario[]>([]);
+  const [pool, setPool] = useState<PoolScenarioSummary[]>([]);
+  const [startingPoolId, setStartingPoolId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [userJlptLevel, setUserJlptLevel] = useState<ScenarioDifficulty | null>(null);
 
@@ -72,12 +74,14 @@ function ScenarioLibraryContent() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [tplRes, archRes, userRes] = await Promise.all([
+        const [tplRes, archRes, userRes, poolRes] = await Promise.all([
           apiFetch(`${API_BASE_URL}/scenarios/templates`),
           apiFetch(`${API_BASE_URL}/scenarios`),
           apiFetch(`${API_BASE_URL}/users/me`),
+          apiFetch(`${API_BASE_URL}/scenarios/pool`),
         ]);
         if (tplRes.ok) setTemplates(await tplRes.json());
+        if (poolRes.ok) setPool(await poolRes.json());
         if (archRes.ok) setArchives(await archRes.json());
         if (userRes.ok) {
           const userData = await userRes.json();
@@ -94,6 +98,20 @@ function ScenarioLibraryContent() {
 
     fetchData();
   }, []);
+
+  /** Start a shared pool scenario (or reopen it, if already started) and go to it. */
+  const handleStartPool = async (poolId: string) => {
+    setStartingPoolId(poolId);
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/scenarios/pool/${poolId}/start`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { id } = await res.json();
+      router.push(`/scenarios/${id}`);
+    } catch (error) {
+      console.error("Failed to start pool scenario", error);
+      setStartingPoolId(null);
+    }
+  };
 
   const handleRunTemplate = async () => {
     if (!selectedTemplate) return;
@@ -213,6 +231,36 @@ function ScenarioLibraryContent() {
         </div>
       ) : (
         <main>
+          {activeTab === "core" && pool.length > 0 && (
+            <section className="mb-10">
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">Scenario pool</h2>
+              <p className="text-sm text-slate-500 mb-4">Ready-made scenarios. Read the blurb and pick the one that fits you.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {pool.map((p) => {
+                  const started = archives.some((a) => a.id === p.id);
+                  return (
+                    <div key={p.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col h-full">
+                      <div className="flex-1">
+                        <span className="bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded-md font-medium uppercase tracking-wide">
+                          {p.difficultyLevel}
+                        </span>
+                        <h3 className="text-xl font-bold text-slate-800 mt-2 mb-2">{p.title}</h3>
+                        <p className="text-slate-600 text-sm">{p.description}</p>
+                      </div>
+                      <button
+                        onClick={() => handleStartPool(p.id)}
+                        disabled={startingPoolId !== null}
+                        className="mt-6 w-full py-2 bg-shodo-ink text-shodo-paper font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+                      >
+                        {startingPoolId === p.id ? "Starting…" : started ? "Continue" : "Start"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {activeTab === "core" && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {templates.map((tpl) => (
