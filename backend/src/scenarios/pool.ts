@@ -9,6 +9,7 @@ import { PoolScenario, Scenario } from '../types/scenario';
 /** The fields a pool scenario shares; everything else on a learner's scenario is their own. */
 export const POOL_CONTENT_FIELDS = [
   'title', 'description', 'difficultyLevel', 'setting', 'roles', 'dialogue', 'extractedKUs', 'grammarMatches', 'grammarNotes',
+  'secondaryKUs', 'simulationBrief',
 ] as const;
 
 /**

@@ -260,7 +260,11 @@ export function buildChatSystemPrompt(
       - User Role: ${userRole}
       - Goal: ${scenario.setting.goal}
       - Difficulty: ${scenario.difficultyLevel}
-
+${scenario.simulationBrief ? `
+      **EXTENDED SITUATION (this role play goes beyond the script):**
+      ${scenario.simulationBrief}
+      Bring this in naturally once the conversation is under way. It should stretch the learner, not catch them out: give them room to respond, and help them through it if they struggle.
+` : ''}
       **REFERENCE SCRIPT (PLOT OUTLINE):**
       ${referenceScript}
 
@@ -440,4 +444,46 @@ ${dto.conversationText}
     }
   ]
 }`;
+}
+
+// ---------------------------------------------------------------------------
+// Script words (a pool scenario's secondary Vocab)
+// ---------------------------------------------------------------------------
+
+/** Response shape for buildScriptVocabPrompt: the script's other content words. */
+export const SCRIPT_VOCAB_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    words: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          content: { type: 'STRING' },
+          reading: { type: 'STRING' },
+          meaning: { type: 'STRING' },
+          jlptLevel: { type: 'STRING', enum: ['N5', 'N4', 'N3', 'N2', 'N1'] },
+        },
+        required: ['content', 'reading', 'meaning', 'jlptLevel'],
+      },
+    },
+  },
+  required: ['words'],
+};
+
+/**
+ * Asks for the content words in a scenario script that aren't already its Key Vocabulary, so a
+ * learner can opt in to learning them too. Lines must be plain text (furigana stripped).
+ */
+export function buildScriptVocabPrompt(lines: string[], keyVocab: string[]): string {
+  return `List the vocabulary a Japanese learner would need to understand this conversation.
+
+Conversation:
+${lines.map(l => `- ${l}`).join('\n')}
+
+Rules:
+- Content words only: nouns, verbs, adjectives, adverbs, set expressions. Leave out particles, grammar endings, person and place names, and numbers.
+- Give each word once, in dictionary form (食べました → 食べる), written as a Japanese dictionary would.
+- Leave out these words, which are already taught: ${keyVocab.length ? keyVocab.join('、') : '(none)'}.
+- reading: hiragana. meaning: a short English gloss for the sense used here. jlptLevel: the word's JLPT level.`;
 }

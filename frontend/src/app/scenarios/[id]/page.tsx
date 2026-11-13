@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/providers/AuthProvider";
 import ScenePicture from "@/components/scenarios/ScenePicture";
 import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
+import ScenePlayer from "@/components/scenarios/ScenePlayer";
 
 const API_BASE_URL = "/api";
 
@@ -36,6 +37,7 @@ export default function ScenarioPage({
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const { isAdmin } = useAuth();
   const [publishStatus, setPublishStatus] = useState<string | null>(null);
+  const [includeScriptWords, setIncludeScriptWords] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -45,7 +47,6 @@ export default function ScenarioPage({
   const [isSending, setIsSending] = useState(false);
 
   // UI State
-  const [showTranslations, setShowTranslations] = useState(false);
   const [kuStatus, setKuStatus] = useState<Record<string, { maxSrsStage: number | null; minSrsStage: number | null }>>({});
   /** The backend's Role Play gate (Key Vocabulary and Key Grammar), and the stage it requires. */
   const [roleplayReady, setRoleplayReady] = useState(false);
@@ -294,6 +295,8 @@ export default function ScenarioPage({
     try {
       const res = await apiFetch(`${API_BASE_URL}/scenarios/${id}/advance`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ includeScriptWords: scenario.state === "encounter" && includeScriptWords }),
       });
       if (!res.ok) throw new Error("Failed to advance scenario");
 
@@ -301,7 +304,8 @@ export default function ScenarioPage({
       const updated = await fetchScenario();
       if (scenario.state === "encounter") {
         window.dispatchEvent(new CustomEvent("refreshStats"));
-        setToast(`${scenario.extractedKUs.length} items added to your learning queue`);
+        const added = scenario.extractedKUs.length + (includeScriptWords ? scenario.secondaryKUs?.length ?? 0 : 0);
+        setToast(`${added} items added to your learning queue`);
         setTimeout(() => setToast(null), 4000);
       } else if (scenario.state === "drill") {
         // Moved to simulate
@@ -536,6 +540,21 @@ export default function ScenarioPage({
           />
         </div>
       </header>
+
+      {isAdmin && scenario.poolId && (
+        <PoolAdminPanel poolId={scenario.poolId} onChanged={fetchScenario} />
+      )}
+
+      {/* The learner can always go back to the play-through */}
+      {/* (A completed scenario without an evaluation falls through to the script view below.) */}
+      {(scenario.state === "simulate" || (scenario.state === "completed" && scenario.evaluation)) && (
+        <details className="rounded-xl border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer font-medium text-slate-700">Watch the scene again</summary>
+          <div className="mt-4">
+            <ScenePlayer dialogue={scenario.dialogue} userRole={scenario.roles?.user} title="The scene" />
+          </div>
+        </details>
+      )}
 
       {/* Conditional Render: Report Card */}
       {scenario.state === "completed" && scenario.evaluation ? (
@@ -841,46 +860,8 @@ export default function ScenarioPage({
         </section>
       ) : (
         <>
-          {/* Main Stage: The Dialogue */}
-          <section className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold text-slate-800">Script</h2>
-              <button
-                onClick={() => setShowTranslations(!showTranslations)}
-                className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-              >
-                {showTranslations ? "Hide Translations" : "Show Translations"}
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {scenario.dialogue.map((line, idx) => {
-                const isUser = line.speaker === scenario.roles?.user;
-                return (
-                  <div
-                    key={idx}
-                    className={`p-4 rounded-xl ${
-                      isUser
-                        ? "bg-indigo-50 border border-indigo-100 ml-12"
-                        : "bg-white border border-slate-200 mr-12"
-                    }`}
-                  >
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">
-                      {line.speaker}
-                    </div>
-                    <p className="text-lg font-medium text-slate-900 leading-relaxed">
-                      {line.text}
-                    </p>
-                    {showTranslations && (
-                      <p className="text-slate-500 mt-1 text-sm border-t border-slate-100 pt-1">
-                        {line.translation}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          {/* Main Stage: the play-through */}
+          <ScenePlayer dialogue={scenario.dialogue} userRole={scenario.roles?.user} />
 
           {/* Grammar Notes (Genki Style) */}
           {scenario.grammarNotes && scenario.grammarNotes.length > 0 && (
@@ -983,13 +964,21 @@ export default function ScenarioPage({
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-lg">
           <div className="max-w-4xl mx-auto">
             {scenario.state === "encounter" ? (
-              <button
-                onClick={handleAdvance}
-                disabled={advancing}
-                className={`w-full py-4 text-lg rounded-xl font-bold transition-colors shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white ${advancing ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                {advancing ? "Processing..." : "Start Learning Vocab and Grammar"}
-              </button>
+              <div className="space-y-2">
+                {(scenario.secondaryKUs?.length ?? 0) > 0 && (
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <input type="checkbox" checked={includeScriptWords} onChange={e => setIncludeScriptWords(e.target.checked)} />
+                    Also learn the other words in the script ({scenario.secondaryKUs!.length})
+                  </label>
+                )}
+                <button
+                  onClick={handleAdvance}
+                  disabled={advancing}
+                  className={`w-full py-4 text-lg rounded-xl font-bold transition-colors shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white ${advancing ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  {advancing ? "Processing..." : "Start Learning Vocab and Grammar"}
+                </button>
+              </div>
             ) : (
               <div className="flex justify-between items-center">
                 {scenario.state === "drill" ? (
@@ -1054,5 +1043,83 @@ export default function ScenarioPage({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Admin, on a pool scenario: write its simulation brief and (re)build its script words. Reads the
+ * pool doc itself, not this page's merged copy (the admin's own progress could hide the pool's list).
+ */
+function PoolAdminPanel({ poolId, onChanged }: { poolId: string; onChanged: () => unknown }) {
+  const [brief, setBrief] = useState("");
+  const [scriptWords, setScriptWords] = useState(0);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const res = await apiFetch(`/api/scenarios/pool/${poolId}`);
+    if (!res.ok) return;
+    const body = await res.json();
+    setBrief(body.simulationBrief ?? "");
+    setDraft(body.simulationBrief ?? "");
+    setScriptWords(body.scriptWords ?? 0);
+  }, [poolId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const run = async (label: string, call: () => Promise<Response>, done: (body: any) => string) => {
+    setBusy(true);
+    setStatus(label);
+    try {
+      const res = await call();
+      const body = await res.json().catch(() => ({}));
+      setStatus(res.ok ? done(body) : `Failed: ${body.message ?? res.status}`);
+      if (res.ok) await Promise.all([load(), onChanged()]);
+    } catch (e) {
+      setStatus(`Failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-dashed border-slate-300 p-4 space-y-3 text-sm">
+      <h2 className="font-semibold text-slate-700">Pool scenario (admin) · {poolId}</h2>
+      <div>
+        <label className="block text-xs text-slate-500 mb-1">
+          Simulation brief: what the role play adds to the scene (shared by every learner)
+        </label>
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          rows={3}
+          className="w-full rounded border border-slate-300 p-2 text-slate-800"
+          placeholder="e.g. The train is delayed; the traveller has to ask about another way to get there."
+        />
+        <button
+          disabled={busy || draft === brief}
+          onClick={() => run("Saving…", () => apiFetch(`/api/scenarios/pool/${poolId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ simulationBrief: draft }),
+          }), () => "Brief saved.")}
+          className="mt-1 px-3 py-1 rounded bg-shodo-ink text-shodo-paper disabled:opacity-40"
+        >
+          Save brief
+        </button>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-slate-600">Script words: {scriptWords}</span>
+        <button
+          disabled={busy}
+          onClick={() => run("Finding script words…", () => apiFetch(`/api/scenarios/pool/${poolId}/script-words`, { method: "POST" }), b => `Found ${b.count} script words.`)}
+          className="px-3 py-1 rounded border border-slate-300 text-slate-700 disabled:opacity-40"
+        >
+          Find script words
+        </button>
+      </div>
+      {status && <p className="text-xs text-slate-500">{status}</p>}
+    </section>
   );
 }

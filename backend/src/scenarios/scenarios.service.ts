@@ -127,9 +127,64 @@ export class ScenariosService {
     const already = await col.where('publishedFrom.uid', '==', uid).where('publishedFrom.scenarioId', '==', scenarioId).limit(1).get();
     if (!already.empty) throw new BadRequestException(`Already published to the pool as ${already.docs[0].id}`);
     const ref = col.doc();
-    await ref.set(poolContentOf(scenario, { uid, scenarioId }, ref.id));
+    const pool = poolContentOf(scenario, { uid, scenarioId }, ref.id);
+    // Written before the slow script-words call, so a second publish soon after sees it.
+    await ref.set(pool);
     this.logger.log(`Published scenario ${scenarioId} (uid=${uid}) to the pool as ${ref.id}`);
+    // Script words are a nice-to-have: a failed call doesn't undo the publish (backfill later).
+    try {
+      await ref.update({ secondaryKUs: await this.scriptWordsFor(pool) });
+    } catch (err) {
+      this.logger.error(`Script words for ${ref.id} failed; published without them`, err);
+    }
     return { poolId: ref.id };
+  }
+
+  /**
+   * The script's other content words (not Key Vocabulary), one Gemini call. Admin-only (publish,
+   * rebuild): each word is resolved to its global KU here, created if new, so learners who opt in
+   * only enrol existing words (global word writes are admin-only).
+   */
+  private async scriptWordsFor(scenario: Pick<Scenario, 'title' | 'dialogue' | 'extractedKUs'>): Promise<ExtractedKU[]> {
+    const lines = (scenario.dialogue ?? []).map(l => stripFurigana(l.text));
+    const key = (scenario.extractedKUs ?? []).map(k => k.content.trim());
+    const words = await this.geminiService.extractScriptVocab(lines, key, scenario.title);
+    const skip = new Set(key);
+    const kept: ExtractedKU[] = [];
+    for (const w of words) {
+      const content = (w.content ?? '').trim();
+      if (!content || skip.has(content)) continue;
+      skip.add(content);
+      const kuId = await this.knowledgeUnitsService.ensureVocab(content, { reading: w.reading, definition: w.meaning, jlptLevel: w.jlptLevel });
+      kept.push({ content, reading: w.reading, meaning: w.meaning, type: 'vocab', status: 'new', jlptLevel: w.jlptLevel, kuId });
+    }
+    return kept;
+  }
+
+  /** Admin: a pool scenario's own brief and script-word count (not a learner's merged copy). */
+  async poolAdminSummary(poolId: string): Promise<{ simulationBrief: string; scriptWords: number }> {
+    const doc = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId).get();
+    if (!doc.exists) throw new NotFoundException('Pool scenario not found');
+    const pool = doc.data() as PoolScenario;
+    return { simulationBrief: pool.simulationBrief ?? '', scriptWords: pool.secondaryKUs?.length ?? 0 };
+  }
+
+  /** Admin: (re)build a pool scenario's script words. */
+  async rebuildScriptWords(poolId: string): Promise<{ count: number }> {
+    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
+    const doc = await ref.get();
+    if (!doc.exists) throw new NotFoundException('Pool scenario not found');
+    const secondaryKUs = await this.scriptWordsFor(doc.data() as PoolScenario);
+    await ref.update({ secondaryKUs });
+    return { count: secondaryKUs.length };
+  }
+
+  /** Admin: set a pool scenario's simulation brief (empty clears it). Only that field changes. */
+  async setSimulationBrief(poolId: string, brief: string): Promise<void> {
+    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
+    if (!(await ref.get()).exists) throw new NotFoundException('Pool scenario not found');
+    const trimmed = (brief ?? '').trim();
+    await ref.update({ simulationBrief: trimmed ? trimmed : FieldValue.delete() });
   }
 
   async getScenariosBySourceKuId(userId: string, sourceKuId: string): Promise<Pick<Scenario, 'id' | 'title' | 'sourceContextSentence' | 'createdAt'>[]> {
@@ -506,7 +561,7 @@ export class ScenariosService {
     }
   }
 
-  async advanceState(uid: string, id: string): Promise<void> {
+  async advanceState(uid: string, id: string, opts: { includeScriptWords?: boolean } = {}): Promise<void> {
     this.logger.log(`Advancing state for scenario ${id}`);
     const scenario = await this.getScenario(uid, id);
     if (!scenario) throw new NotFoundException('Scenario not found');
@@ -526,6 +581,7 @@ export class ScenariosService {
           }
           updateData.extractedKUs = updatedKUs;
         }
+
 
         // Link Grammar KUs — prefer grammarMatches (tool-based, exact kuIds) over legacy grammarNotes
         if (scenario.grammarMatches && scenario.grammarMatches.length > 0) {
@@ -548,6 +604,17 @@ export class ScenariosService {
             }
           }
           this.logger.log(`Grammar notes (legacy): ${matched}/${scenario.grammarNotes.length} matched to pool for scenarioId=${scenario.id}`);
+        }
+
+        // Opted in: the script's other words go to the learning queue too, but not into the gate.
+        // Linked last, so Start Learning (oldest first) serves the Key items before them.
+        // Only words already resolved to a KU (at publish or rebuild): a learner never creates one.
+        if (opts.includeScriptWords && scenario.secondaryKUs?.length) {
+          const resolved = scenario.secondaryKUs.filter(ku => ku.kuId);
+          if (resolved.length < scenario.secondaryKUs.length) {
+            this.logger.warn(`Scenario ${scenario.id}: ${scenario.secondaryKUs.length - resolved.length} script word(s) have no KU yet (rebuild script words); skipped`);
+          }
+          updateData.secondaryKUs = await Promise.all(resolved.map(ku => this.scenarioKnowledge.linkVocabKu(uid, scenario, ku)));
         }
 
         newState = 'drill';

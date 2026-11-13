@@ -135,6 +135,7 @@ export class ScenarioChatService {
       isObjectiveMet: scenario.isObjectiveMet ?? false,
       userRole,
       aiRole: aiRoleStr,
+      ...(scenario.simulationBrief ? { simulationBrief: scenario.simulationBrief } : {}),
     };
 
     const history = (scenario.chatHistory || []).map(msg => ({

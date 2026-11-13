@@ -90,6 +90,8 @@ export type ScenarioEvalContext = {
   userRole?: string;
   aiRole?: string;
   isObjectiveMet: boolean;
+  /** Pool scenarios: the extended situation the role play added (judge how the learner handled it). */
+  simulationBrief?: string;
 };
 
 /**
@@ -121,7 +123,9 @@ export function buildScenarioEvaluatorPrompt(
         - Goal: ${context.goal}
         - User Role: ${context.userRole || 'User'} (The person being evaluated)
         - AI Role: ${context.aiRole || 'AI'} (The conversation partner)
-        - OBJECTIVE MET: ${context.isObjectiveMet}
+        - OBJECTIVE MET: ${context.isObjectiveMet}${context.simulationBrief ? `
+        - EXTENDED SITUATION the partner was asked to bring in: ${context.simulationBrief}
+          (If it came up in the transcript, include in the feedback how the learner handled it. If it never came up, don't mention it.)` : ''}
 
         TRANSCRIPT:
         ${historyText}

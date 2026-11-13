@@ -132,6 +132,10 @@ export interface Scenario {
   vocabReady?: boolean;
   /** Set on a learner's copy of a shared pool scenario (its id is the pool id). */
   poolId?: string;
+  /** Other content words in the script (not Key Vocabulary); learners can opt in at Start Learning. */
+  secondaryKUs?: ExtractedKU[];
+  /** Pool scenarios: the admin-written extension the role play adds. */
+  simulationBrief?: string;
 }
 
 /** A shared pool scenario as GET /scenarios/pool lists it (content only). */

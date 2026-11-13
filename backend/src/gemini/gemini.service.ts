@@ -11,8 +11,9 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
 import { performance } from "perf_hooks"; // For timing
 import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageBuildMessage } from '../prompts/vocab.prompts';
-import { buildScenarioEvaluatorPrompt } from '../prompts/evaluation.prompts';
+import { buildScenarioEvaluatorPrompt, ScenarioEvalContext } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
+import { buildScriptVocabPrompt, SCRIPT_VOCAB_SCHEMA } from '../prompts/scenario.prompts';
 import { buildFuriganaMessage } from '../prompts/grammar.prompts';
 import {
   PictureBrief,
@@ -375,6 +376,20 @@ export class GeminiService implements OnModuleInit {
     });
   }
 
+  /** The content words in a scenario script that aren't its Key Vocabulary (a pool scenario's script words). */
+  async extractScriptVocab(lines: string[], keyVocab: string[], topic: string): Promise<{ content: string; reading: string; meaning: string; jlptLevel: string }[]> {
+    const userMessage = buildScriptVocabPrompt(lines, keyVocab);
+    return this.logged('/scenarios/script-words', this.modelName, { userMessage, topic }, async () => {
+      const response = await this.client.models.generateContent({
+        model: this.modelName,
+        contents: [{ parts: [{ text: userMessage }] }],
+        config: { responseMimeType: 'application/json', responseSchema: SCRIPT_VOCAB_SCHEMA as any },
+      });
+      const parsedJson = this.parseJson<{ words: { content: string; reading: string; meaning: string; jlptLevel: string }[] }>(this.textOf(response));
+      return { result: Array.isArray(parsedJson.words) ? parsedJson.words : [], responseData: { rawText: response.text, parsedJson } };
+    });
+  }
+
   // ─── Picture cards (audio-first vocab) ──────────────────────────────────────
 
   /** Runs a Gemini call wrapped in the standard api-logs start/complete bookkeeping. */
@@ -675,7 +690,7 @@ export class GeminiService implements OnModuleInit {
 
   async evaluateScenario(
     chatHistory: { speaker: string; text: string }[],
-    scenarioContext: { title: string; goal: string; difficulty: string; userRole?: string; aiRole?: string; isObjectiveMet: boolean }
+    scenarioContext: ScenarioEvalContext,
   ): Promise<ScenarioEvaluation> {
     const requestData = {
       scenarioContext,

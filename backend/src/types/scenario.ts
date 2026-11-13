@@ -151,6 +151,14 @@ export interface Scenario {
      * `scenario-pool/{poolId}` and this doc holds the learner's progress (scenarios/pool.ts).
      */
     poolId?: string;
+    /**
+     * Other content words in the script (not Key Vocabulary). On a pool scenario: the list found at
+     * publish. On a learner's doc: the linked copy, once they opted in at "Start Learning". Not part
+     * of the Role Play gate.
+     */
+    secondaryKUs?: ExtractedKU[];
+    /** Pool scenarios: the admin-written extension the simulation adds to the scenario (role play + evaluation). */
+    simulationBrief?: string;
 
     /** Set to true when all linked vocab KUs have minSrsStage >= VOCAB_READY_MIN_STAGE (3), Key Grammar included. Written by ReviewOutcomeService.onGraded after a review. Used for dashboard queries. */
     vocabReady?: boolean;
@@ -162,6 +170,7 @@ export interface Scenario {
  */
 export type PoolScenario = Pick<Scenario,
     'title' | 'description' | 'difficultyLevel' | 'setting' | 'roles' | 'dialogue' | 'extractedKUs' | 'grammarMatches' | 'grammarNotes'
+    | 'secondaryKUs' | 'simulationBrief'
 > & {
     id: string;
     /** The admin's scenario it was published from. */

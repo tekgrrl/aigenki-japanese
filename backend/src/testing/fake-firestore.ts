@@ -2,7 +2,8 @@
  * Minimal in-memory Firestore for unit specs: collections, sub-collections, doc get/set/
  * update (dotted paths), delete, add, getAll, batch, runTransaction, and where() with ==, in and
  * array-contains on (possibly nested) fields. FieldValue arrayUnion / arrayRemove / increment are
- * applied on update and merge-set. select()/limit() are accepted and ignored.
+ * applied on update and merge-set, and FieldValue.delete() removes a field. select()/limit() are
+ * accepted and ignored.
  */
 type Data = Record<string, any>;
 type Op = '==' | 'in' | 'array-contains';
@@ -28,7 +29,11 @@ function resolveTransform(current: unknown, value: any): unknown {
 
 function setPath(d: Data, path: string, value: unknown): Data {
   const [head, ...rest] = path.split('.');
-  if (rest.length === 0) return { ...d, [head]: resolveTransform(d[head], value) };
+  if (rest.length === 0) {
+    // FieldValue.delete() removes the field, as Firestore does.
+    if ((value as any)?.constructor?.name === 'DeleteTransform') { const { [head]: _gone, ...kept } = d; return kept; }
+    return { ...d, [head]: resolveTransform(d[head], value) };
+  }
   return { ...d, [head]: setPath(d[head] ?? {}, rest.join('.'), value) };
 }
 
