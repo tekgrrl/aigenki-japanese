@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { KnowledgeUnit, VocabLesson, VocabKnowledgeUnit, KanjiLesson, GrammarLesson } from "@/types";
@@ -16,9 +17,10 @@ type Facet = { facetType: string };
 type Scenario = { id: string; title: string; sourceContextSentence?: string };
 
 /**
- * A learning item's lesson: its slides on one page (the same slides Start Learning shows),
- * plus three actions: enrol it if it isn't in reviews yet, practise an example in a scenario,
- * and report a problem with the lesson. Learners don't edit lessons or choose card types.
+ * A learning item's lesson: its slides on one page (the same slides Start Learning shows), read
+ * only. Plus practising an example in a scenario and reporting a problem with the lesson. An item
+ * still waiting for its lesson points to Start Learning, the only way to start one. Learners don't
+ * edit lessons or choose card types.
  */
 export default function LearnItemPage() {
   const params = useParams();
@@ -30,7 +32,6 @@ export default function LearnItemPage() {
   const [facets, setFacets] = useState<Facet[] | null>(null);
   const [scenarios, setScenarios] = useState<Record<string, Scenario>>({});
   const [error, setError] = useState<string | null>(null);
-  const [enrolling, setEnrolling] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
 
   const loadFacets = useCallback(async (id: string): Promise<Facet[]> => {
@@ -68,28 +69,6 @@ export default function LearnItemPage() {
       }
     })();
   }, [kuId, loadFacets]);
-
-  /** Starts the item's staged review sequence, the same call Start Learning makes. */
-  const enroll = async (alreadyKnown: boolean) => {
-    if (!ku) return;
-    setEnrolling(true);
-    setError(null);
-    try {
-      const res = await apiFetch("/api/reviews/initialize-sequence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kuId: ku.id, alreadyKnown }),
-      });
-      const result = res.ok ? ((await res.json()) as { facetsCreated?: number }) : null;
-      if (!result || !result.facetsCreated) throw new Error("Couldn't add it to your reviews");
-      await loadFacets(ku.id);
-      window.dispatchEvent(new Event("refreshStats"));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setEnrolling(false);
-    }
-  };
 
   /** Writes a roleplay scenario around one example sentence (about a minute), then links to it. */
   const practise = async (sentence: string) => {
@@ -160,23 +139,16 @@ export default function LearnItemPage() {
 
       {loaded && <LessonSlideStack loaded={loaded} />}
 
-      {/* Not in reviews yet (no cards): enrol it here, the same way Start Learning does. */}
+      {/* Waiting for its lesson (no cards yet): only Start Learning starts it, oldest first. */}
       {loaded && facets !== null && facets.length === 0 && (
-        <section className="mt-8 flex flex-wrap items-center gap-3 border-t border-shodo-ink/10 pt-6">
-          <button
-            onClick={() => enroll(false)}
-            disabled={enrolling}
-            className="rounded-lg bg-shodo-ink px-5 py-2.5 font-medium text-shodo-paper hover:bg-shodo-ink/80 disabled:bg-shodo-ink/40"
+        <section className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-shodo-ink/10 pt-6">
+          <p className="text-sm text-shodo-ink-light">Waiting for its lesson: Start Learning teaches it.</p>
+          <Link
+            href="/learn/session"
+            className="rounded-lg bg-shodo-ink px-5 py-2.5 font-medium text-shodo-paper hover:bg-shodo-ink/80"
           >
-            {enrolling ? "Adding…" : "Add to reviews"}
-          </button>
-          <button
-            onClick={() => enroll(true)}
-            disabled={enrolling}
-            className="rounded-lg border border-shodo-ink/20 px-5 py-2.5 font-medium text-shodo-ink hover:bg-shodo-ink/5 disabled:opacity-40"
-          >
-            I already know this
-          </button>
+            Start Learning
+          </Link>
         </section>
       )}
 

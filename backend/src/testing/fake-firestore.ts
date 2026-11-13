@@ -5,6 +5,8 @@
  * applied on update and merge-set, and FieldValue.delete() removes a field. select()/limit() are
  * accepted and ignored.
  */
+import { Timestamp } from 'firebase-admin/firestore';
+
 type Data = Record<string, any>;
 type Op = '==' | 'in' | 'array-contains';
 
@@ -85,16 +87,26 @@ export class FakeFirestore {
   }
 }
 
+/** structuredClone, but Firestore Timestamps stay Timestamps (as a real read returns them). */
+function clone<T>(v: T): T {
+  if (v instanceof Timestamp) return v;
+  if (Array.isArray(v)) return v.map(clone) as T;
+  if (v && typeof v === 'object' && (v as object).constructor === Object) {
+    return Object.fromEntries(Object.entries(v as Data).map(([k, x]) => [k, clone(x)])) as T;
+  }
+  return structuredClone(v);
+}
+
 class FakeDocRef {
   constructor(private readonly db: FakeFirestore, private readonly col: string, readonly id: string) {}
   private get map() { return this.db.store(this.col); }
   async get(): Promise<any> {
     const d = this.map.get(this.id);
-    return { id: this.id, exists: !!d, data: () => (d ? structuredClone(d) : undefined), ref: this };
+    return { id: this.id, exists: !!d, data: () => (d ? clone(d) : undefined), ref: this };
   }
   async set(data: Data, opts?: { merge?: boolean }) {
     const cur = this.map.get(this.id);
-    this.map.set(this.id, opts?.merge && cur ? deepMerge(cur, data) : structuredClone(data));
+    this.map.set(this.id, opts?.merge && cur ? deepMerge(cur, data) : clone(data));
   }
   async update(data: Data) {
     let cur = this.map.get(this.id);
@@ -128,7 +140,7 @@ class FakeQuery {
     });
     const docs = [...this.db.store(this.col).entries()]
       .filter(([id, d]) => match(id, d))
-      .map(([id, d]) => ({ id, exists: true, data: () => structuredClone(d), ref: new FakeDocRef(this.db, this.col, id) }));
+      .map(([id, d]) => ({ id, exists: true, data: () => clone(d), ref: new FakeDocRef(this.db, this.col, id) }));
     return { empty: docs.length === 0, size: docs.length, docs, forEach: (fn: (d: any) => void) => docs.forEach(fn) };
   }
 }
