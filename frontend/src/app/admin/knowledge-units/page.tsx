@@ -12,7 +12,7 @@ const LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
 const PAGE_SIZE = 50;
 
 /** A KU as the admin list gets it: plus whether an approved picture is attached. */
-type ListedKu = KnowledgeUnit & { hasPicture?: boolean };
+type ListedKu = KnowledgeUnit & { hasPicture?: boolean; hasLesson?: boolean };
 
 const TYPE_COLOURS: Record<string, string> = {
   Vocab: "bg-blue-100 text-blue-800",
@@ -73,6 +73,7 @@ function KuRow({ ku, onEdit, onDelete }: { ku: ListedKu; onEdit: () => void; onD
         {preview}
       </span>
 
+      {ku.hasLesson ? (
       <a
         href={`https://console.cloud.google.com/firestore/databases/aisrs-japanese-dev/data/panel/lessons/${ku.id}?project=gen-lang-client-0878434798`}
         target="_blank"
@@ -87,6 +88,15 @@ function KuRow({ ku, onEdit, onDelete }: { ku: ListedKu; onEdit: () => void; onD
         </svg>
         Lesson
       </a>
+      ) : (
+        // Same box as the link so the Edit/Delete buttons stay lined up down the list.
+        <span
+          title={ku.type === "Kanji" ? "Kanji lessons come live from Kanji Alive and aren't stored" : "No lesson generated yet"}
+          className="shrink-0 flex items-center gap-1 text-xs px-3 py-1 rounded border border-dashed border-shodo-mist text-shodo-ink-faint cursor-default"
+        >
+          No lesson
+        </span>
+      )}
       <button
         onClick={onEdit}
         className="shrink-0 text-xs px-3 py-1 rounded border border-shodo-mist text-shodo-ink-light hover:border-shodo-indigo hover:text-shodo-indigo transition-colors"
