@@ -312,6 +312,11 @@ export interface GrammarLesson {
      * absent on lessons not yet shown.
      */
     furigana?: string;
+    /**
+     * Indices into `fragments` hand-marked as the grammar pattern this example teaches (the
+     * pieces that become blanks; see lib/sentence-assembly.ts). Cleared when fragments change.
+     */
+    patternFragments?: number[];
   }[];
 }
 

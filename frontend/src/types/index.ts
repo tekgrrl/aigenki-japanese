@@ -290,6 +290,8 @@ export interface GrammarLesson {
     learnableTerms?: { term: string; surfaceForm: string; reading: string; meaning: string }[];
     /** `japanese` with furigana markup, display only (backfilled lazily by the backend). */
     furigana?: string;
+    /** Indices into `fragments` hand-marked as the grammar pattern (blanks in the assembly harness). */
+    patternFragments?: number[];
   }[];
 }
 

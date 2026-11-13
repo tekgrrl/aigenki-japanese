@@ -100,7 +100,8 @@ export default function GrammarLessonEditor({ lesson, onChange }: Props) {
                     className={inputClass}
                     value={item.japanese}
                     // The stored furigana is a copy of the old sentence: drop it so a fresh one is made.
-                    onChange={(e) => update({ japanese: e.target.value, furigana: undefined })}
+                    // Pattern marks point at the old fragments, so they go too.
+                    onChange={(e) => update({ japanese: e.target.value, furigana: undefined, patternFragments: undefined })}
                   />
                 </div>
                 <div>
@@ -126,7 +127,8 @@ export default function GrammarLessonEditor({ lesson, onChange }: Props) {
               <div className="pl-2 border-l-2 border-shodo-mist">
                 {stringArrayField(
                   item.fragments,
-                  (values) => update({ fragments: values }),
+                  // Pattern marks are fragment indices: editing the fragments clears them.
+                  (values) => update({ fragments: values, patternFragments: undefined }),
                   "+ Add fragment",
                   "Fragment",
                 )}

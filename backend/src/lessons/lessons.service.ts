@@ -11,6 +11,7 @@ import { KanjiService } from '../kanji/kanji.service';
 import { subjectOf, usageKey } from '../pictures/pictures.service';
 import { BuiltUsages, checkBuiltUsages, examplesFingerprint, withUncoveredSetAside, withUsageIds } from './vocab-usages';
 import { stripFurigana } from '../lib/furigana-text';
+import { validPatternMarks } from '../lib/sentence-assembly';
 import { UserService } from '../users/user.service';
 
 function applyKuOverrides(lesson: Lesson, ku: KnowledgeUnit): Lesson {
@@ -468,7 +469,7 @@ export class LessonsService {
     }
 
     if (Array.isArray(parsed.examples)) {
-      parsed.examples = dropStaleFurigana(parsed.examples);
+      parsed.examples = dropInvalidPatternMarks(dropStaleFurigana(parsed.examples));
     }
 
     await lessonRef.update(parsed);
@@ -661,6 +662,19 @@ export function dropStaleFurigana<T extends { japanese?: string; furigana?: stri
   return examples.map(ex => {
     if (typeof ex?.furigana !== 'string' || stripFurigana(ex.furigana) === ex.japanese) return ex;
     const { furigana: _stale, ...rest } = ex;
+    return rest as T;
+  });
+}
+
+/**
+ * Removes `patternFragments` from Grammar examples where the marks no longer fit the fragments
+ * (an index out of range or repeated, or every fragment marked). The lesson editor clears marks
+ * when it edits fragments; this is the backstop for anything else.
+ */
+export function dropInvalidPatternMarks<T extends { fragments?: unknown; patternFragments?: unknown }>(examples: T[]): T[] {
+  return examples.map(ex => {
+    if (ex?.patternFragments === undefined || validPatternMarks(ex.fragments, ex.patternFragments)) return ex;
+    const { patternFragments: _invalid, ...rest } = ex;
     return rest as T;
   });
 }
