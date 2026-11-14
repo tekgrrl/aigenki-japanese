@@ -36,12 +36,17 @@ export default function EditKnowledgeUnitModal({
   // The modal stays mounted across opens (parent only toggles isOpen/knowledgeUnit) — clear
   // the "Saved." confirmation whenever it closes, so reopening later (even the same KU, with
   // no new edits) doesn't show a leftover confirmation from a previous session.
+  // Closing (Save or Cancel) also forgets which KU was loaded, so the next open reloads every
+  // field from the stored values: unsaved edits from a cancelled session don't linger.
   useEffect(() => {
-    if (!isOpen) setSaveMessage(null);
+    if (!isOpen) {
+      setSaveMessage(null);
+      prevKuIdRef.current = null;
+    }
   }, [isOpen]);
 
   useEffect(() => {
-    if (knowledgeUnit) {
+    if (knowledgeUnit && isOpen) {
       // True when this effect fired because the parent refreshed the same KU's prop after a
       // save (see handleSave) rather than because a genuinely different KU was opened.
       const isSameKuRefresh = knowledgeUnit.id === prevKuIdRef.current;
@@ -95,7 +100,7 @@ export default function EditKnowledgeUnitModal({
         setCorpusNotes("");
       }
     }
-  }, [knowledgeUnit]);
+  }, [knowledgeUnit, isOpen]);
 
   if (!isOpen || !knowledgeUnit) return null;
 
@@ -158,16 +163,19 @@ export default function EditKnowledgeUnitModal({
       await onSave(knowledgeUnit!.id, updates);
 
       if (knowledgeUnit!.type === "Grammar" && grammarNotes !== initialGrammarNotes) {
-        await apiFetch(`/api/lessons/${knowledgeUnit!.id}`, {
+        // The lesson's own notes live on the lesson doc (the same route the lesson editor saves to).
+        const res = await apiFetch(`/api/lessons/${knowledgeUnit!.id}/global`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ section: "notes", content: grammarNotes }),
+          body: JSON.stringify({ updates: { notes: grammarNotes } }),
         });
+        if (!res.ok) throw new Error(res.status === 404 ? "No lesson yet to save notes to" : `Notes not saved (HTTP ${res.status})`);
       }
 
       setSaveMessage("Saved.");
     } catch (error) {
       console.error("Failed to save changes", error);
+      setSaveMessage(`Not saved: ${(error as Error).message}`);
     } finally {
       setIsSaving(false);
     }
