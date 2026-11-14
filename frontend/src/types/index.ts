@@ -292,6 +292,8 @@ export interface GrammarLesson {
     furigana?: string;
     /** Indices into `fragments` hand-marked as the grammar pattern (blanks in the assembly harness). */
     patternFragments?: number[];
+    /** Decoy pieces shown with the assembly that aren't part of the sentence. */
+    distractors?: string[];
   }[];
 }
 

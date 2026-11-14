@@ -16,7 +16,7 @@ type Example = GrammarLesson["examples"][number];
 type ListedKu = KnowledgeUnit & { hasLesson?: boolean };
 
 interface AssemblyCard {
-  pieces: { text: string | null; blank?: number }[];
+  pieces: { text: string | null; blank?: number; distractor?: true }[];
   blanks: { answer: string; accept: string[] }[];
   answer: string;
   english: string;
@@ -106,9 +106,15 @@ export default function AssemblyLabPage() {
       return;
     }
     const merged = current.map((ex, i) => {
-      const { patternFragments: _old, ...rest } = ex;
+      const { patternFragments: _old, distractors: _oldDecoys, ...rest } = ex;
       const marks = examples[i].patternFragments;
-      return { ...rest, fragments: examples[i].fragments, ...(marks ? { patternFragments: marks } : {}) };
+      const decoys = examples[i].distractors;
+      return {
+        ...rest,
+        fragments: examples[i].fragments,
+        ...(marks ? { patternFragments: marks } : {}),
+        ...(decoys?.length ? { distractors: decoys } : {}),
+      };
     });
     const res = await apiFetch(`/api/lessons/${kuId}/global`, {
       method: "PUT",
@@ -180,6 +186,7 @@ export default function AssemblyLabPage() {
               example={ex}
               onToggle={f => toggleMark(i, f)}
               onFragments={fragments => changeExample(i, { fragments, patternFragments: undefined })}
+              onDistractors={ds => changeExample(i, { distractors: ds.length ? ds : undefined })}
               onTry={() => tryExample(i)}
             >
               {trial?.index === i && <Trial key={trial.key} card={trial.card} />}
@@ -191,11 +198,12 @@ export default function AssemblyLabPage() {
   );
 }
 
-function ExampleRow({ index, example, onToggle, onFragments, onTry, children }: {
+function ExampleRow({ index, example, onToggle, onFragments, onDistractors, onTry, children }: {
   index: number;
   example: Example;
   onToggle: (fragment: number) => void;
   onFragments: (fragments: string[]) => void;
+  onDistractors: (distractors: string[]) => void;
   onTry: () => void;
   children?: React.ReactNode;
 }) {
@@ -267,6 +275,8 @@ function ExampleRow({ index, example, onToggle, onFragments, onTry, children }: 
         </div>
       )}
 
+      <DecoyEditor decoys={example.distractors ?? []} onChange={onDistractors} />
+
       {children}
     </section>
   );
@@ -322,14 +332,16 @@ function Trial({ card }: { card: AssemblyCard }) {
   };
 
   const chip = "px-3 py-1 rounded border text-base";
-  const allPlaced = pool.length === 0;
+  // With decoys in the pile, the learner checks once they've built the sentence, leaving decoys out.
+  const allBlanksPlaced = card.pieces.every((p, i) => p.text !== null || placed.includes(i));
+  const hasDecoys = card.pieces.some(p => p.distractor);
 
   return (
     <div className="mt-2 rounded bg-shodo-ink/5 p-4 space-y-4">
       <p className="text-sm text-shodo-ink-light">{card.english}</p>
 
       <div>
-        <p className="text-xs text-shodo-ink-faint mb-1">1. Build the sentence (tap to place, tap again to remove)</p>
+        <p className="text-xs text-shodo-ink-faint mb-1">1. Build the sentence (tap to place, tap again to remove){hasDecoys ? ": some pieces don't belong" : ""}</p>
         <div className="min-h-10 flex flex-wrap gap-2 items-center border-b border-shodo-mist pb-2">
           {placed.map(p => {
             const k = blankAt.get(p);
@@ -356,13 +368,13 @@ function Trial({ card }: { card: AssemblyCard }) {
             </button>
           ))}
         </div>
-        <button onClick={checkOrder} disabled={!allPlaced} className="mt-2 text-xs px-3 py-1 rounded border border-shodo-mist disabled:opacity-40">Check order</button>
+        <button onClick={checkOrder} disabled={placed.length === 0} className="mt-2 text-xs px-3 py-1 rounded border border-shodo-mist disabled:opacity-40">Check order</button>
         {orderResult && <p className="text-sm mt-1 text-shodo-ink">{orderResult}</p>}
       </div>
 
       <div>
         <p className="text-xs text-shodo-ink-faint mb-1">2. Fill the blanks in the sentence above</p>
-        <button onClick={checkBlanks} disabled={!allPlaced} className="text-xs px-3 py-1 rounded border border-shodo-mist disabled:opacity-40">Check blanks</button>
+        <button onClick={checkBlanks} disabled={!allBlanksPlaced} className="text-xs px-3 py-1 rounded border border-shodo-mist disabled:opacity-40">Check blanks</button>
         {blankResults && (
           <ul className="text-sm mt-1 text-shodo-ink">
             {card.blanks.map((b, k) => (
@@ -387,6 +399,35 @@ function Trial({ card }: { card: AssemblyCard }) {
         )}
         {speechResult && <p className="text-sm mt-1 text-shodo-ink">{speechResult}</p>}
       </div>
+    </div>
+  );
+}
+
+/** Decoy pieces for one example: shown in the pile but not part of the sentence. */
+function DecoyEditor({ decoys, onChange }: { decoys: string[]; onChange: (decoys: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const d = draft.trim();
+    if (d && !decoys.includes(d)) onChange([...decoys, d]);
+    setDraft("");
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-shodo-ink-light">Decoys:</span>
+      {decoys.map(d => (
+        <span key={d} className="flex items-center gap-1 px-2 py-0.5 rounded border border-dashed border-shodo-stamp-red text-sm text-shodo-ink">
+          {d}
+          <button onClick={() => onChange(decoys.filter(x => x !== d))} title="Remove decoy" className="text-xs text-shodo-stamp-red">×</button>
+        </span>
+      ))}
+      <input
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") add(); }}
+        placeholder="Add a decoy (e.g. 本が)"
+        className="w-40 rounded border border-shodo-mist bg-shodo-paper px-2 py-0.5 text-sm text-shodo-ink"
+      />
+      <button onClick={add} disabled={!draft.trim()} className="text-xs px-2 py-0.5 rounded border border-shodo-mist disabled:opacity-40">Add</button>
     </div>
   );
 }
