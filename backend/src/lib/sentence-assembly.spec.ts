@@ -70,6 +70,20 @@ describe('buildAssemblyCard', () => {
   });
 });
 
+describe('decoys', () => {
+  const base = { japanese: '本を読みます。', fragments: ['本を', '読み', 'ます。'], patternFragments: [2] };
+
+  it('adds them as pieces that are not part of the answer', () => {
+    const card = buildAssemblyCard({ ...base, distractors: ['本が', ' 本が ', ''] });
+    expect(card.pieces).toEqual([{ text: '本を' }, { text: '読み' }, { text: null, blank: 0 }, { text: '本が', distractor: true }]);
+    expect(card.answer).toBe('本を読みます。');
+  });
+
+  it('refuses a decoy that is also a real piece', () => {
+    expect(() => buildAssemblyCard({ ...base, distractors: ['本を'] })).toThrow(AssemblyError);
+  });
+});
+
 describe('validPatternMarks', () => {
   it('agrees with the card builder about a lone final 。', () => {
     expect(validPatternMarks(['行き', 'ます', '。'], [0, 1])).toBe(false); // nothing left to place

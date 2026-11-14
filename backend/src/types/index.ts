@@ -319,6 +319,8 @@ export interface GrammarLesson {
      * that change fragments (scripts, regeneration) must clear them too.
      */
     patternFragments?: number[];
+    /** Decoy pieces shown with the assembly that aren't part of the sentence (see lib/sentence-assembly.ts). */
+    distractors?: string[];
   }[];
 }
 

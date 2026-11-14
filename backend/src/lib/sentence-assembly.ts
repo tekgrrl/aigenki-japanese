@@ -12,6 +12,8 @@ export interface AssemblyExampleInput {
   accepted_alternatives?: string[];
   /** Indices into `fragments` that are the grammar pattern. */
   patternFragments?: number[];
+  /** Decoy pieces that aren't part of the sentence; the learner has to leave them out. */
+  distractors?: string[];
   /** `japanese` with readings (食[た]べます); used to accept kana answers for kanji blanks. */
   furigana?: string;
 }
@@ -21,6 +23,8 @@ export interface AssemblyPiece {
   text: string | null;
   /** For a blank: its index in `blanks`. */
   blank?: number;
+  /** A decoy: not part of the answer (the answer is built without it). */
+  distractor?: true;
 }
 
 export interface AssemblyBlank {
@@ -139,6 +143,14 @@ export function buildAssemblyCard(example: AssemblyExampleInput): AssemblyCard {
     const accept = [...new Set([texts[i], ...(reading ? [reading] : [])])];
     pieces.push({ text: null, blank: blanks.length });
     blanks.push({ answer: texts[i], accept });
+  }
+
+  // Decoys go after the real pieces (the card shuffles anyway). One that matches a real piece
+  // would be indistinguishable from it, so it's refused.
+  const real = new Set(texts.map(t => t.trim()));
+  for (const d of [...new Set((example.distractors ?? []).map(x => String(x).trim()).filter(Boolean))]) {
+    if (real.has(d)) throw new AssemblyError(`The decoy "${d}" is also a real piece of the sentence`);
+    pieces.push({ text: d, distractor: true });
   }
 
   return {
