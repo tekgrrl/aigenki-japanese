@@ -158,16 +158,19 @@ export default function EditKnowledgeUnitModal({
       await onSave(knowledgeUnit!.id, updates);
 
       if (knowledgeUnit!.type === "Grammar" && grammarNotes !== initialGrammarNotes) {
-        await apiFetch(`/api/lessons/${knowledgeUnit!.id}`, {
+        // The lesson's own notes live on the lesson doc (the same route the lesson editor saves to).
+        const res = await apiFetch(`/api/lessons/${knowledgeUnit!.id}/global`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ section: "notes", content: grammarNotes }),
+          body: JSON.stringify({ updates: { notes: grammarNotes } }),
         });
+        if (!res.ok) throw new Error(res.status === 404 ? "No lesson yet to save notes to" : `Notes not saved (HTTP ${res.status})`);
       }
 
       setSaveMessage("Saved.");
     } catch (error) {
       console.error("Failed to save changes", error);
+      setSaveMessage(`Not saved: ${(error as Error).message}`);
     } finally {
       setIsSaving(false);
     }

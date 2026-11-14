@@ -51,6 +51,9 @@ export function useSpeechRecognition() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // State, not derived from the ref: the recognizer is created after the first render, and a ref
+  // change alone doesn't re-render, so callers would keep seeing "unsupported".
+  const [supported, setSupported] = useState(false);
 
   useEffect(() => {
     const SpeechRecognition =
@@ -106,6 +109,7 @@ export function useSpeechRecognition() {
       };
 
       recognitionRef.current = recognition;
+      setSupported(true);
     } else {
       console.warn("Speech Recognition API not supported in this browser.");
     }
@@ -143,6 +147,6 @@ export function useSpeechRecognition() {
     start,
     stop,
     reset,
-    supported: !!recognitionRef.current,
+    supported,
   };
 }
