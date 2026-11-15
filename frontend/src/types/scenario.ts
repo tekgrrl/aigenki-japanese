@@ -138,6 +138,25 @@ export interface Scenario {
   simulationBrief?: string;
 }
 
+/** A pool scenario as the admin's pool editor reads it (GET /scenarios/pool/:id). */
+export interface PoolEntry {
+  id: string;
+  title: string;
+  description: string;
+  difficultyLevel: string;
+  setting: { location: string; goal: string; timeOfDay?: string; visualPrompt?: string };
+  roles: { user: string; ai: string | string[] };
+  simulationBrief?: string;
+  goals?: { summary: string; vocab: { content: string; kuId: string }[]; grammarKuIds: string[]; setPhrases: string[] };
+  /** Present once the first learner's start has generated it. */
+  dialogue?: unknown[];
+  /** Free-text tags for choosing (e.g. traveller, resident). */
+  situationTags?: string[];
+  /** Set when a Journey phase owns this scenario's goals, allowed items and brief. */
+  phaseRef?: { journeyId: string; journeyTitle: string; phaseId: string; phaseTitle: string };
+  allowed?: { vocab: { content: string; kuId: string }[]; grammarKuIds: string[] };
+}
+
 /** A shared pool scenario as GET /scenarios/pool lists it (content only). */
 export type PoolScenarioSummary = Pick<Scenario, "title" | "description" | "difficultyLevel"> & { id: string };
 

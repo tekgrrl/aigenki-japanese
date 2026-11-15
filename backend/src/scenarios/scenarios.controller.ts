@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ScenariosService } from './scenarios.service';
+import type { PoolEntryInput } from './scenarios.service';
 import { GenerateScenarioDto, ImportScenarioDto, ChatTurnDto, ResetSessionDto } from '../types/scenario';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
@@ -46,20 +47,25 @@ export class ScenariosController {
     return this.scenariosService.startPoolScenario(uid, poolId);
   }
 
-  /** Admin: a pool scenario's brief and script-word count, for the admin panel. */
+  /** Admin: a pool scenario as stored, for the pool editor. */
   @Get('pool/:poolId')
   @UseGuards(AdminGuard)
-  poolAdminSummary(@Param('poolId') poolId: string) {
-    return this.scenariosService.poolAdminSummary(poolId);
+  getPoolEntry(@Param('poolId') poolId: string) {
+    return this.scenariosService.getPoolEntry(poolId);
   }
 
-  /** Admin: set a pool scenario's simulation brief (the extension the role play adds). */
+  /** Admin: create a pool scenario from a premise and goals (nothing is generated until a learner starts it). */
+  @Post('pool')
+  @UseGuards(AdminGuard)
+  createPoolEntry(@Body() body: PoolEntryInput) {
+    return this.scenariosService.savePoolEntry(null, body);
+  }
+
+  /** Admin: replace a pool scenario's premise and goals (a change clears the generated content). */
   @Put('pool/:poolId')
   @UseGuards(AdminGuard)
-  async updatePoolScenario(@Param('poolId') poolId: string, @Body() body: { simulationBrief?: string }) {
-    if (typeof body?.simulationBrief !== 'string') throw new BadRequestException('simulationBrief is required');
-    await this.scenariosService.setSimulationBrief(poolId, body.simulationBrief);
-    return { success: true };
+  updatePoolEntry(@Param('poolId') poolId: string, @Body() body: PoolEntryInput) {
+    return this.scenariosService.savePoolEntry(poolId, body);
   }
 
   /** Admin: (re)build a pool scenario's script words (one Gemini call). */

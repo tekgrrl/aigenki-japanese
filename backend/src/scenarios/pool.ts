@@ -27,17 +27,27 @@ export function mergePoolScenario(pool: PoolScenario | null | undefined, learner
   } as Scenario;
 }
 
-/** The pool doc published from one of the admin's own scenarios: its content fields only. */
-export function poolContentOf(scenario: Scenario, publishedFrom: { uid: string; scenarioId: string }, id: string): PoolScenario {
-  const content: Record<string, unknown> = Object.fromEntries(POOL_CONTENT_FIELDS.filter(f => scenario[f] !== undefined).map(f => [f, scenario[f]]));
-  // The admin may have played it already: their per-item status isn't a learner's starting point.
-  if (Array.isArray(scenario.extractedKUs)) content.extractedKUs = scenario.extractedKUs.map(ku => ({ ...ku, status: 'new' }));
+/** The premise: what the admin writes. The rest of a pool scenario is generated from it plus its goals. */
+export const PREMISE_FIELDS = ['title', 'description', 'difficultyLevel', 'setting', 'roles', 'simulationBrief'] as const;
+
+/** Written on the pool scenario by the first start; cleared when the premise or goals change. */
+export const GENERATED_FIELDS = ['dialogue', 'extractedKUs', 'grammarMatches', 'grammarNotes', 'secondaryKUs', 'generatedAt'] as const;
+
+/** A scenario's premise, for publishing it to the pool (no dialogue: that's generated on first start). */
+export function premiseOf(scenario: Pick<Scenario, typeof PREMISE_FIELDS[number]>): Partial<PoolScenario> {
+  const premise: Record<string, unknown> = Object.fromEntries(PREMISE_FIELDS.filter(f => scenario[f] !== undefined).map(f => [f, scenario[f]]));
   // The admin's drawn scene lives in their own folder and is deleted if they redraw it: don't share it.
   if (scenario.setting) {
     const { picture: _own, ...setting } = scenario.setting;
-    content.setting = setting;
+    premise.setting = setting;
   }
-  return { ...content, id, publishedFrom, createdAt: Timestamp.now() } as PoolScenario;
+  return premise as Partial<PoolScenario>;
+}
+
+/** True when two pool versions differ in anything the generated scenario depends on. */
+export function premiseOrGoalsChanged(before: Partial<PoolScenario>, after: Partial<PoolScenario>): boolean {
+  const pick = (p: Partial<PoolScenario>) => JSON.stringify([...PREMISE_FIELDS.filter(f => f !== 'simulationBrief').map(f => p[f] ?? null), p.goals ?? null, p.allowed ?? null]);
+  return pick(before) !== pick(after);
 }
 
 /** A learner's fresh scenario doc for a pool scenario: progress only, ready for the play-through. */

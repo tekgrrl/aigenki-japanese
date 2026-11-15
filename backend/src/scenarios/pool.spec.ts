@@ -69,28 +69,20 @@ describe('ScenariosService: the pool', () => {
     await expect(service.startPoolScenario('u1', 'nope')).rejects.toThrow('Pool scenario not found');
   });
 
-  it("publishes an admin's scenario as content only, with item statuses reset", async () => {
+  it("publishes an admin's scenario as a premise + goals only: no dialogue, no drawn scene, once", async () => {
     const { db, service } = setup();
     const own = db.collection('users').doc('a1').collection('scenarios');
     await own.doc('s0').set({
       ...pool, id: 's0', state: 'completed', chatHistory: [{ speaker: 'user', text: 'x', timestamp: 1 }],
+      setting: { ...pool.setting, picture: { file: 'scenarios/a1/s0-x.png' } },
       extractedKUs: [{ ...pool.extractedKUs[0], kuId: 'k1', status: 'learning' }],
+      grammarMatches: [{ kuId: 'g1' }],
     });
     const { poolId } = await service.publishToPool('a1', 's0');
     const published = (await db.collection('scenario-pool').doc(poolId).get()).data()!;
-    expect(published).toMatchObject({ id: poolId, title: 'At the station', publishedFrom: { uid: 'a1', scenarioId: 's0' } });
-    expect(published.extractedKUs).toEqual([{ ...pool.extractedKUs[0], kuId: 'k1', status: 'new' }]);
-    expect(published.state).toBeUndefined();
-    expect(published.chatHistory).toBeUndefined();
-  });
-
-  it('publishes a scenario only once, and leaves out the admin\'s drawn scene', async () => {
-    const { db, service } = setup();
-    const own = db.collection('users').doc('a1').collection('scenarios');
-    await own.doc('s0').set({ ...pool, id: 's0', setting: { ...pool.setting, picture: { file: 'scenarios/a1/s0-x.png' } } });
-    const { poolId } = await service.publishToPool('a1', 's0');
-    const published = (await db.collection('scenario-pool').doc(poolId).get()).data()!;
-    expect(published.setting).toEqual(pool.setting);
+    expect(published).toMatchObject({ id: poolId, title: 'At the station', setting: pool.setting, publishedFrom: { uid: 'a1', scenarioId: 's0' } });
+    expect(published.goals).toEqual({ summary: 'Find the platform', vocab: [{ content: '駅', kuId: 'k1' }], grammarKuIds: ['g1'], setPhrases: [] });
+    for (const f of ['dialogue', 'extractedKUs', 'grammarMatches', 'state', 'chatHistory']) expect(published[f]).toBeUndefined();
     await expect(service.publishToPool('a1', 's0')).rejects.toThrow(`Already published to the pool as ${poolId}`);
   });
 

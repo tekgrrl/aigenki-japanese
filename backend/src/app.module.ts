@@ -29,8 +29,9 @@ import { GrammarSectionsModule } from './grammar-sections/grammar-sections.modul
 import { PicturesModule } from './pictures/pictures.module';
 import { FacetsModule } from './facets/facets.module';
 
+import { JourneysModule } from './journeys/journeys.module';
 @Module({
-  imports: [ValidationModule, ReviewsModule, FirebaseModule, FacetsModule, GeminiModule, ClaudeModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, TutorContextModule, DailyPlanModule, LearnerFlagsModule, GrammarSectionsModule, PicturesModule],
+  imports: [ValidationModule, ReviewsModule, FirebaseModule, FacetsModule, GeminiModule, ClaudeModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, TutorContextModule, DailyPlanModule, LearnerFlagsModule, GrammarSectionsModule, PicturesModule, JourneysModule],
   controllers: [AppController],
   providers: [AppService],
 })

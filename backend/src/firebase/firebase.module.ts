@@ -13,6 +13,10 @@ export const USER_STATS_COLLECTION = 'user-stats';
 export const SCENARIOS_COLLECTION = 'scenarios';
 /** Shared, pre-created scenarios (content only); learners start them into users/{uid}/scenarios. */
 export const SCENARIO_POOL_COLLECTION = 'scenario-pool';
+/** Journeys: ordered phases of pool scenarios, built in the admin Journey planner (the course structure). */
+export const JOURNEYS_COLLECTION = 'journeys';
+/** users/{uid}/journey-progress/{journeyId}: a Journey's completion, recorded the first time it's met. */
+export const JOURNEY_PROGRESS_SUBCOLLECTION = 'journey-progress';
 export const CONCEPTS_COLLECTION = 'concepts';
 export const GRAMMAR_SECTIONS_COLLECTION = 'grammar-sections';
 export const USER_KUS_SUBCOLLECTION = 'user-kus';

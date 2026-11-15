@@ -487,3 +487,67 @@ Rules:
 - Leave out these words, which are already taught: ${keyVocab.length ? keyVocab.join('、') : '(none)'}.
 - reading: hiragana. meaning: a short English gloss for the sense used here. jlptLevel: the word's JLPT level.`;
 }
+
+// ---------------------------------------------------------------------------
+// Pool scenario generation (from the admin's premise and goals, no user context)
+// ---------------------------------------------------------------------------
+
+/** What buildPoolScenarioPrompt needs: the pool scenario's premise and its resolved goals. */
+export interface PoolScenarioPromptInput {
+  title: string;
+  description: string;
+  difficultyLevel: string;
+  setting: { location: string; goal: string; timeOfDay?: string; participants?: string[] };
+  roles: { user: string; ai: string | string[] };
+  goalSummary: string;
+  vocab: string[];
+  grammar: { kuId: string; pattern: string }[];
+  setPhrases: string[];
+  /** Taught before this scene (earlier Journey phases): usable, but never Key items. */
+  allowed?: { vocab: string[]; grammar: string[] };
+}
+
+/**
+ * The dialogue for a shared pool scenario, written from the admin's premise and learning goals.
+ * No tools and no learner context: the allowed vocab and grammar are given here, and the service
+ * drops anything outside them afterwards.
+ */
+export function buildPoolScenarioPrompt(p: PoolScenarioPromptInput): string {
+  const aiRoles = Array.isArray(p.roles.ai) ? p.roles.ai : [p.roles.ai];
+  return `
+You are an expert Japanese language curriculum designer. Write the dialogue for this learning scene, for an ADULT living in or visiting Japan.
+
+**Scene:**
+- Title: ${p.title}
+- What happens: ${p.description}
+- Location: ${p.setting.location}${p.setting.timeOfDay ? ` (${p.setting.timeOfDay})` : ''}
+- The learner's goal: ${p.setting.goal}
+- Learner role: ${p.roles.user}
+- Partner role(s): ${aiRoles.join(', ')}
+- Level: ${p.difficultyLevel}
+
+**Learning goals:** ${p.goalSummary || '(none written)'}
+- Vocabulary to teach (use these; keep any other words very basic, at ${p.difficultyLevel} or below): ${p.vocab.length ? p.vocab.join('、') : '(none given)'}
+- Grammar to teach (use these, and no grammar above ${p.difficultyLevel}):
+${p.grammar.length ? p.grammar.map(g => `  - ${g.pattern} (kuId: ${g.kuId})`).join('\n') : '  (none given)'}
+- Set phrases (use each as written, where it fits): ${p.setPhrases.length ? p.setPhrases.join(' / ') : '(none)'}
+${p.allowed && (p.allowed.vocab.length || p.allowed.grammar.length) ? `
+**Already learned** (taught in earlier scenes: use them freely where natural, but they are NOT taught here, so never list them in \`extractedKUs\` or \`grammarMatches\`):
+- Vocabulary: ${p.allowed.vocab.length ? p.allowed.vocab.join('、') : '(none)'}
+- Grammar: ${p.allowed.grammar.length ? p.allowed.grammar.join(' / ') : '(none)'}
+` : ''}
+**Requirements:**
+1. A natural, realistic dialogue of 6-12 lines between the roles above that reaches the learner's goal.
+2. \`extractedKUs\`: the vocabulary to teach that the dialogue actually uses, ONLY from the list above.
+3. \`grammarMatches\`: for each grammar point above that the dialogue uses, its kuId (ONLY from the list above, never invented) and a sentence from the dialogue showing it.
+4. Use the given title, description, location, goal and roles for those fields; \`setting.visualPrompt\`: a visual description of the scene.
+5. **NO ROMAJI** anywhere. \`dialogue[].speakerRole\` is REQUIRED on every line: "user" for the learner role, "ai" for a partner role.
+6. Extracted KUs: \`content\` Japanese only, \`reading\` kana only, \`meaning\` English only, \`jlptLevel\` one of N5-N1.
+
+**Grammar Match Fragments Rules:**
+- ${FRAGMENT_CONTRACT}
+- ${ACCEPTED_ALTERNATIVES_DEF}
+
+Return ONLY raw JSON matching the response schema.
+`;
+}
