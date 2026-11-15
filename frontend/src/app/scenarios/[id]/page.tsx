@@ -1047,34 +1047,28 @@ export default function ScenarioPage({
 }
 
 /**
- * Admin, on a pool scenario: write its simulation brief and (re)build its script words. Reads the
- * pool doc itself, not this page's merged copy (the admin's own progress could hide the pool's list).
+ * Admin, on a pool scenario: a link to its premise and goals in the pool editor, and (re)building
+ * its script words once it has been generated. Reads the pool doc itself, not this page's merged copy.
  */
 function PoolAdminPanel({ poolId, onChanged }: { poolId: string; onChanged: () => unknown }) {
-  const [brief, setBrief] = useState("");
-  const [scriptWords, setScriptWords] = useState(0);
-  const [draft, setDraft] = useState("");
+  const [scriptWords, setScriptWords] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch(`/api/scenarios/pool/${poolId}`);
-    if (!res.ok) return;
-    const body = await res.json();
-    setBrief(body.simulationBrief ?? "");
-    setDraft(body.simulationBrief ?? "");
-    setScriptWords(body.scriptWords ?? 0);
+    if (res.ok) setScriptWords(((await res.json()).secondaryKUs ?? []).length);
   }, [poolId]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const run = async (label: string, call: () => Promise<Response>, done: (body: any) => string) => {
+  const rebuild = async () => {
     setBusy(true);
-    setStatus(label);
+    setStatus("Finding script words…");
     try {
-      const res = await call();
+      const res = await apiFetch(`/api/scenarios/pool/${poolId}/script-words`, { method: "POST" });
       const body = await res.json().catch(() => ({}));
-      setStatus(res.ok ? done(body) : `Failed: ${body.message ?? res.status}`);
+      setStatus(res.ok ? `Found ${body.count} script words.` : `Failed: ${body.message ?? res.status}`);
       if (res.ok) await Promise.all([load(), onChanged()]);
     } catch (e) {
       setStatus(`Failed: ${(e as Error).message}`);
@@ -1084,38 +1078,12 @@ function PoolAdminPanel({ poolId, onChanged }: { poolId: string; onChanged: () =
   };
 
   return (
-    <section className="rounded-xl border border-dashed border-slate-300 p-4 space-y-3 text-sm">
+    <section className="rounded-xl border border-dashed border-slate-300 p-4 space-y-2 text-sm">
       <h2 className="font-semibold text-slate-700">Pool scenario (admin) · {poolId}</h2>
-      <div>
-        <label className="block text-xs text-slate-500 mb-1">
-          Simulation brief: what the role play adds to the scene (shared by every learner)
-        </label>
-        <textarea
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          rows={3}
-          className="w-full rounded border border-slate-300 p-2 text-slate-800"
-          placeholder="e.g. The train is delayed; the traveller has to ask about another way to get there."
-        />
-        <button
-          disabled={busy || draft === brief}
-          onClick={() => run("Saving…", () => apiFetch(`/api/scenarios/pool/${poolId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ simulationBrief: draft }),
-          }), () => "Brief saved.")}
-          className="mt-1 px-3 py-1 rounded bg-shodo-ink text-shodo-paper disabled:opacity-40"
-        >
-          Save brief
-        </button>
-      </div>
+      <a href={`/admin/scenario-pool?id=${poolId}`} className="text-indigo-600 hover:underline">Edit premise, goals and brief in the pool editor →</a>
       <div className="flex items-center gap-3">
-        <span className="text-slate-600">Script words: {scriptWords}</span>
-        <button
-          disabled={busy}
-          onClick={() => run("Finding script words…", () => apiFetch(`/api/scenarios/pool/${poolId}/script-words`, { method: "POST" }), b => `Found ${b.count} script words.`)}
-          className="px-3 py-1 rounded border border-slate-300 text-slate-700 disabled:opacity-40"
-        >
+        <span className="text-slate-600">Script words: {scriptWords ?? "…"}</span>
+        <button onClick={rebuild} disabled={busy} className="px-3 py-1 rounded border border-slate-300 text-slate-700 disabled:opacity-40">
           Find script words
         </button>
       </div>

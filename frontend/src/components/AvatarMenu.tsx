@@ -147,6 +147,15 @@ export function AvatarMenu() {
               <Link href="/admin/assembly-lab" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
                 Assembly Lab
               </Link>
+              <Link href="/journeys" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Journeys (learner view)
+              </Link>
+              <Link href="/admin/journeys" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Journey Planner
+              </Link>
+              <Link href="/admin/scenario-pool" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Scenario Pool
+              </Link>
             </>
           )}
 

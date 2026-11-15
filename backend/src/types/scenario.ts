@@ -173,10 +173,37 @@ export type PoolScenario = Pick<Scenario,
     | 'secondaryKUs' | 'simulationBrief'
 > & {
     id: string;
-    /** The admin's scenario it was published from. */
-    publishedFrom: { uid: string; scenarioId: string };
+    /** The scene's learning goals and allowed sets; the scenario is generated from these. */
+    goals?: PoolGoals;
+    /** When the dialogue etc. were generated (absent until the first learner starts it). */
+    generatedAt?: Timestamp;
+    /** Items taught before this scenario's phase: the generator may use them, but they aren't Key items. */
+    allowed?: PhaseItemsRef;
+    /** Free-text tags for choosing (e.g. traveller, resident). */
+    situationTags?: string[];
+    /** The Journey phase that owns this scenario's goals, brief and allowed items (edited in the planner). */
+    phaseRef?: { journeyId: string; journeyTitle: string; phaseId: string; phaseTitle: string };
+    /** The admin's scenario it was published from (absent when made in the pool editor). */
+    publishedFrom?: { uid: string; scenarioId: string };
     createdAt: Timestamp;
 };
+
+/** Resolved Vocab and Grammar items (same shape as a Journey phase's). */
+export interface PhaseItemsRef {
+    vocab: { content: string; kuId: string }[];
+    grammarKuIds: string[];
+}
+
+/** A pool scenario's learning goals: what its generated scenario may use and teaches. */
+export interface PoolGoals {
+    summary: string;
+    /** Allowed / taught words, resolved to KUs when the admin saves (learners never create one). */
+    vocab: { content: string; kuId: string }[];
+    /** Allowed / taught grammar points (Grammar KU ids). */
+    grammarKuIds: string[];
+    /** Phrases the dialogue should use as they are. */
+    setPhrases: string[];
+}
 
 export interface ScenarioTemplate {
     id: string;

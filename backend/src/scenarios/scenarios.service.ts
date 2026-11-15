@@ -8,16 +8,16 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import { Firestore, CollectionReference, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import { Scenario, PoolScenario, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt, GrammarMatch } from '../types/scenario';
+import { Scenario, PoolScenario, PoolGoals, PhaseItemsRef, GenerateScenarioDto, ImportScenarioDto, ScenarioState, ExtractedKU, ChatMessage, ScenarioAttempt, ProgressStatus, LevelProgress, Attempt, GrammarMatch } from '../types/scenario';
 import { KnowledgeUnitsService } from '../knowledge-units/knowledge-units.service';
 import { UserService } from '../users/user.service';
 import { FIRESTORE_CONNECTION, SCENARIOS_COLLECTION, SCENARIO_POOL_COLLECTION, KNOWLEDGE_UNITS_COLLECTION } from '../firebase/firebase.module';
-import { mergePoolScenario, newLearnerDoc, poolContentOf } from './pool';
+import { GENERATED_FIELDS, mergePoolScenario, newLearnerDoc, premiseOf, premiseOrGoalsChanged } from './pool';
 import { JLPT_LEVEL_ORDER, JlptLevel } from '../prompts/curriculum';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { ValidationService } from '../validation/validation.service';
-import { buildArchitectPrompt, buildImportPrompt, SCENARIO_RESPONSE_SCHEMA } from '../prompts/scenario.prompts';
+import { buildArchitectPrompt, buildImportPrompt, buildPoolScenarioPrompt, SCENARIO_RESPONSE_SCHEMA } from '../prompts/scenario.prompts';
 import { GET_GRAMMAR_PATTERNS_DECLARATION } from '../prompts/curriculum';
 import { GrammarSectionsService } from '../grammar-sections/grammar-sections.service';
 
@@ -32,6 +32,37 @@ import { jlptLevelOf, excludedContentOf } from '../users/user.service';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
 export const VOCAB_READY_MIN_STAGE = 3;
+
+/** An item counts as learned enough (gate, Journey goals): every card at stage 3 or above. */
+export const itemIsReady = (stages: { minSrsStage: number | null } | undefined): boolean =>
+  (stages?.minSrsStage ?? -1) >= VOCAB_READY_MIN_STAGE;
+
+/** A learner's scenario has a passed simulation: the current evaluation or any archived attempt. */
+export const scenarioPassed = (s: Pick<Scenario, 'evaluation' | 'pastAttempts'> | null | undefined): boolean =>
+  !!s && (s.evaluation?.outcome === 'passed' || (s.pastAttempts ?? []).some(a => a.evaluation?.outcome === 'passed'));
+
+/** What the admin's pool editor sends: the premise, and goals as plain lines (resolved on save). */
+export interface PoolEntryInput {
+  title: string;
+  description?: string;
+  difficultyLevel?: string;
+  setting: { location: string; goal: string; timeOfDay?: string; visualPrompt?: string };
+  roles: { user: string; ai: string };
+  simulationBrief?: string;
+  goals?: { summary?: string; vocab?: string[]; grammar?: string[]; setPhrases?: string[] };
+  situationTags?: string[];
+}
+
+/** What a Journey phase writes onto each of its pool scenarios (see applyPhaseToPool). */
+export interface PhaseOnPool {
+  goals: PoolGoals;
+  allowed: PhaseItemsRef;
+  simulationBrief: string;
+  phaseRef: NonNullable<PoolScenario['phaseRef']>;
+}
+
+/** Trimmed, de-duplicated, non-empty lines. */
+const cleanLines = (xs: unknown): string[] => [...new Set((Array.isArray(xs) ? xs : []).map(x => String(x).trim()).filter(Boolean))];
 
 @Injectable()
 export class ScenariosService {
@@ -93,6 +124,27 @@ export class ScenariosService {
       .map(s => (s.poolId ? mergePoolScenario(byId.get(s.poolId), s) : s));
   }
 
+  /**
+   * For each pool id: the pool scenario's content and the learner's own doc for it (null if not
+   * started). Two reads for any number of ids. Unknown pool ids are left out.
+   */
+  async poolScenariosFor(uid: string, poolIds: string[]): Promise<Map<string, { pool: PoolScenario; learner: Scenario | null }>> {
+    const ids = [...new Set(poolIds)];
+    const out = new Map<string, { pool: PoolScenario; learner: Scenario | null }>();
+    if (ids.length === 0) return out;
+    const poolCol = this.db.collection(SCENARIO_POOL_COLLECTION);
+    const mine = this.scenariosColRef(uid);
+    const [pools, learners] = await Promise.all([
+      this.db.getAll(...ids.map(id => poolCol.doc(id))),
+      this.db.getAll(...ids.map(id => mine.doc(id))),
+    ]);
+    ids.forEach((id, i) => {
+      if (!pools[i].exists) return;
+      out.set(id, { pool: pools[i].data() as PoolScenario, learner: learners[i].exists ? (learners[i].data() as Scenario) : null });
+    });
+    return out;
+  }
+
   /** The pool scenarios a learner can start, by level then title (content only, no progress). */
   async listPool(): Promise<Pick<PoolScenario, 'id' | 'title' | 'description' | 'difficultyLevel'>[]> {
     const snap = await this.db.collection(SCENARIO_POOL_COLLECTION).select('id', 'title', 'description', 'difficultyLevel').get();
@@ -104,13 +156,19 @@ export class ScenariosService {
       .map(p => ({ id: p.id, title: p.title, description: p.description, difficultyLevel: p.difficultyLevel }));
   }
 
+  /** In-progress generations by pool id, so two starts at once generate once (single instance). */
+  private readonly generating = new Map<string, Promise<void>>();
+
   /**
    * Starts a pool scenario for a learner: their own doc (id = pool id) holding progress only.
-   * Already started → the existing doc is kept (Reset handles another attempt).
+   * A pool scenario that hasn't been generated yet is generated first (shared: every later
+   * learner reuses it). Already started → the existing doc is kept (Reset handles another attempt).
    */
   async startPoolScenario(uid: string, poolId: string): Promise<{ id: string }> {
-    const poolDoc = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId).get();
+    const poolRef = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
+    const poolDoc = await poolRef.get();
     if (!poolDoc.exists) throw new NotFoundException('Pool scenario not found');
+    if (!(poolDoc.data() as PoolScenario).dialogue?.length) await this.ensureGenerated(poolId);
     const ref = this.scenariosColRef(uid).doc(poolId);
     await this.db.runTransaction(async tx => {
       if (!(await tx.get(ref)).exists) tx.set(ref, newLearnerDoc(poolId, uid));
@@ -118,7 +176,84 @@ export class ScenariosService {
     return { id: poolId };
   }
 
-  /** Admin: publish one of their own standalone scenarios to the pool (its content fields only). */
+  /** Generates a pool scenario's shared content once, however many starts ask at the same time. */
+  private async ensureGenerated(poolId: string): Promise<void> {
+    const running = this.generating.get(poolId);
+    if (running) return running;
+    const run = (async () => {
+      const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
+      const pool = (await ref.get()).data() as PoolScenario;
+      if (pool.dialogue?.length) return; // another start finished first
+      await ref.update(await this.generatePoolContent(pool));
+      this.logger.log(`Generated pool scenario ${poolId}`);
+    })().finally(() => this.generating.delete(poolId));
+    this.generating.set(poolId, run);
+    return run;
+  }
+
+  /**
+   * A pool scenario's dialogue, Key items and script words, from its premise and goals alone (one
+   * Gemini call, no tools, no user context). Anything outside the goals is dropped afterwards, and
+   * no global word is created: Key words take the goal's KU id, script words must already exist.
+   */
+  private async generatePoolContent(pool: PoolScenario): Promise<Record<string, unknown>> {
+    const goals = pool.goals ?? { summary: '', vocab: [], grammarKuIds: [], setPhrases: [] };
+    const grammarDocs = goals.grammarKuIds.length
+      ? await this.db.getAll(...goals.grammarKuIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id)))
+      : [];
+    const grammar = grammarDocs.filter(d => d.exists).map(d => ({ kuId: d.id, pattern: String(d.data()!.content) }));
+    const allowedGrammarIds = (pool.allowed?.grammarKuIds ?? []).filter(id => !goals.grammarKuIds.includes(id));
+    const allowedGrammarDocs = allowedGrammarIds.length
+      ? await this.db.getAll(...allowedGrammarIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id)))
+      : [];
+    const taughtWords = new Set(goals.vocab.map(v => v.content));
+    const data = await this.geminiService.generateScenario(buildPoolScenarioPrompt({
+      title: pool.title,
+      description: pool.description,
+      difficultyLevel: pool.difficultyLevel,
+      setting: pool.setting,
+      roles: pool.roles ?? { user: 'You', ai: 'Partner' },
+      goalSummary: goals.summary,
+      vocab: goals.vocab.map(v => v.content),
+      grammar,
+      setPhrases: goals.setPhrases,
+      allowed: {
+        vocab: (pool.allowed?.vocab ?? []).map(v => v.content).filter(c => !taughtWords.has(c)),
+        grammar: allowedGrammarDocs.filter(d => d.exists).map(d => String(d.data()!.content)),
+      },
+    }), undefined, undefined, SCENARIO_RESPONSE_SCHEMA);
+
+    const vocabIds = new Map(goals.vocab.map(v => [v.content, v.kuId]));
+    const extractedKUs: ExtractedKU[] = (Array.isArray(data.extractedKUs) ? data.extractedKUs : [])
+      .map((ku: any) => ({ ...ku, content: String(ku.content ?? '').trim() }))
+      .filter((ku: any) => vocabIds.has(ku.content))
+      .map((ku: any) => ({
+        content: ku.content, reading: ku.reading, meaning: ku.meaning, type: 'vocab' as const,
+        status: 'new' as const, jlptLevel: ku.jlptLevel ?? null, kuId: vocabIds.get(ku.content),
+      }));
+    const allowedGrammar = new Set(grammar.map(g => g.kuId));
+    const grammarMatches = (Array.isArray(data.grammarMatches) ? data.grammarMatches : []).filter((m: any) => allowedGrammar.has(m.kuId));
+    const dialogue = Array.isArray(data.dialogue) ? data.dialogue : [];
+    if (dialogue.length === 0) throw new InternalServerErrorException('Scenario generation returned no dialogue');
+
+    const generated = { dialogue, extractedKUs, grammarMatches };
+    const secondaryKUs = await this.scriptWordsFor({ title: pool.title, ...generated }, { create: false }).catch(err => {
+      this.logger.error(`Script words for pool ${pool.id} failed; generated without them`, err);
+      return [] as ExtractedKU[];
+    });
+    return {
+      ...generated,
+      secondaryKUs,
+      ...(data.setting?.visualPrompt && !pool.setting?.visualPrompt ? { 'setting.visualPrompt': data.setting.visualPrompt } : {}),
+      generatedAt: Timestamp.now(),
+    };
+  }
+
+  /**
+   * Admin: publish one of their own standalone scenarios to the pool as a premise, with its Key
+   * Vocabulary and Grammar as the starting goals. No dialogue: the first start generates one from
+   * the premise and goals, outside anyone's account.
+   */
   async publishToPool(uid: string, scenarioId: string): Promise<{ poolId: string }> {
     const scenario = await this.getScenario(uid, scenarioId);
     if (!scenario) throw new NotFoundException('Scenario not found');
@@ -126,26 +261,150 @@ export class ScenariosService {
     const col = this.db.collection(SCENARIO_POOL_COLLECTION);
     const already = await col.where('publishedFrom.uid', '==', uid).where('publishedFrom.scenarioId', '==', scenarioId).limit(1).get();
     if (!already.empty) throw new BadRequestException(`Already published to the pool as ${already.docs[0].id}`);
-    const ref = col.doc();
-    const pool = poolContentOf(scenario, { uid, scenarioId }, ref.id);
-    // Written before the slow script-words call, so a second publish soon after sees it.
-    await ref.set(pool);
-    this.logger.log(`Published scenario ${scenarioId} (uid=${uid}) to the pool as ${ref.id}`);
-    // Script words are a nice-to-have: a failed call doesn't undo the publish (backfill later).
-    try {
-      await ref.update({ secondaryKUs: await this.scriptWordsFor(pool) });
-    } catch (err) {
-      this.logger.error(`Script words for ${ref.id} failed; published without them`, err);
+    const vocab: PoolGoals['vocab'] = [];
+    for (const ku of scenario.extractedKUs ?? []) {
+      const content = ku.content.trim();
+      if (!content || vocab.some(v => v.content === content)) continue;
+      vocab.push({ content, kuId: ku.kuId ?? await this.knowledgeUnitsService.ensureVocab(content, { reading: ku.reading, definition: ku.meaning, jlptLevel: ku.jlptLevel }) });
     }
+    const ref = col.doc();
+    await ref.set({
+      ...premiseOf(scenario),
+      id: ref.id,
+      goals: { summary: scenario.setting?.goal ?? '', vocab, grammarKuIds: [...new Set((scenario.grammarMatches ?? []).map(g => g.kuId).filter(Boolean))], setPhrases: [] },
+      publishedFrom: { uid, scenarioId },
+      createdAt: Timestamp.now(),
+    });
+    this.logger.log(`Published scenario ${scenarioId} (uid=${uid}) to the pool as ${ref.id} (premise + goals)`);
     return { poolId: ref.id };
   }
 
+  /** Admin: a pool scenario as stored, for the pool editor. */
+  async getPoolEntry(poolId: string): Promise<PoolScenario> {
+    const doc = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId).get();
+    if (!doc.exists) throw new NotFoundException('Pool scenario not found');
+    return doc.data() as PoolScenario;
+  }
+
   /**
-   * The script's other content words (not Key Vocabulary), one Gemini call. Admin-only (publish,
-   * rebuild): each word is resolved to its global KU here, created if new, so learners who opt in
-   * only enrol existing words (global word writes are admin-only).
+   * Admin: create (no id) or replace a pool scenario's premise and goals. Goal words are resolved
+   * to KUs here (created if new: admin only); grammar lines must name an existing Grammar KU (by
+   * content or id). A changed premise or goals clears the generated content, so the next start
+   * regenerates it.
    */
-  private async scriptWordsFor(scenario: Pick<Scenario, 'title' | 'dialogue' | 'extractedKUs'>): Promise<ExtractedKU[]> {
+  async savePoolEntry(poolId: string | null, input: PoolEntryInput): Promise<PoolScenario> {
+    const title = (input?.title ?? '').trim();
+    if (!title) throw new BadRequestException('A pool scenario needs a title');
+    if (!input.setting?.location?.trim() || !input.setting?.goal?.trim()) throw new BadRequestException('Location and goal are required');
+    if (!input.roles?.user?.trim() || !String(input.roles?.ai ?? '').trim()) throw new BadRequestException('Both roles are required');
+
+    const col = this.db.collection(SCENARIO_POOL_COLLECTION);
+    const ref = poolId ? col.doc(poolId) : col.doc();
+    const before = poolId ? (await ref.get()).data() as PoolScenario | undefined : undefined;
+    if (poolId && !before) throw new NotFoundException('Pool scenario not found');
+
+    // A scenario in a Journey phase takes its goals, allowed items and brief from the phase
+    // (edited in the planner): the pool editor's versions of those are ignored.
+    const owned = before?.phaseRef;
+    const { vocab, grammarKuIds } = owned
+      ? { vocab: before.goals?.vocab ?? [], grammarKuIds: before.goals?.grammarKuIds ?? [] }
+      : await this.resolveGoalLines(input.goals?.vocab, input.goals?.grammar);
+    const brief = owned ? (before.simulationBrief ?? '') : (input.simulationBrief ?? '').trim();
+    const situationTags = cleanLines(input.situationTags);
+    const next: Partial<PoolScenario> = {
+      title,
+      description: (input.description ?? '').trim(),
+      difficultyLevel: (input.difficultyLevel ?? 'N5') as PoolScenario['difficultyLevel'],
+      setting: {
+        location: input.setting.location.trim(),
+        goal: input.setting.goal.trim(),
+        timeOfDay: (input.setting.timeOfDay ?? '').trim(),
+        participants: [input.roles.user.trim(), String(input.roles.ai).trim()],
+        visualPrompt: (input.setting.visualPrompt ?? before?.setting?.visualPrompt ?? '').trim(),
+      },
+      roles: { user: input.roles.user.trim(), ai: String(input.roles.ai).trim() },
+      goals: owned
+        ? before.goals
+        : { summary: (input.goals?.summary ?? '').trim(), vocab, grammarKuIds, setPhrases: cleanLines(input.goals?.setPhrases) },
+      ...(owned && before.allowed ? { allowed: before.allowed } : {}),
+    };
+    const keepGenerated = before && !premiseOrGoalsChanged(before, next);
+    const generated = keepGenerated ? Object.fromEntries(GENERATED_FIELDS.filter(f => before[f] !== undefined).map(f => [f, before[f]])) : {};
+    const doc = {
+      ...next,
+      ...generated,
+      ...(brief ? { simulationBrief: brief } : {}),
+      ...(before?.publishedFrom ? { publishedFrom: before.publishedFrom } : {}),
+      ...(owned ? { phaseRef: owned } : {}),
+      ...(situationTags.length ? { situationTags } : {}),
+      id: ref.id,
+      createdAt: before?.createdAt ?? Timestamp.now(),
+    } as PoolScenario;
+    await ref.set(doc);
+    return doc;
+  }
+
+  /**
+   * Admin: goal lines resolved to KUs. A Vocab line is a word (created if new: admin only) or an
+   * already-resolved `{ content, kuId }`; a Grammar line is a Grammar KU id or its pattern. An
+   * unknown Grammar line is refused (a 400 naming it).
+   */
+  async resolveGoalLines(vocabLines: unknown, grammarLines: unknown): Promise<PhaseItemsRef> {
+    const vocab: PhaseItemsRef['vocab'] = [];
+    for (const v of Array.isArray(vocabLines) ? vocabLines : []) {
+      const given = typeof v === 'object' && v ? v as { content?: unknown; kuId?: unknown } : null;
+      const content = String(given ? given.content ?? '' : v).trim();
+      if (!content || vocab.some(x => x.content === content)) continue;
+      const kuId = given && typeof given.kuId === 'string' && given.kuId ? given.kuId : await this.knowledgeUnitsService.ensureVocab(content);
+      vocab.push({ content, kuId });
+    }
+    const grammarKuIds: string[] = [];
+    const unknown: string[] = [];
+    for (const line of cleanLines(grammarLines)) {
+      const byId = await this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(line).get();
+      const id = byId.exists && byId.data()!.type === 'Grammar' ? byId.id : (await this.knowledgeUnitsService.findByContent(line, 'Grammar'))?.id;
+      if (!id) unknown.push(line);
+      else if (!grammarKuIds.includes(id)) grammarKuIds.push(id);
+    }
+    if (unknown.length) throw new BadRequestException(`No Grammar point matches: ${unknown.join(', ')}`);
+    return { vocab, grammarKuIds };
+  }
+
+  /**
+   * Admin (Journey save): writes a phase's goals, allowed items and brief onto one of its pool
+   * scenarios. Changed goals or allowed items clear the generated scene, so the next start writes
+   * a new one; the brief alone doesn't (it's read by the role play, not the generator).
+   */
+  async applyPhaseToPool(poolId: string, phase: PhaseOnPool): Promise<void> {
+    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
+    const before = (await ref.get()).data() as PoolScenario | undefined;
+    if (!before) throw new NotFoundException(`Pool scenario ${poolId} not found`);
+    const next = { ...before, goals: phase.goals, allowed: phase.allowed };
+    const clear = premiseOrGoalsChanged(before, next)
+      ? Object.fromEntries(GENERATED_FIELDS.filter(f => before[f] !== undefined).map(f => [f, FieldValue.delete()]))
+      : {};
+    const brief = phase.simulationBrief.trim();
+    await ref.update({
+      goals: phase.goals,
+      allowed: phase.allowed,
+      simulationBrief: brief ? brief : FieldValue.delete(),
+      phaseRef: phase.phaseRef,
+      ...clear,
+    });
+  }
+
+  /** Admin (Journey save): a pool scenario no longer in any phase goes back to its own goals. */
+  async releaseFromPhase(poolId: string): Promise<void> {
+    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
+    if ((await ref.get()).exists) await ref.update({ phaseRef: FieldValue.delete() });
+  }
+
+  /**
+   * The script's other content words (not Key Vocabulary), one Gemini call. With `create` (admin
+   * rebuild) a new word becomes a global KU; without it (generation on a learner's start) only
+   * words that already exist are kept, since global word writes are admin-only.
+   */
+  private async scriptWordsFor(scenario: Pick<Scenario, 'title' | 'dialogue' | 'extractedKUs'>, opts: { create: boolean }): Promise<ExtractedKU[]> {
     const lines = (scenario.dialogue ?? []).map(l => stripFurigana(l.text));
     const key = (scenario.extractedKUs ?? []).map(k => k.content.trim());
     const words = await this.geminiService.extractScriptVocab(lines, key, scenario.title);
@@ -155,36 +414,24 @@ export class ScenariosService {
       const content = (w.content ?? '').trim();
       if (!content || skip.has(content)) continue;
       skip.add(content);
-      const kuId = await this.knowledgeUnitsService.ensureVocab(content, { reading: w.reading, definition: w.meaning, jlptLevel: w.jlptLevel });
-      kept.push({ content, reading: w.reading, meaning: w.meaning, type: 'vocab', status: 'new', jlptLevel: w.jlptLevel, kuId });
+      const kuId = opts.create
+        ? await this.knowledgeUnitsService.ensureVocab(content, { reading: w.reading, definition: w.meaning, jlptLevel: w.jlptLevel })
+        : (await this.knowledgeUnitsService.findByContent(content, 'Vocab'))?.id;
+      if (kuId) kept.push({ content, reading: w.reading, meaning: w.meaning, type: 'vocab', status: 'new', jlptLevel: w.jlptLevel, kuId });
     }
     return kept;
   }
 
-  /** Admin: a pool scenario's own brief and script-word count (not a learner's merged copy). */
-  async poolAdminSummary(poolId: string): Promise<{ simulationBrief: string; scriptWords: number }> {
-    const doc = await this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId).get();
-    if (!doc.exists) throw new NotFoundException('Pool scenario not found');
-    const pool = doc.data() as PoolScenario;
-    return { simulationBrief: pool.simulationBrief ?? '', scriptWords: pool.secondaryKUs?.length ?? 0 };
-  }
-
-  /** Admin: (re)build a pool scenario's script words. */
+  /** Admin: (re)build a pool scenario's script words from its generated dialogue. */
   async rebuildScriptWords(poolId: string): Promise<{ count: number }> {
     const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
     const doc = await ref.get();
     if (!doc.exists) throw new NotFoundException('Pool scenario not found');
-    const secondaryKUs = await this.scriptWordsFor(doc.data() as PoolScenario);
+    const pool = doc.data() as PoolScenario;
+    if (!pool.dialogue?.length) throw new BadRequestException('Not generated yet: script words come with the first start');
+    const secondaryKUs = await this.scriptWordsFor(pool, { create: true });
     await ref.update({ secondaryKUs });
     return { count: secondaryKUs.length };
-  }
-
-  /** Admin: set a pool scenario's simulation brief (empty clears it). Only that field changes. */
-  async setSimulationBrief(poolId: string, brief: string): Promise<void> {
-    const ref = this.db.collection(SCENARIO_POOL_COLLECTION).doc(poolId);
-    if (!(await ref.get()).exists) throw new NotFoundException('Pool scenario not found');
-    const trimmed = (brief ?? '').trim();
-    await ref.update({ simulationBrief: trimmed ? trimmed : FieldValue.delete() });
   }
 
   async getScenariosBySourceKuId(userId: string, sourceKuId: string): Promise<Pick<Scenario, 'id' | 'title' | 'sourceContextSentence' | 'createdAt'>[]> {
@@ -802,9 +1049,17 @@ export class ScenariosService {
     ])];
     // Nothing linked means nothing to graduate: Role Play is open.
     if (kuIds.length === 0) return { items: {}, ready: true };
+    const items = await this.itemStages(uid, kuIds);
+    const ready = kuIds.every(kuId => itemIsReady(items[kuId]));
+    return { items, ready };
+  }
 
+  /**
+   * Each item's lowest and highest SRS stage across the learner's cards for it (null: no cards
+   * yet). The Role Play gate and Journey goal progress both read this.
+   */
+  async itemStages(uid: string, kuIds: string[]): Promise<Record<string, { maxSrsStage: number | null; minSrsStage: number | null }>> {
     const facetsRef = this.facetStore.query(uid);
-
     const items: Record<string, { maxSrsStage: number | null; minSrsStage: number | null }> = {};
     await Promise.all(kuIds.map(async (kuId) => {
       const snap = await facetsRef.where('kuId', '==', kuId).get();
@@ -814,8 +1069,7 @@ export class ScenariosService {
         minSrsStage: stages.length > 0 ? Math.min(...stages) : null,
       };
     }));
-    const ready = kuIds.every(kuId => (items[kuId].minSrsStage ?? -1) >= VOCAB_READY_MIN_STAGE);
-    return { items, ready };
+    return items;
   }
 
   private async validateScenario(scenario: Scenario, jlptLevel: string): Promise<void> {

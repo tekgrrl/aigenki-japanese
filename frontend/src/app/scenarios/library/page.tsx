@@ -252,7 +252,7 @@ function ScenarioLibraryContent() {
                         disabled={startingPoolId !== null}
                         className="mt-6 w-full py-2 bg-shodo-ink text-shodo-paper font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
                       >
-                        {startingPoolId === p.id ? "Starting…" : started ? "Continue" : "Start"}
+                        {startingPoolId === p.id ? (started ? "Opening…" : "Writing your scene…") : started ? "Continue" : "Start"}
                       </button>
                     </div>
                   );
