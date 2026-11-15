@@ -176,3 +176,27 @@ export function buildAssemblyCard(example: AssemblyExampleInput): AssemblyCard {
     alternatives: example.accepted_alternatives ?? [],
   };
 }
+
+/** A Grammar example as stored, with what a review card needs besides the assembly itself. */
+export type ReviewAssemblyExample = AssemblyExampleInput & { learnableTerms?: unknown[] };
+
+/**
+ * A review card from a lesson's examples: one chosen at random from those with marks that build
+ * (unmarked examples are never used once any example is marked), with that example's learnable
+ * terms for the "don't know this" flag. Null when no example is marked.
+ */
+export function pickReviewAssembly(
+  examples: ReviewAssemblyExample[] | undefined,
+  random: () => number = Math.random,
+): { card: AssemblyCard; learnableTerms: unknown[] } | null {
+  const usable: { card: AssemblyCard; learnableTerms: unknown[] }[] = [];
+  for (const ex of examples ?? []) {
+    if (!validPatternMarks(ex.fragments, ex.patternFragments)) continue;
+    try {
+      usable.push({ card: buildAssemblyCard(ex), learnableTerms: ex.learnableTerms ?? [] });
+    } catch (e) {
+      if (!(e instanceof AssemblyError)) throw e; // e.g. a decoy equal to a real piece: skip it
+    }
+  }
+  return usable.length ? usable[Math.floor(random() * usable.length)] : null;
+}

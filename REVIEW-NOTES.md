@@ -119,6 +119,11 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Opening Review Lesson before answering** locks the card for this round: only Skip is left. A skipped
   card stays due, so reloading the page or clicking the Review tab brings it straight back, unlocked.
   That's accepted; the cost is deliberately light.
+- **Grammar assembly cards with blanks** are built from the lesson as it is now
+  (`GET /lessons/:kuId/assembly-card`), not from the facet's stored examples. Once a grammar point has
+  any marked example, only marked examples are shown; with none it keeps the plain ordering card.
+  Saying the whole sentence passes on its own (no blanks typed); a spoken attempt that doesn't match
+  is not a fail, the learner can retry or build it. The owner's choices.
 - **Existing reading cards for words without kanji** (Content-to-Reading on katakana words, made
   before the no-kanji rule) are left alone, not deleted by a migration. Only new cards are stopped.
 

@@ -1,4 +1,4 @@
-import { AssemblyError, buildAssemblyCard, toHiragana, validPatternMarks } from './sentence-assembly';
+import { pickReviewAssembly, AssemblyError, buildAssemblyCard, toHiragana, validPatternMarks } from './sentence-assembly';
 
 const superlative = {
   japanese: 'クラスの中で田中さんが一番背が高いです。',
@@ -117,5 +117,22 @@ describe('toHiragana', () => {
   it('converts katakana and leaves the rest', () => {
     expect(toHiragana('テレビを見ます')).toBe('てれびを見ます');
     expect(toHiragana('ヴ3ヶ月')).toBe('ゔ3ヶ月');
+  });
+});
+
+describe('pickReviewAssembly', () => {
+  const marked = { japanese: '本を読みます。', fragments: ['本を', '読み', 'ます。'], patternFragments: [2], learnableTerms: [{ term: '本' }] };
+  const unmarked = { japanese: '水を飲みます。', fragments: ['水を', '飲み', 'ます。'] };
+  const badDecoy = { ...marked, japanese: '本を買います。', fragments: ['本を', '買い', 'ます。'], distractors: ['本を'] };
+
+  it('uses only marked examples that build, with their learnable terms', () => {
+    const picked = pickReviewAssembly([unmarked, badDecoy, marked], () => 0.99);
+    expect(picked?.card.answer).toBe('本を読みます。');
+    expect(picked?.learnableTerms).toEqual([{ term: '本' }]);
+  });
+
+  it('is null when nothing is marked', () => {
+    expect(pickReviewAssembly([unmarked])).toBeNull();
+    expect(pickReviewAssembly(undefined)).toBeNull();
   });
 });
