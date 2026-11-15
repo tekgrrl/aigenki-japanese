@@ -82,6 +82,21 @@ describe('decoys', () => {
   it('refuses a decoy that is also a real piece', () => {
     expect(() => buildAssemblyCard({ ...base, distractors: ['本を'] })).toThrow(AssemblyError);
   });
+
+  it('adds spare blanks as blank decoys with no blank index', () => {
+    const card = buildAssemblyCard({ ...base, blankDecoys: 2 });
+    expect(card.pieces.slice(3)).toEqual([{ text: null, distractor: true }, { text: null, distractor: true }]);
+    expect(card.blanks).toHaveLength(1);
+  });
+
+  it('passes hints through, trimmed and without repeats', () => {
+    expect(buildAssemblyCard({ ...base, hints: [' polite', 'polite', '', 'to a friend'] }).hints).toEqual(['polite', 'to a friend']);
+    expect(buildAssemblyCard(base).hints).toEqual([]);
+  });
+
+  it.each([-1, 1.5, 4])('refuses %p spare blanks', n => {
+    expect(() => buildAssemblyCard({ ...base, blankDecoys: n })).toThrow(AssemblyError);
+  });
 });
 
 describe('validPatternMarks', () => {

@@ -294,6 +294,10 @@ export interface GrammarLesson {
     patternFragments?: number[];
     /** Decoy pieces shown with the assembly that aren't part of the sentence. */
     distractors?: string[];
+    /** Spare blank chips shown with the assembly that aren't part of the sentence. */
+    blankDecoys?: number;
+    /** Free-text tags shown with the assembly's English (e.g. "polite"). Display only. */
+    hints?: string[];
   }[];
 }
 
