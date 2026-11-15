@@ -9,20 +9,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as wanakana from "wanakana";
 import { apiFetch } from "@/lib/api-client";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { normalizeAssemblyAnswer as normalize } from "@/lib/assembly-answer";
+import { AssemblyCard, blankSlots, checkBlanks, checkOrder as judgeOrder, sentenceMatches, typedPerBlank } from "@/lib/assembly-check";
 import type { GrammarLesson, KnowledgeUnit } from "@/types";
 
 type Example = GrammarLesson["examples"][number];
 type ListedKu = KnowledgeUnit & { hasLesson?: boolean };
-
-interface AssemblyCard {
-  pieces: { text: string | null; blank?: number; distractor?: true }[];
-  blanks: { answer: string; accept: string[] }[];
-  answer: string;
-  english: string;
-  hints: string[];
-  alternatives: string[];
-}
 
 const LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
 /** Matches MAX_BLANK_DECOYS in the backend's lib/sentence-assembly.ts. */
@@ -306,46 +297,29 @@ function Trial({ card }: { card: AssemblyCard }) {
   const speech = useSpeechRecognition();
   const [speechResult, setSpeechResult] = useState<string | null>(null);
 
-  // Blank chips look the same, so the k-th blank placed stands for the k-th blank of the sentence.
-  // With spare blanks in the pile, k can run past the sentence's blanks: that chip is a spare.
-  const blankAt = useMemo(() => {
-    const at = new Map<number, number>();
-    placed.filter(p => card.pieces[p].text === null).forEach((p, k) => at.set(p, k));
-    return at;
-  }, [placed, card]);
+  // The k-th blank chip placed stands for the k-th blank of the sentence (k past them: a spare).
+  const blankAt = useMemo(() => blankSlots(card, placed), [placed, card]);
 
   const place = (p: number) => { setPool(prev => prev.filter(x => x !== p)); setPlaced(prev => [...prev, p]); setOrderResult(null); };
   const unplace = (p: number) => { setPlaced(prev => prev.filter(x => x !== p)); setPool(prev => [...prev, p]); setOrderResult(null); };
 
-  const matchesSentence = (s: string) => [card.answer, ...card.alternatives].some(a => normalize(a) === normalize(s));
-
   const checkOrder = () => {
-    const placedBlanks = blankAt.size;
-    if (placedBlanks !== card.blanks.length) {
-      setOrderResult(`✗ Order not accepted: ${placedBlanks} blank${placedBlanks === 1 ? "" : "s"} placed, the sentence has ${card.blanks.length}`);
+    const { ok, joined, blanksPlaced } = judgeOrder(card, placed);
+    if (blanksPlaced !== card.blanks.length) {
+      setOrderResult(`✗ Order not accepted: ${blanksPlaced} blank${blanksPlaced === 1 ? "" : "s"} placed, the sentence has ${card.blanks.length}`);
       return;
     }
-    const joined = placed.map(p => card.pieces[p].text ?? card.blanks[blankAt.get(p)!].answer).join("");
-    setOrderResult(matchesSentence(joined) ? "✓ Order accepted" : `✗ Order not accepted: ${joined}`);
+    setOrderResult(ok ? "✓ Order accepted" : `✗ Order not accepted: ${joined}`);
   };
 
-  // The chip standing for each blank of the sentence (inverse of blankAt).
-  const chipFor = useMemo(() => {
-    const chips: number[] = [];
-    blankAt.forEach((k, p) => { chips[k] = p; });
-    return chips;
-  }, [blankAt]);
-  const typedFor = (k: number) => typed[chipFor[k]] ?? "";
+  const typedNow = typedPerBlank(card, placed, typed);
+  const typedFor = (k: number) => typedNow[k];
 
-  const checkBlanks = () => {
-    setBlankResults(card.blanks.map((b, k) =>
-      b.accept.some(a => wanakana.toHiragana(normalize(a)) === wanakana.toHiragana(normalize(typedFor(k)))),
-    ));
-  };
+  const checkBlanksNow = () => setBlankResults(checkBlanks(card, placed, typed));
 
   const checkSpeech = () => {
     const t = speech.transcript;
-    setSpeechResult(matchesSentence(t)
+    setSpeechResult(sentenceMatches(card, t)
       ? `✓ Heard the sentence: ${t}`
       : `✗ Heard: ${t || "(nothing)"} · expected: ${card.answer}`);
   };
@@ -398,7 +372,7 @@ function Trial({ card }: { card: AssemblyCard }) {
 
       <div>
         <p className="text-xs text-shodo-ink-faint mb-1">2. Fill the blanks in the sentence above</p>
-        <button onClick={checkBlanks} disabled={!allBlanksPlaced} className="text-xs px-3 py-1 rounded border border-shodo-mist disabled:opacity-40">Check blanks</button>
+        <button onClick={checkBlanksNow} disabled={!allBlanksPlaced} className="text-xs px-3 py-1 rounded border border-shodo-mist disabled:opacity-40">Check blanks</button>
         {blankResults && (
           <ul className="text-sm mt-1 text-shodo-ink">
             {card.blanks.map((b, k) => (

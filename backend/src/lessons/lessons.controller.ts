@@ -8,7 +8,7 @@ import { buildGrammarLessonMessage } from '../prompts/grammar.prompts';
 import { GrammarKnowledgeUnit } from '../types';
 import { UserService } from '../users/user.service';
 import { LearningQueueService } from '../learning-progress/learning-queue.service';
-import { AssemblyError, AssemblyExampleInput, buildAssemblyCard } from '../lib/sentence-assembly';
+import { AssemblyError, AssemblyExampleInput, buildAssemblyCard, pickReviewAssembly } from '../lib/sentence-assembly';
 
 @Controller('lessons')
 @UseGuards(FirebaseAuthGuard)
@@ -116,6 +116,20 @@ export class LessonsController {
   async addFurigana(@Param('kuId') kuId: string) {
     if (!kuId) throw new BadRequestException('kuId is required');
     return this.lessonsService.addGrammarFurigana(kuId);
+  }
+
+  /**
+   * A Grammar review's assembly card, built from the lesson as it is now (so marks added after the
+   * card was created count): a random example with valid blank marks. 404 when the lesson has
+   * none marked; the review card then falls back to its plain ordering exercise. `title` is the
+   * Grammar point's own title (English only, so it doesn't give a blank away), for the card header.
+   */
+  @Get(':kuId/assembly-card')
+  async reviewAssemblyCard(@Param('kuId') kuId: string) {
+    const [lesson, ku] = await Promise.all([this.lessonsService.findByKuId(kuId), this.knowledgeUnitsService.findOneById(kuId)]);
+    const picked = lesson?.type === 'Grammar' ? pickReviewAssembly(lesson.examples) : null;
+    if (!picked) throw new NotFoundException('No marked example for this lesson');
+    return { ...picked, title: ku?.type === 'Grammar' ? ku.data.title ?? '' : '' };
   }
 
   /**

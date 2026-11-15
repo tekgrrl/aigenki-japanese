@@ -7,10 +7,11 @@ import { ReviewFacet } from "@/types";
 import { apiFetch } from "@/lib/api-client";
 import ReviewActionButtons from "./ReviewActionButtons";
 import { normalizeAssemblyAnswer } from "@/lib/assembly-answer";
+import type { AssemblyCard } from "@/lib/assembly-check";
+import BlankAssemblyCard from "./BlankAssemblyCard";
+import { LearnableTerm, useFragmentFlag } from "./FragmentFlag";
 
-const LONG_PRESS_MS = 500;
-
-interface Props {
+export interface Props {
   facet: ReviewFacet;
   onResult: (result: "pass" | "fail") => Promise<void>;
   onAdvance: () => void;
@@ -29,13 +30,6 @@ function shuffleArray<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
-}
-
-interface LearnableTerm {
-  term: string;
-  surfaceForm: string;
-  reading: string;
-  meaning: string;
 }
 
 interface AssemblyExample {
@@ -58,7 +52,36 @@ function stripFinalPunctuation(fragments: string[]): string[] {
   return out.filter((f) => f.trim() !== "");
 }
 
-export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSkip, onSpeak, onShowLesson, showLesson, isFetchingLesson, lessonPeeked }: Props) {
+/**
+ * A sentence-assembly review. A Grammar point whose lesson has examples marked for blanks gets the
+ * blanks card, built from the lesson as it is now (GET /lessons/:kuId/assembly-card); otherwise
+ * (no marks yet, or a Concept) it's the plain ordering card from the facet's stored examples.
+ */
+export default function SentenceAssemblyCard(props: Props) {
+  const { facet } = props;
+  const isGrammar = facet.sourceCollection !== "concepts";
+  // undefined: still asking; null: no marked example (plain card).
+  const [blanks, setBlanks] = useState<{ card: AssemblyCard; learnableTerms: LearnableTerm[]; title: string } | null | undefined>(isGrammar ? undefined : null);
+
+  useEffect(() => {
+    if (!isGrammar) return;
+    let cancelled = false;
+    apiFetch(`/api/lessons/${facet.kuId}/assembly-card`)
+      .then(async res => (res.ok ? res.json() : null))
+      .catch(() => null)
+      .then(body => { if (!cancelled) setBlanks(body); });
+    return () => { cancelled = true; };
+  }, [facet.kuId, isGrammar]);
+
+  if (blanks === undefined) {
+    return <div className="bg-gray-800 shadow-2xl rounded-lg p-8 text-center text-gray-400">Loading…</div>;
+  }
+  if (blanks) return <BlankAssemblyCard {...props} card={blanks.card} learnableTerms={blanks.learnableTerms} title={blanks.title} />;
+  return <PlainAssemblyCard {...props} />;
+}
+
+/** The plain ordering exercise: put every fragment in order. */
+function PlainAssemblyCard({ facet, onResult, onAdvance, onSkip, onSpeak, onShowLesson, showLesson, isFetchingLesson, lessonPeeked }: Props) {
   const data = facet.data as Partial<AssemblyExample> & {
     goalTitle: string;
     sourceId?: string;
@@ -87,18 +110,8 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
   const [isSubmitting, setIsSubmitting] = useState(false);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
 
-  // "I don't know this" flag flow (issue #222) — long-press an unplaced fragment
-  // to flag it, without disturbing the tap-to-select gesture the same button uses.
-  // Fragments bundle particles with their preceding word (needed for the assembly
-  // exercise itself), so they're often poor standalone learning items on their own
-  // ("先生は", "九時から"). Instead of flagging the raw fragment, match it against
-  // learnableTerms — dictionary-form words the lesson generator already identified
-  // as worth learning — and only offer the flag when a match exists.
-  const [flagTerm, setFlagTerm] = useState<LearnableTerm | null>(null);
-  const [flagStatus, setFlagStatus] = useState<"idle" | "sending">("idle");
-  const [flagMessage, setFlagMessage] = useState<string | null>(null);
-  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressTriggered = useRef(false);
+  // Long-press a fragment to flag the learnable word in it (see FragmentFlag).
+  const flag = useFragmentFlag(learnableTerms);
 
   useEffect(() => {
     if (submitted) {
@@ -113,53 +126,9 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
     setAssembled(prev => [...prev, fragment]);
   };
 
-  const startPress = (fragment: string) => {
-    longPressTriggered.current = false;
-    const match = (learnableTerms ?? []).find(t => fragment.includes(t.surfaceForm || t.term));
-    if (!match) return; // nothing learnable in this fragment — no long-press effect
-    pressTimer.current = setTimeout(() => {
-      longPressTriggered.current = true;
-      setFlagTerm(match);
-    }, LONG_PRESS_MS);
-  };
-
-  const cancelPress = () => {
-    if (pressTimer.current) {
-      clearTimeout(pressTimer.current);
-      pressTimer.current = null;
-    }
-  };
-
   const handleFragmentClick = (idx: number) => {
-    if (longPressTriggered.current) {
-      longPressTriggered.current = false;
-      return;
-    }
+    if (flag.swallowClick()) return;
     addFragment(idx);
-  };
-
-  const handleFlagChoice = async (choice: "exclude" | "enroll") => {
-    if (!flagTerm) return;
-    setFlagStatus("sending");
-    try {
-      const res = await apiFetch("/api/learner-flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: flagTerm.term,
-          kuType: "Vocab",
-          choice,
-          context: "sentence-assembly",
-        }),
-      });
-      if (!res.ok) throw new Error("Flag request failed");
-      setFlagMessage(choice === "exclude" ? "Got it — won't show this for a while." : "Added to your learning queue.");
-    } catch {
-      setFlagMessage("Something went wrong — try again later.");
-    } finally {
-      setFlagStatus("idle");
-      setTimeout(() => { setFlagTerm(null); setFlagMessage(null); }, 2500);
-    }
   };
 
   const removeFragment = (idx: number) => {
@@ -260,16 +229,12 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
         <p className="text-xs uppercase tracking-widest text-gray-400 mb-2">Fragments</p>
         <div className="flex flex-wrap gap-2">
           {available.map((fragment, i) => {
-            const hasLearnableTerm = (learnableTerms ?? []).some(t => fragment.includes(t.surfaceForm || t.term));
             return (
               <button
                 key={`${fragment}-${i}`}
                 onClick={() => handleFragmentClick(i)}
-                onPointerDown={() => startPress(fragment)}
-                onPointerUp={cancelPress}
-                onPointerLeave={cancelPress}
+                {...flag.pressHandlers(fragment)}
                 disabled={submitted}
-                title={hasLearnableTerm ? "Long-press if you don't know this" : undefined}
                 className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-base rounded-md font-medium transition-colors disabled:opacity-40 disabled:cursor-default select-none"
               >
                 {fragment}
@@ -280,44 +245,7 @@ export default function SentenceAssemblyCard({ facet, onResult, onAdvance, onSki
       </div>
 
       {/* "I don't know this" flag — long-press a fragment above to open */}
-      {flagTerm && (
-        <div className="rounded-lg border border-gray-600 bg-gray-900 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-gray-300">
-              Don't know <span className="text-white font-semibold">{flagTerm.term}</span>
-              {flagTerm.reading && flagTerm.reading !== flagTerm.term && <span className="text-gray-400"> ({flagTerm.reading})</span>}
-              {flagTerm.meaning && <span className="text-gray-400"> — {flagTerm.meaning}</span>}?
-            </p>
-            <button
-              onClick={() => { setFlagTerm(null); setFlagMessage(null); }}
-              className="text-gray-500 hover:text-gray-300 text-sm shrink-0"
-              aria-label="Dismiss"
-            >
-              ✕
-            </button>
-          </div>
-          {flagMessage ? (
-            <p className="text-sm text-green-300">{flagMessage}</p>
-          ) : (
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleFlagChoice("exclude")}
-                disabled={flagStatus === "sending"}
-                className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-md transition-colors disabled:opacity-50"
-              >
-                Not now
-              </button>
-              <button
-                onClick={() => handleFlagChoice("enroll")}
-                disabled={flagStatus === "sending"}
-                className="flex-1 px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm rounded-md transition-colors disabled:opacity-50"
-              >
-                Help me learn this
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {flag.panel}
 
       {/* Submit */}
       {!submitted && (

@@ -5,6 +5,7 @@ import { ALREADY_KNOWN_STAGE, SRS_INTERVALS } from '../lib/constants';
 import { FACET_SEQUENCES } from '../lib/facet-sequences';
 import { kanjiIn } from '../lib/kanji-chars';
 import { isUsefulAssembly } from '../lib/assembly-quality';
+import { validPatternMarks } from '../lib/sentence-assembly';
 import {
   FacetStageDefinition,
   FacetStageEntry,
@@ -544,9 +545,10 @@ export class ReviewProgressService {
         const gl = lesson as GrammarLesson;
         // One rotating facet per grammar point (the card picks an example each review),
         // not one facet per example — and only examples long enough to be a real
-        // exercise. No useful example → [] → the stage is skipped (stageIsApplicable).
+        // exercise, or marked for blanks. No useful example → [] → the stage is skipped (stageIsApplicable).
         const examples = (gl.examples ?? [])
-          .filter(ex => ex.japanese && isUsefulAssembly(ex.fragments))
+          // A short sentence is fine once it has blank marks (the review card reads them live).
+          .filter(ex => ex.japanese && (isUsefulAssembly(ex.fragments) || validPatternMarks(ex.fragments, ex.patternFragments)))
           .map(ex => ({
             fragments: ex.fragments,
             answer: ex.japanese,
