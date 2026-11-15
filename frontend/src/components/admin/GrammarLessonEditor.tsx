@@ -146,6 +146,17 @@ export default function GrammarLessonEditor({ lesson, onChange }: Props) {
               </div>
 
               <div className="pl-2 border-l-2 border-shodo-mist">
+                {stringArrayField(
+                  item.hints ?? [],
+                  // Display-only tags for the sentence assembly (e.g. "polite"); never sent to AI or checked.
+                  (values) => update({ hints: values.length ? values : undefined }),
+                  "+ Add hint",
+                  "Hint (e.g. polite)",
+                )}
+                <label className={microLabelClass}>Assembly Hints</label>
+              </div>
+
+              <div className="pl-2 border-l-2 border-shodo-mist">
                 <ArrayFieldEditor
                   label="Learnable Terms"
                   items={item.learnableTerms || []}

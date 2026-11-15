@@ -20,10 +20,13 @@ interface AssemblyCard {
   blanks: { answer: string; accept: string[] }[];
   answer: string;
   english: string;
+  hints: string[];
   alternatives: string[];
 }
 
 const LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
+/** Matches MAX_BLANK_DECOYS in the backend's lib/sentence-assembly.ts. */
+const MAX_BLANK_DECOYS = 3;
 
 function shuffled(n: number): number[] {
   const a = Array.from({ length: n }, (_, i) => i);
@@ -106,14 +109,18 @@ export default function AssemblyLabPage() {
       return;
     }
     const merged = current.map((ex, i) => {
-      const { patternFragments: _old, distractors: _oldDecoys, ...rest } = ex;
+      const { patternFragments: _old, distractors: _oldDecoys, blankDecoys: _oldSpares, hints: _oldHints, ...rest } = ex;
       const marks = examples[i].patternFragments;
       const decoys = examples[i].distractors;
+      const spares = examples[i].blankDecoys;
+      const hints = examples[i].hints;
       return {
         ...rest,
         fragments: examples[i].fragments,
         ...(marks ? { patternFragments: marks } : {}),
         ...(decoys?.length ? { distractors: decoys } : {}),
+        ...(spares ? { blankDecoys: spares } : {}),
+        ...(hints?.length ? { hints } : {}),
       };
     });
     const res = await apiFetch(`/api/lessons/${kuId}/global`, {
@@ -187,6 +194,8 @@ export default function AssemblyLabPage() {
               onToggle={f => toggleMark(i, f)}
               onFragments={fragments => changeExample(i, { fragments, patternFragments: undefined })}
               onDistractors={ds => changeExample(i, { distractors: ds.length ? ds : undefined })}
+              onBlankDecoys={n => changeExample(i, { blankDecoys: n || undefined })}
+              onHints={hs => changeExample(i, { hints: hs.length ? hs : undefined })}
               onTry={() => tryExample(i)}
             >
               {trial?.index === i && <Trial key={trial.key} card={trial.card} />}
@@ -198,12 +207,14 @@ export default function AssemblyLabPage() {
   );
 }
 
-function ExampleRow({ index, example, onToggle, onFragments, onDistractors, onTry, children }: {
+function ExampleRow({ index, example, onToggle, onFragments, onDistractors, onBlankDecoys, onHints, onTry, children }: {
   index: number;
   example: Example;
   onToggle: (fragment: number) => void;
   onFragments: (fragments: string[]) => void;
   onDistractors: (distractors: string[]) => void;
+  onBlankDecoys: (count: number) => void;
+  onHints: (hints: string[]) => void;
   onTry: () => void;
   children?: React.ReactNode;
 }) {
@@ -275,7 +286,9 @@ function ExampleRow({ index, example, onToggle, onFragments, onDistractors, onTr
         </div>
       )}
 
-      <DecoyEditor decoys={example.distractors ?? []} onChange={onDistractors} />
+      <TagListEditor label="Hints:" placeholder="Add a hint (e.g. polite)" items={(example.hints ?? []).filter(h => h.trim())} onChange={onHints} chipClass="border-shodo-indigo" />
+      <TagListEditor label="Decoys:" placeholder="Add a decoy (e.g. 本が)" items={example.distractors ?? []} onChange={onDistractors} chipClass="border-dashed border-shodo-stamp-red" />
+      <BlankDecoyEditor count={example.blankDecoys ?? 0} onChange={onBlankDecoys} />
 
       {children}
     </section>
@@ -294,6 +307,7 @@ function Trial({ card }: { card: AssemblyCard }) {
   const [speechResult, setSpeechResult] = useState<string | null>(null);
 
   // Blank chips look the same, so the k-th blank placed stands for the k-th blank of the sentence.
+  // With spare blanks in the pile, k can run past the sentence's blanks: that chip is a spare.
   const blankAt = useMemo(() => {
     const at = new Map<number, number>();
     placed.filter(p => card.pieces[p].text === null).forEach((p, k) => at.set(p, k));
@@ -306,6 +320,11 @@ function Trial({ card }: { card: AssemblyCard }) {
   const matchesSentence = (s: string) => [card.answer, ...card.alternatives].some(a => normalize(a) === normalize(s));
 
   const checkOrder = () => {
+    const placedBlanks = blankAt.size;
+    if (placedBlanks !== card.blanks.length) {
+      setOrderResult(`✗ Order not accepted: ${placedBlanks} blank${placedBlanks === 1 ? "" : "s"} placed, the sentence has ${card.blanks.length}`);
+      return;
+    }
     const joined = placed.map(p => card.pieces[p].text ?? card.blanks[blankAt.get(p)!].answer).join("");
     setOrderResult(matchesSentence(joined) ? "✓ Order accepted" : `✗ Order not accepted: ${joined}`);
   };
@@ -333,12 +352,17 @@ function Trial({ card }: { card: AssemblyCard }) {
 
   const chip = "px-3 py-1 rounded border text-base";
   // With decoys in the pile, the learner checks once they've built the sentence, leaving decoys out.
-  const allBlanksPlaced = card.pieces.every((p, i) => p.text !== null || placed.includes(i));
+  const allBlanksPlaced = blankAt.size >= card.blanks.length;
   const hasDecoys = card.pieces.some(p => p.distractor);
 
   return (
     <div className="mt-2 rounded bg-shodo-ink/5 p-4 space-y-4">
-      <p className="text-sm text-shodo-ink-light">{card.english}</p>
+      <p className="text-sm text-shodo-ink-light flex flex-wrap items-center gap-2">
+        {card.english}
+        {card.hints.map(h => (
+          <span key={h} className="text-xs px-2 py-0.5 rounded-full border border-shodo-indigo text-shodo-indigo">{h}</span>
+        ))}
+      </p>
 
       <div>
         <p className="text-xs text-shodo-ink-faint mb-1">1. Build the sentence (tap to place, tap again to remove){hasDecoys ? ": some pieces don't belong" : ""}</p>
@@ -354,7 +378,7 @@ function Trial({ card }: { card: AssemblyCard }) {
                   value={typed[p] ?? ""}
                   onChange={e => { const v = wanakana.toKana(e.target.value, { IMEMode: true }); setTyped(prev => ({ ...prev, [p]: v })); setBlankResults(null); }}
                   placeholder="＿＿"
-                  className={`w-24 rounded border px-2 py-1 text-base bg-shodo-paper ${blankResults ? (blankResults[k] ? "border-shodo-matcha" : "border-shodo-stamp-red") : "border-dashed border-shodo-ink-faint"}`}
+                  className={`w-24 rounded border px-2 py-1 text-base bg-shodo-paper ${blankResults && k < card.blanks.length ? (blankResults[k] ? "border-shodo-matcha" : "border-shodo-stamp-red") : "border-dashed border-shodo-ink-faint"}`}
                 />
                 <button onClick={() => unplace(p)} title="Remove" className="text-xs text-shodo-ink-faint">×</button>
               </span>
@@ -403,31 +427,53 @@ function Trial({ card }: { card: AssemblyCard }) {
   );
 }
 
-/** Decoy pieces for one example: shown in the pile but not part of the sentence. */
-function DecoyEditor({ decoys, onChange }: { decoys: string[]; onChange: (decoys: string[]) => void }) {
+/** A list of short strings for one example (its hints, or its decoy pieces), added and removed one at a time. */
+function TagListEditor({ label, placeholder, items, onChange, chipClass }: {
+  label: string;
+  placeholder: string;
+  items: string[];
+  onChange: (items: string[]) => void;
+  chipClass: string;
+}) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const d = draft.trim();
-    if (d && !decoys.includes(d)) onChange([...decoys, d]);
+    if (d && !items.includes(d)) onChange([...items, d]);
     setDraft("");
   };
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-shodo-ink-light">Decoys:</span>
-      {decoys.map(d => (
-        <span key={d} className="flex items-center gap-1 px-2 py-0.5 rounded border border-dashed border-shodo-stamp-red text-sm text-shodo-ink">
+      <span className="text-xs text-shodo-ink-light">{label}</span>
+      {items.map(d => (
+        <span key={d} className={`flex items-center gap-1 px-2 py-0.5 rounded border text-sm text-shodo-ink ${chipClass}`}>
           {d}
-          <button onClick={() => onChange(decoys.filter(x => x !== d))} title="Remove decoy" className="text-xs text-shodo-stamp-red">×</button>
+          <button onClick={() => onChange(items.filter(x => x !== d))} title="Remove" className="text-xs text-shodo-ink-faint">×</button>
         </span>
       ))}
       <input
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") add(); }}
-        placeholder="Add a decoy (e.g. 本が)"
-        className="w-40 rounded border border-shodo-mist bg-shodo-paper px-2 py-0.5 text-sm text-shodo-ink"
+        placeholder={placeholder}
+        className="w-44 rounded border border-shodo-mist bg-shodo-paper px-2 py-0.5 text-sm text-shodo-ink"
       />
       <button onClick={add} disabled={!draft.trim()} className="text-xs px-2 py-0.5 rounded border border-shodo-mist disabled:opacity-40">Add</button>
+    </div>
+  );
+}
+
+/** Spare blank chips for one example: the learner has to work out how many blanks the sentence needs. */
+function BlankDecoyEditor({ count, onChange }: { count: number; onChange: (count: number) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-shodo-ink-light">Spare blanks:</span>
+      <select
+        value={count}
+        onChange={e => onChange(Number(e.target.value))}
+        className="rounded border border-shodo-mist bg-shodo-paper px-2 py-0.5 text-sm text-shodo-ink"
+      >
+        {Array.from({ length: MAX_BLANK_DECOYS + 1 }, (_, n) => <option key={n} value={n}>{n}</option>)}
+      </select>
     </div>
   );
 }

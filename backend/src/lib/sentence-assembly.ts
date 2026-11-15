@@ -14,6 +14,10 @@ export interface AssemblyExampleInput {
   patternFragments?: number[];
   /** Decoy pieces that aren't part of the sentence; the learner has to leave them out. */
   distractors?: string[];
+  /** Spare blank chips (0–MAX_BLANK_DECOYS): the learner has to work out how many blanks the sentence needs. */
+  blankDecoys?: number;
+  /** Free-text tags shown with the English (e.g. "polite"), to say which form is wanted. Display only. */
+  hints?: string[];
   /** `japanese` with readings (食[た]べます); used to accept kana answers for kanji blanks. */
   furigana?: string;
 }
@@ -23,7 +27,7 @@ export interface AssemblyPiece {
   text: string | null;
   /** For a blank: its index in `blanks`. */
   blank?: number;
-  /** A decoy: not part of the answer (the answer is built without it). */
+  /** A decoy: not part of the answer (the answer is built without it). A decoy blank has `text: null` and no `blank`. */
   distractor?: true;
 }
 
@@ -39,11 +43,16 @@ export interface AssemblyCard {
   blanks: AssemblyBlank[];
   answer: string;
   english: string;
+  /** The example's hints, trimmed, empty ones and repeats dropped. */
+  hints: string[];
   alternatives: string[];
 }
 
 /** The example can't be turned into a card (the message says why). */
 export class AssemblyError extends Error {}
+
+/** Most spare blank chips one example can have. */
+export const MAX_BLANK_DECOYS = 3;
 
 const FINAL_PUNCTUATION = /[。！？!?.]+$/u;
 const KANJI_RUN = /[\u4e00-\u9faf\u3005]+/u;
@@ -152,12 +161,18 @@ export function buildAssemblyCard(example: AssemblyExampleInput): AssemblyCard {
     if (real.has(d)) throw new AssemblyError(`The decoy "${d}" is also a real piece of the sentence`);
     pieces.push({ text: d, distractor: true });
   }
+  const spareBlanks = example.blankDecoys ?? 0;
+  if (!Number.isInteger(spareBlanks) || spareBlanks < 0 || spareBlanks > MAX_BLANK_DECOYS) {
+    throw new AssemblyError(`Spare blanks must be a whole number from 0 to ${MAX_BLANK_DECOYS}`);
+  }
+  for (let n = 0; n < spareBlanks; n++) pieces.push({ text: null, distractor: true });
 
   return {
     pieces,
     blanks,
     answer: japanese,
     english: example.english ?? '',
+    hints: [...new Set((example.hints ?? []).map(h => String(h).trim()).filter(Boolean))],
     alternatives: example.accepted_alternatives ?? [],
   };
 }
