@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
+import { addUsage, costUsd, emptyUsage } from '../lib/gemini-pricing';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
 import { Firestore, Timestamp, Query } from 'firebase-admin/firestore';
@@ -69,10 +70,11 @@ export class ValidationService implements OnModuleInit {
         },
       });
 
+      const usage = addUsage(emptyUsage(), response.usageMetadata);
       const result = JSON.parse(response.text ?? '{}') as ValidationResult;
       await this.apilogService.completeLog(logRef, {
         status: 'success',
-        responseData: { parsedJson: result },
+        responseData: { parsedJson: result, usage, costUsd: costUsd(this.modelName, usage) ?? null },
       });
       return result;
     } catch (err) {

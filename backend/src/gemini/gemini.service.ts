@@ -10,6 +10,8 @@ import { ApiLog, Lesson, ScenarioEvaluation } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 import { ApilogService } from '../apilog/apilog.service';
 import { performance } from "perf_hooks"; // For timing
+import { AsyncLocalStorage } from "async_hooks";
+import { TokenUsage, addUsage, costUsd, emptyUsage } from '../lib/gemini-pricing';
 import { buildKanjiDetailsSystemPrompt, buildKanjiDetailsUserMessage, buildUsageBuildMessage } from '../prompts/vocab.prompts';
 import { buildScenarioEvaluatorPrompt, ScenarioEvalContext } from '../prompts/evaluation.prompts';
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
@@ -86,7 +88,7 @@ export class GeminiService implements OnModuleInit {
       input_topic: logContext?.topic,
     };
     return this.logged('/reviews/evaluate', this.modelName, requestData, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: `User Answer: ${userAnswer}\nExpected: ${JSON.stringify(expectedAnswers)}` }] }],
         config: {
@@ -118,7 +120,7 @@ export class GeminiService implements OnModuleInit {
     }
     const requestData = { userMessage, content: logContext?.content, kuId: logContext?.kuId };
     const lessonString = await this.logged('/lessons/generate', this.modelName, requestData, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: {
@@ -155,7 +157,7 @@ export class GeminiService implements OnModuleInit {
     }
 
     return this.logged('/scenarios/generate', this.modelName, { userMessage }, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: {
@@ -179,7 +181,7 @@ export class GeminiService implements OnModuleInit {
    * service, deliberately skips apilogService logging.
    */
   async segmentJapaneseSentence(text: string): Promise<string[]> {
-    const response = await this.client.models.generateContent({
+    const response = await this.generate({
       model: this.modelName,
       contents: [{ parts: [{ text: buildSegmentationPrompt(text) }] }],
       config: {
@@ -204,7 +206,7 @@ export class GeminiService implements OnModuleInit {
         { role: 'model' as const, parts: [{ text: model }] },
       ]);
 
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [...fewShotContents, { parts: [{ text: userMessage }] }],
         config: {
@@ -262,7 +264,7 @@ export class GeminiService implements OnModuleInit {
 
     const requestData = { userMessage, systemPrompt, topic: kanji, source: 'kanji-fallback' };
     return this.logged('gemini-generate-kanji', this.modelName, requestData, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: {
@@ -339,7 +341,7 @@ export class GeminiService implements OnModuleInit {
     };
 
     return this.logged('/lessons/build-usages', this.modelName, { userMessage, content: vocab, kuId }, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.2 },
@@ -359,7 +361,7 @@ export class GeminiService implements OnModuleInit {
   async addFurigana(sentences: string[], kuId: string): Promise<string[]> {
     const userMessage = buildFuriganaMessage(sentences);
     return this.logged('/lessons/furigana', this.modelName, { userMessage, kuId }, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: {
@@ -380,7 +382,7 @@ export class GeminiService implements OnModuleInit {
   async extractScriptVocab(lines: string[], keyVocab: string[], topic: string): Promise<{ content: string; reading: string; meaning: string; jlptLevel: string }[]> {
     const userMessage = buildScriptVocabPrompt(lines, keyVocab);
     return this.logged('/scenarios/script-words', this.modelName, { userMessage, topic }, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: { responseMimeType: 'application/json', responseSchema: SCRIPT_VOCAB_SCHEMA as any },
@@ -393,6 +395,17 @@ export class GeminiService implements OnModuleInit {
   // ─── Picture cards (audio-first vocab) ──────────────────────────────────────
 
   /** Runs a Gemini call wrapped in the standard api-logs start/complete bookkeeping. */
+  /** Token usage of the Gemini calls made inside the current logged() call, for its log entry. */
+  private readonly usageStore = new AsyncLocalStorage<TokenUsage>();
+
+  /** Every Gemini text/image call goes through here, so logged() can add up tokens and cost. */
+  private async generate(params: Parameters<GoogleGenAI['models']['generateContent']>[0]): Promise<GenerateContentResponse> {
+    const response = await this.client.models.generateContent(params);
+    const usage = this.usageStore.getStore();
+    if (usage) addUsage(usage, response.usageMetadata);
+    return response;
+  }
+
   private async logged<T>(
     route: string,
     model: string,
@@ -405,11 +418,13 @@ export class GeminiService implements OnModuleInit {
       .catch(err => { this.logger.error(`Failed to start ${route} log`, err); return null; });
     const startTime = performance.now();
     const elapsed = () => Math.round(performance.now() - startTime);
+    const usage = emptyUsage();
     try {
-      const { result, responseData } = await call();
+      const { result, responseData } = await this.usageStore.run(usage, call);
       if (logRef) {
+        const priced = usage.calls ? { usage, costUsd: costUsd(model, usage) ?? null } : {};
         this.apilogService
-          .completeLog(logRef, { status: 'success', durationMs: elapsed(), responseData })
+          .completeLog(logRef, { status: 'success', durationMs: elapsed(), responseData: { ...responseData, ...priced } })
           .catch(err => console.error(`Failed to update ${route} log`, err));
       }
       return result;
@@ -484,7 +499,7 @@ export class GeminiService implements OnModuleInit {
 
   private async runPictureBrief(userMessage: string, route: string, meta: { content: string; kuId?: string }): Promise<PictureBrief> {
     return this.logged(route, this.modelName, { userMessage, content: meta.content, kuId: meta.kuId ?? null }, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: { responseMimeType: 'application/json', responseSchema: PICTURE_BRIEF_SCHEMA, temperature: 0.4 },
@@ -515,7 +530,7 @@ export class GeminiService implements OnModuleInit {
       for (const delay of delays) {
         if (delay) await new Promise(r => setTimeout(r, delay));
         try {
-          const response = await this.client.models.generateContent({
+          const response = await this.generate({
             model: this.imageModelName,
             contents: [{ role: 'user', parts }],
             config: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: PICTURE_STYLES[style].aspectRatio } },
@@ -545,7 +560,7 @@ export class GeminiService implements OnModuleInit {
   /** Step 3: does the image contain any writing? (binary, checkable — not a quality judge) */
   async checkPictureForText(image: Buffer, mimeType: string, kuId: string): Promise<{ hasText: boolean; where: string }> {
     return this.logged('/pictures/text-check', this.modelName, { userMessage: PICTURE_TEXT_CHECK_PROMPT, kuId }, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: image.toString('base64') } }, { text: PICTURE_TEXT_CHECK_PROMPT }] }],
         config: { responseMimeType: 'application/json', responseSchema: PICTURE_TEXT_CHECK_SCHEMA, temperature: 0 },
@@ -585,7 +600,7 @@ export class GeminiService implements OnModuleInit {
 
       // Tool-calling loop (safety cap: 5 iterations)
       for (let i = 0; i < 5; i++) {
-        const response = await this.client.models.generateContent({
+        const response = await this.generate({
           model: this.modelName,
           contents,
           config: {
@@ -626,7 +641,7 @@ export class GeminiService implements OnModuleInit {
       }
 
       // Final turn: structured output, no tools
-      const finalResponse = await this.client.models.generateContent({
+      const finalResponse = await this.generate({
         model: this.modelName,
         contents,
         config: {
@@ -662,7 +677,7 @@ export class GeminiService implements OnModuleInit {
   ) {
     const requestData = { userMessage, systemPrompt, input_topic: logContext?.topic, kuId: logContext?.scenarioId };
     return this.logged('/scenarios/chat', this.modelName, requestData, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: {
@@ -700,7 +715,7 @@ export class GeminiService implements OnModuleInit {
     return this.logged('/scenarios/evaluate', this.modelName, requestData, async () => {
       const prompt = buildScenarioEvaluatorPrompt(chatHistory, scenarioContext);
 
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.modelName,
         contents: [{ parts: [{ text: prompt }] }],
         config: {
@@ -742,7 +757,7 @@ export class GeminiService implements OnModuleInit {
     this.logger.log(`Generating concept for topic: "${logContext?.topic ?? 'unknown'}"`);
     const requestData = { userMessage, topic: logContext?.topic };
     const conceptString = await this.logged('/concepts/generate', this.conceptModelName, requestData, async () => {
-      const response = await this.client.models.generateContent({
+      const response = await this.generate({
         model: this.conceptModelName,
         contents: [{ parts: [{ text: userMessage }] }],
         config: {
@@ -796,7 +811,7 @@ export class GeminiService implements OnModuleInit {
     // Tool-calling loop (cap 5)
     if (toolDeclarations.length > 0) {
       for (let i = 0; i < 5; i++) {
-        const response = await this.client.models.generateContent({
+        const response = await this.generate({
           model,
           contents,
           config: {
@@ -835,7 +850,7 @@ export class GeminiService implements OnModuleInit {
       finalConfig.responseSchema = responseSchema;
     }
 
-    const finalResponse = await this.client.models.generateContent({
+    const finalResponse = await this.generate({
       model,
       contents,
       config: finalConfig,

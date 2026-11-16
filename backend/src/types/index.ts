@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase-admin/firestore";
+import type { TokenUsage } from "../lib/gemini-pricing";
 
 export interface ApiLog {
   id?: string; // Firestore document ID
@@ -24,7 +25,10 @@ export interface ApiLog {
     rawText?: string;
     parsedJson?: any;
     toolCalls?: Array<{ fn: string; args: Record<string, unknown>; response: Record<string, unknown> }>;
-    costUsd?: number;
+    /** null: a model with no price in lib/gemini-pricing.ts. */
+    costUsd?: number | null;
+    /** Gemini token counts over every call the entry covers (lib/gemini-pricing.ts). */
+    usage?: TokenUsage;
   };
   errorData?: {
     message?: string;
