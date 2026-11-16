@@ -122,7 +122,7 @@ export default function AdminKnowledgeUnitsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters persist across a round trip through Preview / the full-page lesson editor and
+  // Filters (and the page) persist across a round trip through Preview / the full-page lesson editor and
   // back (both navigate away from this page, which otherwise fully remounts on return).
   // Loaded/saved in effects rather than a useState lazy initializer — reading sessionStorage
   // during the initial render would mismatch the server-rendered ("" on the server, since
@@ -142,6 +142,7 @@ export default function AdminKnowledgeUnitsPage() {
     setFilterType(sessionStorage.getItem("kuListFilterType") ?? "");
     setFilterLevel(sessionStorage.getItem("kuListFilterLevel") ?? "");
     setSearchQuery(sessionStorage.getItem("kuListSearchQuery") ?? "");
+    setPage(Number(sessionStorage.getItem("kuListPage")) || 1);
     setFiltersHydrated(true);
   }, []);
 
@@ -150,7 +151,8 @@ export default function AdminKnowledgeUnitsPage() {
     sessionStorage.setItem("kuListFilterType", filterType);
     sessionStorage.setItem("kuListFilterLevel", filterLevel);
     sessionStorage.setItem("kuListSearchQuery", searchQuery);
-  }, [filterType, filterLevel, searchQuery, filtersHydrated]);
+    sessionStorage.setItem("kuListPage", String(page));
+  }, [filterType, filterLevel, searchQuery, page, filtersHydrated]);
 
   const [editTarget, setEditTarget] = useState<KnowledgeUnit | null>(null);
   const [backfill, setBackfill] = useState<{ running: boolean; message?: string }>({ running: false });
