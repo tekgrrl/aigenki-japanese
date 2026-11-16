@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI, Content, Part } from '@google/genai';
 import { randomUUID } from 'crypto';
+import { addUsage, costUsd as priceUsage, emptyUsage } from '../../lib/gemini-pricing';
 import {
   AiProvider,
   AiMessage,
@@ -55,6 +56,8 @@ export class GeminiProvider extends AiProvider implements OnModuleInit {
       },
     });
 
+    // The tutor adds these up per run and logs the total (tutor.service.ts).
+    const costUsd = priceUsage(this.modelName, addUsage(emptyUsage(), response.usageMetadata));
     const calls = response.functionCalls;
     if (calls && calls.length > 0) {
       const toolCalls: AiToolCall[] = calls.map((c, i) => ({
@@ -78,12 +81,12 @@ export class GeminiProvider extends AiProvider implements OnModuleInit {
       };
 
       this.logger.debug(`tool_use: ${toolCalls.map(c => c.name).join(', ')}`);
-      return { type: 'tool_use', calls: toolCalls, modelTurn };
+      return { type: 'tool_use', calls: toolCalls, modelTurn, costUsd };
     }
 
     const text = response.text ?? '';
     this.logger.debug(`end_turn: ${text.length} chars`);
-    return { type: 'end_turn', content: text };
+    return { type: 'end_turn', content: text, costUsd };
   }
 
   private toContent(msg: AiMessage): Content {
