@@ -56,6 +56,8 @@ export type BuildUsagesResult = {
   built?: { usages: VocabUsage[]; usageSetAside: string[] };
 };
 
+const CONJUGATION_TYPES: string[] = ['godan', 'ichidan', 'irregular'];
+
 @Injectable()
 export class LessonsService {
   private readonly logger = new Logger(LessonsService.name);
@@ -477,7 +479,19 @@ export class LessonsService {
 
   /** Admin-only: batched write of multiple lesson sections to global data in a single Firestore update. */
   async updateGlobalLesson(kuId: string, updates: Record<string, any>) {
+    // The KU keeps a copy of a Vocab lesson's conjugationType (generateLesson writes it too), so an
+    // edit here is mirrored onto the KU. null means "None": the field is removed from both.
+    const conj = updates.conjugationType;
+    if (conj !== undefined && conj !== null && !CONJUGATION_TYPES.includes(conj)) {
+      throw new BadRequestException(`conjugationType must be one of ${CONJUGATION_TYPES.join(', ')} or null`);
+    }
+    if (conj === null) updates = { ...updates, conjugationType: FieldValue.delete() };
+
     await this.writeGlobalLesson(kuId, updates);
+
+    if (conj !== undefined) {
+      await this.knowledgeUnitsService.update(kuId, { 'data.conjugationType': conj ?? FieldValue.delete() });
+    }
     return { success: true };
   }
 

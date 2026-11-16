@@ -86,6 +86,11 @@ export default function EditLessonPage() {
       for (const field of editableFields) {
         updates[field as string] = (lesson as any)[field];
       }
+      // "None" is undefined, which JSON drops; send null when a set type was cleared, so the
+      // backend removes it from the lesson and the KU.
+      if (updates.conjugationType === undefined && (initialLesson as VocabLesson | null)?.conjugationType) {
+        updates.conjugationType = null;
+      }
 
       const res = await apiFetch(`/api/lessons/${kuId}/global`, {
         method: "PUT",
@@ -100,7 +105,7 @@ export default function EditLessonPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [lesson, ku, kuId, hasChanges, editableFields]);
+  }, [lesson, initialLesson, ku, kuId, hasChanges, editableFields]);
 
   if (authLoading) return null;
 
