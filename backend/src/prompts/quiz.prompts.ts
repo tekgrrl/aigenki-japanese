@@ -44,11 +44,11 @@ Rules:
 4.  ${BLANK_DISAMBIGUATION_GUARD}
 5.  Ensure the generated question and any accepted answers make grammatical sense.
 6.  If a reading and/or meaning are provided, generate a question where the topic matches those specific constraints only — do not test alternative readings.
-7.  For verb and adjective questions where the answer is a conjugated form, include valid politeness-level alternatives (plain form and polite 〜ます form) in accepted_alternatives unless the question specifically constrains the form.
+7.  For verb and adjective questions where the answer is a conjugated form, include valid politeness-level alternatives (plain form and polite 〜ます form) in accepted_alternatives, unless the question is a conjugation question that asks for one specific form.
 8.  LEVEL CONSTRAINT (critical): Use ONLY grammar patterns listed in the cumulative schema returned by get_user_level for the surrounding sentence. The target word itself may be more advanced — that is the point — but every other word and grammatical structure in the question must come from the learner's known schema.
 9.  EXCLUSION CONSTRAINT (critical): NEVER use any word or pattern from excludedVocab/excludedGrammar (also returned by get_user_level) in the surrounding sentence, regardless of level — the learner explicitly said they don't want to see these right now.
 10. Ambiguity prevention: if synonyms could fit the blank, use the context field to pin the exact meaning of the target word.
-11. If the question requires verb conjugation and the answer is not the base form, provide enough context to make the expected form unambiguous.`;
+11. If the question requires verb conjugation and the answer is not the base form, provide enough context to make the expected form unambiguous (tense, negative, potential and so on). Politeness isn't part of this: rule 7 already accepts both levels, so don't use the context just to set it.`;
 }
 
 /**
@@ -133,7 +133,7 @@ export const NOUN_PARTICLE_FEW_SHOT_TURNS: Array<{ user: string; model: string }
 // ---------------------------------------------------------------------------
 
 export const GRAMMAR_QUESTION_OPTIONS: Record<string, string> = {
-  'novel-translation': 'Create a completely new English sentence that naturally forces the use of the target grammar pattern. Ask the user to translate it into Japanese.',
+  'novel-translation': "Create a completely new English sentence that naturally forces the use of the target grammar pattern. Ask the user to translate it into Japanese. The context is a short English hint pointing at the pattern being tested (e.g. for よく/あまり/ぜんぜん: \"Use a degree adverb with the negative\"), without writing the Japanese pattern or the answer. Don't use it to set the politeness level: either level is accepted (see the politeness rule).",
   'error-correction': 'Present a complete Japanese sentence that attempts to use the target grammar pattern but contains a specific error in its construction. Ask the user to correct the error and provide the fully corrected Japanese sentence. The context is the intended English meaning only — do not point out, quote or describe the error, or name the correct form; finding it is the test. Keep the question to one short instruction followed by the incorrect sentence.',
 };
 
@@ -167,7 +167,8 @@ Rules:
 5. EXCLUSION CONSTRAINT (critical): NEVER use any word or pattern from excludedVocab/excludedGrammar (also returned by get_user_level) in the surrounding sentence, regardless of level.
 6. Keep vocabulary simple and concrete. The user is being tested on grammar, not vocabulary.
 7. ${BLANK_DISAMBIGUATION_GUARD}
-8. ${JSON_ONLY_OUTPUT}`;
+8. POLITENESS: unless politeness is what the pattern is about, plain and polite (〜ます) answers are equally correct. Put the answer in one level and the other level's version in accepted_alternatives; never use the question or context to demand a level.
+9. ${JSON_ONLY_OUTPUT}`;
 }
 
 // ---------------------------------------------------------------------------
