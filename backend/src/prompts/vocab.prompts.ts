@@ -265,11 +265,12 @@ Output:
  * VOCAB_INSTRUCTIONS is already loaded into the cache as the system instruction.
  * Source: lessons.service.ts:generateLesson (Vocab branch)
  */
-export function buildVocabLessonMessage(content: string, useCached: boolean, jlptLevel: string): string {
+export function buildVocabLessonMessage(content: string, useCached: boolean, jlptLevel: string, corpusNotes?: string): string {
+  const note = corpusNotes?.trim() ? `\nCorpus note from the curator (follow it; it can limit which reading or sense to teach): ${corpusNotes.trim()}` : '';
   if (useCached) {
-    return `Generate a lesson for the Japanese word: ${content}`;
+    return `Generate a lesson for the Japanese word: ${content}${note}`;
   }
-  return `You are an expert Japanese tutor. You will be asked to generate a lesson for the Japanese word: ${content}.
+  return `You are an expert Japanese tutor. You will be asked to generate a lesson for the Japanese word: ${content}.${note}
 ${VOCAB_INSTRUCTIONS}
 ${levelConstraint(jlptLevel)}`;
 }

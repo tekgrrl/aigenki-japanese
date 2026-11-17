@@ -22,6 +22,8 @@ export default function KnowledgeManagementPage() {
   const [facets, setFacets] = useState<ReviewFacet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Shown after adding a word that was already in the corpus (so typed fields weren't used). */
+  const [notice, setNotice] = useState<string | null>(null);
 
   // --- Form State ---
   const [newKuType, setNewKuType] = useState<KnowledgeUnit["type"]>("Vocab");
@@ -98,6 +100,7 @@ export default function KnowledgeManagementPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null); // Clear previous errors
+    setNotice(null);
 
     // --- VALIDATION ---
     // Double-check validation on submit
@@ -132,6 +135,13 @@ export default function KnowledgeManagementPage() {
 
       if (!response.ok) {
         throw new Error("Failed to add new unit");
+      }
+      const result: { isNew?: boolean; noteAdded?: boolean } = await response.json();
+      if (result.isNew === false) {
+        setNotice(
+          `${newKuContent} was already in the corpus, so you were enrolled in the existing word` +
+            (result.noteAdded ? " and your corpus note was added to it." : ". The fields you typed weren't used."),
+        );
       }
 
       // Reset form fields
@@ -382,6 +392,12 @@ export default function KnowledgeManagementPage() {
       {error && (
         <div className="bg-red-800 border border-red-600 text-red-100 p-4 rounded-md mb-6">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="bg-gray-700 border border-gray-500 text-gray-100 p-4 rounded-md mb-6">
+          {notice}
         </div>
       )}
 

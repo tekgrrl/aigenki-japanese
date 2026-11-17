@@ -158,10 +158,19 @@ export class KnowledgeUnitsController {
         const existing = await this.knowledgeUnitsService.findByContent(body.content, body.type);
         let kuId: string;
         let isNewKu: boolean;
+        let noteAdded = false;
 
         if (existing) {
             kuId = existing.id;
             isNewKu = false;
+            // An admin re-adding an existing word may bring a corpus note (e.g. which reading is
+            // meant); store it rather than drop it. Other typed fields never overwrite stored ones.
+            const note = typeof body.data?.corpusNotes === 'string' ? body.data.corpusNotes.trim() : '';
+            const stored = existing.data && 'corpusNotes' in existing.data ? existing.data.corpusNotes : undefined;
+            if (note && note !== stored && (await this.userService.isAdmin(uid))) {
+                await this.knowledgeUnitsService.update(kuId, { 'data.corpusNotes': note });
+                noteAdded = true;
+            }
         } else {
             if (!(await this.userService.isAdmin(uid))) {
                 throw new ForbiddenException('Only an admin can add a new word to the library');
@@ -174,7 +183,7 @@ export class KnowledgeUnitsController {
         // Link the KU to the user (idempotent)
         await this.userKnowledgeUnitsService.create(uid, kuId);
 
-        return { id: kuId, isNew: isNewKu };
+        return { id: kuId, isNew: isNewKu, noteAdded };
     }
 
 }
