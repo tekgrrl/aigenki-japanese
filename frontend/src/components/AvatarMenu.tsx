@@ -147,6 +147,9 @@ export function AvatarMenu() {
               <Link href="/admin/assembly-lab" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
                 Assembly Lab
               </Link>
+              <Link href="/admin/progress" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
+                Verb-form Progress
+              </Link>
               <Link href="/journeys" className="block px-3 py-2 text-sm text-shodo-ink hover:bg-shodo-ink/5 transition-colors" onClick={() => setOpen(false)}>
                 Journeys (learner view)
               </Link>

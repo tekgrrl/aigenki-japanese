@@ -9,6 +9,7 @@ import { LearningProgressService } from '../learning-progress/learning-progress.
 import { ReviewProgressService } from '../review-progress/review-progress.service';
 import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
 import { getSrsLevelIndex, getSrsLevelName } from '../lib/srs-levels';
+import { LearnerProgressService } from '../learner-progress/learner-progress.service';
 
 /** A Grammar KU whose facet reaches this SRS stage gets its scenario chain (the user's rule, 2026-11-04; tunable). */
 const SCENARIO_FLASH_STAGE = 3;
@@ -31,6 +32,8 @@ export interface GradedReview {
     newStage: number;
     prevConsecutiveFailures: number;
     newConsecutiveFailures: number;
+    /** An AI-question card: the question it was answered on (the facet's currentQuestionId). */
+    questionId?: string;
 }
 
 /**
@@ -57,12 +60,20 @@ export class ReviewOutcomeService {
         private readonly tutorContext: TutorContextService,
         private readonly dailyPlanService: DailyPlanService,
         private readonly scenarioFlashService: ScenarioFlashService,
+        private readonly learnerProgress: LearnerProgressService,
     ) { }
 
     async onGraded(uid: string, review: GradedReview): Promise<void> {
         const { kuId } = review;
         if (!kuId) return;
-        await Promise.all([this.updateProgress(uid, kuId, review), this.reactToGrade(uid, kuId, review)]);
+        await Promise.all([
+            this.updateProgress(uid, kuId, review),
+            this.reactToGrade(uid, kuId, review),
+            // Skill evidence (a verb-form drill's answer) is independent of both chains.
+            review.questionId
+                ? this.step('skill evidence', uid, review, () => this.learnerProgress.recordDrillAnswer(uid, review.questionId!, review.result))
+                : Promise.resolve(),
+        ]);
     }
 
     private async step(name: string, uid: string, review: GradedReview, run: () => Promise<unknown>): Promise<void> {

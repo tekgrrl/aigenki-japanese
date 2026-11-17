@@ -616,6 +616,11 @@ export interface QuestionItem {
   /** Vocab: the usage this question tests (a VocabLesson usage id). Absent on older questions. */
   usageId?: string;
   /**
+   * Verb-form drill (kind 'verb-form'): the skill it tests (lib/verb-forms skill id) and the verb it
+   * uses. The answer was computed by code, so it's checked locally, never by the AI.
+   */
+  verbForm?: VerbFormTarget;
+  /**
    * Which kind of question the prompt asked for: a key of VOCAB_, NOUN_, GRAMMAR_ or
    * CONCEPT_QUESTION_OPTIONS (e.g. 'error-correction'). Absent on questions made before
    * 2026-11-11; the admin page guesses those from the text (lib/question-kind.ts).
@@ -626,6 +631,14 @@ export interface QuestionItem {
   rank: number;        // 0–100, starts at 50; suitable threshold is 30
   rejectionCount: number; // tracked for observability; not used for ranking
   createdAt: string | Timestamp;
+}
+
+/** Which verb-form skill a drill tests, and with which verb (a Vocab KU id). */
+export interface VerbFormTarget {
+  skillId: string;
+  verbKuId: string;
+  /** The verb's headword, for the explanation after a wrong answer. */
+  verb?: string;
 }
 
 export interface UserQuestionState {

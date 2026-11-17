@@ -20,9 +20,12 @@ export class QuestionsController {
     @Query('facetId') facetId: string,
     @Query('kuId') kuId: string,
     @Query('usageId') usageId?: string,
+    @Query('verbSkill') verbSkill?: string,
+    @Query('verbKuId') verbKuId?: string,
   ) {
     if (!topic) throw new BadRequestException('Topic is required');
-    return this.questionsService.selectQuestion(uid, kuId, facetId, topic, usageId || undefined);
+    const verbForm = verbSkill && verbKuId ? { skillId: verbSkill, verbKuId } : undefined;
+    return this.questionsService.selectQuestion(uid, kuId, facetId, topic, usageId || undefined, verbForm);
   }
 
   @Patch(':id/feedback')

@@ -171,6 +171,65 @@ Rules:
 }
 
 // ---------------------------------------------------------------------------
+// Verb-form drills (Grammar points with a verb slot)
+// ---------------------------------------------------------------------------
+
+/** What code has already decided for a verb-form drill: the AI only writes the sentence around it. */
+export interface VerbFormDrillInput {
+  pattern: string;
+  title: string;
+  /** The verb in dictionary form, and its meaning. */
+  verb: string;
+  meaning: string;
+  /** The exact text that goes in the blank: the verb's form plus the pattern's fixed ending (待ってください), computed by code. */
+  answer: string;
+  /** The Grammar point's JLPT level, for the surrounding sentence. */
+  jlptLevel: string;
+}
+
+/**
+ * System prompt for a verb-form drill's sentence (QuestionsService.generateVerbFormQuestion).
+ * Code picks the verb and computes the form; the model must not change either.
+ */
+export function buildVerbFormDrillPrompt(d: VerbFormDrillInput): string {
+  return `You are an expert Japanese tutor writing a short conjugation drill.
+The learner must produce a verb together with a grammar pattern's ending. The verb and the exact answer
+are already decided; your only job is a natural situation and one Japanese sentence with a blank.
+
+Grammar pattern: ${d.pattern} (${d.title})
+Verb: ${d.verb} (${d.meaning})
+The exact text that fills the blank: ${d.answer}
+
+Return:
+- "situation": one short English sentence setting the scene, so the sentence makes sense.
+- "sentence": one natural Japanese sentence using the pattern, with ＿＿＿ in place of "${d.answer}".
+- "translation": the English meaning of the whole sentence.
+
+Rules:
+1. The blank ＿＿＿ MUST appear exactly once, and MUST stand for exactly "${d.answer}" and nothing else.
+   The pattern's ending is part of the blank: DO NOT write it again next to the blank.
+2. The situation and sentence MUST make "${d.answer}" the natural choice (for a past ending, set it in
+   the past; for a request, make it a request), so a learner who knows the pattern can't pick another.
+3. DO NOT use a different verb, a different form, or a synonym. DO NOT write "${d.answer}" anywhere in the sentence.
+4. DO NOT name the form, the verb class or the answer in "situation" or "translation".
+5. Keep the rest of the sentence simple: JLPT ${d.jlptLevel} or easier vocabulary and grammar.
+6. ${NO_ROMAJI}
+7. ${JSON_ONLY_OUTPUT}
+
+Example 1
+Pattern: {V-te}ください, Verb: 待つ (to wait), Fills the blank: 待ってください
+{"situation": "Your friend is about to leave without you. Ask them politely.", "sentence": "ちょっと＿＿＿。", "translation": "Please wait a moment."}
+
+Example 2
+Pattern: {V-masu}ました, Verb: 来る (to come), Fills the blank: 来ました
+{"situation": "You tell a coworker politely about your weekend.", "sentence": "昨日、友だちがうちに＿＿＿。", "translation": "Yesterday a friend came to my house."}
+
+Example 3
+Pattern: {V-masu}ながら, Verb: 聞く (to listen), Fills the blank: 聞きながら
+{"situation": "You describe how you usually study.", "sentence": "音楽を＿＿＿、勉強します。", "translation": "I study while listening to music."}`;
+}
+
+// ---------------------------------------------------------------------------
 // Concept mechanic questions
 // ---------------------------------------------------------------------------
 

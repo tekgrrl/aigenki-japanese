@@ -7,6 +7,7 @@ import {
 import { FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore';
 import {
     FIRESTORE_CONNECTION,
+    KNOWLEDGE_UNITS_COLLECTION,
     LESSONS_COLLECTION,
     QUESTIONS_COLLECTION,
     USER_STATS_COLLECTION,
@@ -15,7 +16,7 @@ import { SRS_INTERVALS } from '../lib/constants';
 import { GeminiService } from '../gemini/gemini.service';
 import { FacetStore } from '../facets/facet-store';
 import { QuestionsService } from '../questions/questions.service';
-import { FacetType, Lesson, ReviewFacet, VocabLesson, VocabUsage } from '@/types';
+import { FacetType, Lesson, QuestionItem, ReviewFacet, VocabLesson, VocabUsage } from '@/types';
 import { StatsService } from '../stats/stats.service';
 import { KanjiService } from '../kanji/kanji.service';
 import { ScenarioFlashService } from '../scenario-flash/scenario-flash.service';
@@ -23,6 +24,10 @@ import { buildAnswerEvaluatorPrompt, buildMeaningEvaluatorPrompt } from '../prom
 import { DEFAULT_USAGE_ID, usagesOf } from '../lessons/vocab-usages';
 import { chooseMeaningForm, matchUsageLocally, meaningOutcome, MeaningOutcome, normaliseAnswer, stripTrailingPunctuation } from './meaning-card';
 import { ReviewOutcomeService } from './review-outcome.service';
+import { LearnerProgressService } from '../learner-progress/learner-progress.service';
+import { slotForms, VerbForm } from '../lib/verb-forms';
+import { chooseVerbFormTarget } from './verb-form-card';
+import type { VerbFormTarget } from '@/types';
 
 /**
  * Resolves which Firestore collection a ReviewFacet's kuId points to.
@@ -51,6 +56,7 @@ export class ReviewsService {
         private readonly kanjiService: KanjiService,
         private readonly scenarioFlashService: ScenarioFlashService,
         private readonly reviewOutcome: ReviewOutcomeService,
+        private readonly learnerProgress: LearnerProgressService,
     ) { }
 
     /** `usageId`: on a Vocab meaning card, the usage a correct answer matched (from evaluateAnswer). */
@@ -175,6 +181,7 @@ export class ReviewsService {
                 // The KU the facet tests; differs from kuId for Kanji-Component-* facets.
                 targetKuId: facetData.kuId,
                 facetType: facetData.facetType,
+                questionId: facetData.facetType === 'AI-Generated-Question' ? facetData.currentQuestionId : undefined,
                 prevConsecutiveFailures,
                 newConsecutiveFailures,
                 ...usageResult,
@@ -194,6 +201,7 @@ export class ReviewsService {
             newStage: txResult.newStage,
             prevConsecutiveFailures: txResult.prevConsecutiveFailures,
             newConsecutiveFailures: txResult.newConsecutiveFailures,
+            questionId: 'questionId' in txResult ? txResult.questionId : undefined,
         }).catch(e => this.logger.error(`onGraded failed uid=${uid} facetId=${facetId}`, e));
 
         return {
@@ -321,6 +329,15 @@ export class ReviewsService {
                 await this.questionsService.recordAnswer(uid, questionId, kuId, 'pass', facetType);
             }
             return { result: 'pass', explanation: 'Correct!' };
+        }
+
+        // A verb-form drill's answer was computed by code: no match is simply wrong, never a question for the AI.
+        if (questionId && facetType === 'AI-Generated-Question') {
+            const q = (await this.db.collection(QUESTIONS_COLLECTION).doc(questionId).get()).data() as QuestionItem | undefined;
+            if (q?.kind === 'verb-form') {
+                await this.questionsService.recordAnswer(uid, questionId, kuId, 'fail', facetType);
+                return { result: 'fail', explanation: QuestionsService.verbFormExplanation(q) };
+            }
         }
 
         // 2. AI Fallback
@@ -473,10 +490,46 @@ export class ReviewsService {
             })
             .filter(item => item !== null);
 
-        const withForms = await this.addMeaningForms(reviewItems);
+        const withForms = await this.addVerbFormTargets(uid, await this.addMeaningForms(reviewItems));
         this.logger.log(`Found ${withForms.length} due reviews for user ${uid}`);
         return withForms;
     } // END getDueReviews
+
+    /**
+     * Grammar AI-question cards on points with a verb slot ({V-te}ください): decide whether each is
+     * shown as a verb-form drill, and for which skill and verb (chooseVerbFormTarget). The item
+     * carries `verbForm`; the card itself is unchanged. Never blocks reviews: on error, no drills.
+     */
+    private async addVerbFormTargets<T extends { facet: ReviewFacet }>(uid: string, items: T[]): Promise<(T & { verbForm?: VerbFormTarget })[]> {
+        const candidates = items.filter(i => i.facet.facetType === 'AI-Generated-Question' && resolveKuCollection(i.facet) === 'knowledge-units');
+        if (candidates.length === 0) return items;
+        try {
+            const kuIds = [...new Set(candidates.map(i => i.facet.kuId))];
+            const kuDocs = await this.db.getAll(...kuIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id)));
+            const formsByKu = new Map<string, VerbForm[]>();
+            kuDocs.forEach(d => {
+                const ku = d.data();
+                const forms = ku?.type === 'Grammar' ? slotForms(ku.content) : [];
+                if (forms.length > 0) formsByKu.set(d.id, forms);
+            });
+            if (formsByKu.size === 0) return items;
+
+            const allForms = [...new Set([...formsByKu.values()].flat())];
+            const [progress, pools] = await Promise.all([
+                this.learnerProgress.skills(uid, this.learnerProgress.verbFormSkillIds(allForms)),
+                this.learnerProgress.verbPools(uid, allForms),
+            ]);
+            return items.map(item => {
+                const forms = item.facet.facetType === 'AI-Generated-Question' ? formsByKu.get(item.facet.kuId) : undefined;
+                if (!forms) return item;
+                const target = chooseVerbFormTarget(progress.filter(p => forms.includes(p.form)), pools);
+                return target ? { ...item, verbForm: target } : item;
+            });
+        } catch (e) {
+            this.logger.error(`Verb-form drill choice failed uid=${uid}; showing ordinary questions`, e);
+            return items;
+        }
+    }
 
     /**
      * Vocab meaning cards: decide whether each is shown as the bare word or as an AI question

@@ -132,8 +132,27 @@ if a change actually breaks the stated intent. New decisions get added here as t
   through the admin dashboard). Reassigning moves it to another word and drops its usage.
 - **`kind` is stored only on questions made from 2026-11-11.** Older ones show a kind guessed from their
   text (`guessQuestionKind`), display only and never written back.
-- **Grammar questions stay 50/50** between translation and error correction until new question kinds are
-  added. Rank isn't used for anything on the admin page (too few learners for it to mean much).
+- **Grammar questions are 50/50** between translation and error correction, except that points with a
+  verb slot also get verb-form drills (below). Rank isn't used for anything on the admin page (too few
+  learners for it to mean much).
+
+## Verb-form drills and learner progress
+- **The skill is the abstract rule** (a form + an ending group, `lib/verb-forms.ts`), never one verb.
+  Evidence is stored raw per user (`skill-evidence`); `learner-progress/skill-rules.ts` judges it.
+- **Placeholder rules, to be tuned by experiment** (owner, 2026-11-16): "learned" = 3 correct across 2
+  verbs with the latest correct (`LEARNED_RULE`); half of a point's due AI-question cards are drills while
+  any of its skills isn't learned (`VERB_FORM_DRILL_SHARE`). Don't flag the thresholds.
+- **Record only, for now:** drill evidence changes no SRS stage and gates nothing; the card's own SRS
+  works as before.
+- **Code computes the answer; the AI only writes the sentence.** A drill is checked locally against the
+  computed written and kana forms, and a miss is a fail with no AI fallback. The expected answers come
+  from the client like every other card; that's accepted.
+- **Verbs left out of drills:** polite or set-phrase headwords (行きます, いらっしゃいませ), honorific godan
+  verbs (下さる, おっしゃる), and one-kanji する verbs (愛する, which partly conjugates as 愛す). An ending
+  group with no verb (ぐ, ぬ today) isn't drilled until a verb in it has a lesson (which sets its type).
+- **A drill always shows the verb's meaning**, studied or not (questions are shared between learners).
+- **Cost:** choosing drills reads the verb list and the learner's studied KUs once per due-reviews fetch,
+  and the evidence lists grow without a cap. Small numbers for a personal tool; accepted.
 
 ## Vocab usages and the meaning card
 - **The usage set is what the lesson's examples show.** Definitions no example shows are set aside, not

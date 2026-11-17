@@ -11,7 +11,8 @@ import {
   Timestamp,
   FieldValue,
 } from '../firebase/firebase.module';
-import { QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage } from '@/types';
+import { QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage, VerbFormTarget } from '@/types';
+import { conjugate, FORM_GROUPS, parseSkillId, patternTails } from '../lib/verb-forms';
 import { usagesOf } from '../lessons/vocab-usages';
 import { GeminiService } from '../gemini/gemini.service';
 import { FacetStore } from '../facets/facet-store';
@@ -49,6 +50,8 @@ type QuestionResponse = {
   isNew: boolean;
   /** Vocab: the usage the question tests, if known. */
   usageId?: string;
+  /** A verb-form drill's skill and verb. */
+  verbForm?: VerbFormTarget;
 };
 
 /** A Vocab usage to ask about, and whether it's the word's only usage (then older, usage-less questions fit too). */
@@ -87,6 +90,7 @@ export class QuestionsService {
       questionId: question.id,
       isNew,
       ...(question.usageId ? { usageId: question.usageId } : {}),
+      ...(question.verbForm ? { verbForm: question.verbForm } : {}),
     };
   }
 
@@ -99,11 +103,15 @@ export class QuestionsService {
    * `usageId`: a Vocab meaning card shown as an AI question asks about one usage; only
    * questions for that usage are reused, and a new one is generated for it.
    */
-  async selectQuestion(uid: string, kuId: string, facetId: string, topic: string, usageId?: string): Promise<QuestionResponse> {
+  async selectQuestion(uid: string, kuId: string, facetId: string, topic: string, usageId?: string, verbForm?: VerbFormTarget): Promise<QuestionResponse> {
     if (!topic) throw new BadRequestException('Topic is required');
 
     const target = usageId ? await this.targetUsage(kuId, usageId) : null;
-    const fits = (q: { usageId?: string }) => !target || q.usageId === target.usage.id || (!q.usageId && target.only);
+    // A verb-form drill reuses only a question for the same skill and verb; any other card never
+    // gets a drill (the facet's currentQuestionId may still point at one from an earlier review).
+    const fits = (q: { usageId?: string; verbForm?: VerbFormTarget }) => verbForm
+      ? q.verbForm?.skillId === verbForm.skillId && q.verbForm.verbKuId === verbForm.verbKuId
+      : !q.verbForm && (!target || q.usageId === target.usage.id || (!q.usageId && target.only));
 
     const facetData = facetId
       ? await this.facetStore.get(uid, facetId)
@@ -132,6 +140,7 @@ export class QuestionsService {
 
     // 3. Generate a new question via AI
     this.logger.log(`No suitable questions for KU ${kuId} — generating new one`);
+    if (verbForm) return this.generateVerbFormQuestion(uid, kuId, facetId, verbForm);
     return this.generateAndSave(uid, topic, kuId, facetId, undefined, target?.usage);
   }
 
@@ -402,6 +411,74 @@ export class QuestionsService {
     }
 
     return this.toResponse(newQuestion, true);
+  }
+
+  /**
+   * A verb-form drill for a Grammar point: code conjugates the verb (lib/verb-forms), Gemini only
+   * writes the situation and a sentence with a blank where the form goes. The stored answer is
+   * the computed form, so the answer is checked locally (ReviewsService), never by the AI.
+   */
+  private async generateVerbFormQuestion(uid: string, kuId: string, facetId: string | undefined, target: VerbFormTarget): Promise<QuestionResponse> {
+    const skill = parseSkillId(target.skillId);
+    if (!skill) throw new BadRequestException(`Unknown verb-form skill ${target.skillId}`);
+    const [grammar, verbKu] = await Promise.all([
+      this.knowledgeUnitsService.findOne(kuId),
+      this.knowledgeUnitsService.findOne(target.verbKuId),
+    ]);
+    if (grammar.type !== 'Grammar') throw new BadRequestException(`KU ${kuId} is not a Grammar point`);
+    const verbData = verbKu.data as { reading?: string; definition?: string; conjugationType?: 'godan' | 'ichidan' | 'irregular' };
+    const form = verbData.conjugationType && verbData.reading
+      ? conjugate({ content: verbKu.content, reading: verbData.reading, conjugationType: verbData.conjugationType }, skill.form)
+      : null;
+    if (!form || form.group !== skill.group) {
+      throw new BadRequestException(`${verbKu.content} isn't in ${target.skillId}`);
+    }
+
+    // The blank covers the verb AND what the pattern fixes after it (来ました, not just 来), so the
+    // drill tests the grammar point; each variant of the pattern (います / いる) is accepted.
+    const [tail, ...otherTails] = patternTails(grammar.content, skill.form);
+    const answer = form.written + tail;
+    const accepted = [...new Set([form.kana + tail, ...otherTails.flatMap(t => [form.written + t, form.kana + t])])].filter(a => a !== answer);
+
+    const meaning = verbData.definition ?? '';
+    const jlptLevel = (grammar.data as { jlptLevel?: string }).jlptLevel ?? 'N5';
+    const input = { pattern: grammar.content, title: grammar.data.title ?? grammar.content, verb: verbKu.content, meaning, answer, jlptLevel };
+    // The blank must be there exactly once and the answer mustn't leak; one retry, then give up.
+    let drill = await this.geminiService.generateVerbFormDrill(input, kuId);
+    const valid = (d: typeof drill) => d.sentence.split('＿＿＿').length === 2 && ![answer, ...accepted].some(a => d.sentence.includes(a));
+    if (!valid(drill)) drill = await this.geminiService.generateVerbFormDrill(input, kuId);
+    if (!valid(drill)) throw new Error(`Verb-form drill for ${grammar.content} / ${verbKu.content}: no usable sentence after a retry`);
+
+    const ref = this.db.collection(QUESTIONS_COLLECTION).doc();
+    const newQuestion: QuestionItem = {
+      id: ref.id,
+      kuId,
+      sourceCollection: 'knowledge-units',
+      kind: 'verb-form',
+      verbForm: { skillId: target.skillId, verbKuId: target.verbKuId, verb: verbKu.content },
+      data: {
+        // Names only the verb: naming the form would give the answer away.
+        question: `Fill the blank using ${verbKu.content}${meaning ? ` (${meaning})` : ''}: 「${drill.sentence}」`,
+        context: `${drill.situation} "${drill.translation}"`,
+        answer,
+        acceptedAlternatives: accepted,
+        difficulty: `JLPT-${jlptLevel}` as import('@/types').LessonDifficulty,
+      },
+      rank: 50,
+      rejectionCount: 0,
+      createdAt: Timestamp.now(),
+    };
+    await ref.set(newQuestion);
+    this.logger.log(`Saved verb-form drill ${ref.id} for KU ${kuId} (${target.skillId}, ${verbKu.content} → ${answer})`);
+    if (facetId) await this.facetStore.updateQuestion(uid, facetId, ref.id);
+    return this.toResponse(newQuestion, true);
+  }
+
+  /** The explanation shown after a wrong verb-form drill answer: the right form and the rule it follows. */
+  static verbFormExplanation(question: QuestionItem): string {
+    const skill = question.verbForm ? parseSkillId(question.verbForm.skillId) : null;
+    const rule = skill ? FORM_GROUPS[skill.form].find(g => g.id === skill.group)?.label : undefined;
+    return `${question.verbForm?.verb ?? 'The verb'} → ${question.data.answer}${rule ? ` (${rule})` : ''}`;
   }
 
   private async generateConceptQuestion(uid: string, mechanic: ConceptMechanic, kuId: string, facetId?: string): Promise<QuestionResponse> {
