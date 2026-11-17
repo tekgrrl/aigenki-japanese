@@ -22,6 +22,7 @@ import FacetDebugPanel from "@/components/review/FacetDebugPanel";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import ReviewActionButtons from "@/components/review/ReviewActionButtons";
 import KanjiWordsLine from "@/components/review/KanjiWordsLine";
+import WaniKaniLink from "@/components/WaniKaniLink";
 import LessonSlideStack from "@/components/learn/LessonSlideStack";
 import { audioFirstPictures } from "@/lib/pictures";
 import { completeLesson } from "@/components/learn/LessonSlides";
@@ -1274,6 +1275,11 @@ export default function ReviewPage() {
             </p>
           )}
           {usageProgress && <UsageProgressLine progress={usageProgress} />}
+          {getQuestionType(currentItem).startsWith("Kanji") && currentItem.facet.data?.content && (
+            <p className="mt-3">
+              <WaniKaniLink kanji={currentItem.facet.data.content} className="text-base text-gray-200 hover:text-white" />
+            </p>
+          )}
 
           {answerState === "incorrect" && currentItem && (
             <div className="mt-4">

@@ -10,6 +10,7 @@ import { FuriganaText } from "@/components/FuriganaText";
 import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
 import { pictureUrl, type PictureRef } from "@/lib/pictures";
 import { stripFurigana } from "@/lib/furigana";
+import WaniKaniLink from "@/components/WaniKaniLink";
 
 export interface QueueItem {
   kuId: string;
@@ -411,6 +412,7 @@ function KanjiCharacterSlide({ loaded }: { loaded: LoadedItem }) {
         {kl.radical?.character && <> · radical {kl.radical.character}{kl.radical.meaning ? ` (${kl.radical.meaning})` : ""}</>}
       </div>
       {kl.mnemonic_meaning && <p className="max-w-xl text-lg text-shodo-ink-light leading-relaxed">{kl.mnemonic_meaning}</p>}
+      <WaniKaniLink kanji={loaded.item.content} className="text-sm text-shodo-ink-light hover:text-shodo-ink" />
     </div>
   );
 }
