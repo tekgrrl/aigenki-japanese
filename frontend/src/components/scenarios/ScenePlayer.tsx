@@ -16,9 +16,11 @@ interface Props {
   /** The learner's role, so their lines sit on the other side. */
   userRole?: string;
   title?: string;
+  /** Each speaker's voice (speaker label → voice name); lines with no entry use the app's voice. */
+  voices?: Record<string, string>;
 }
 
-export default function ScenePlayer({ dialogue, userRole, title = "Script" }: Props) {
+export default function ScenePlayer({ dialogue, userRole, title = "Script", voices }: Props) {
   const [current, setCurrent] = useState<number | null>(null); // line being played (or paused on)
   const [playing, setPlaying] = useState(false);
   const [showTranslations, setShowTranslations] = useState(false);
@@ -34,7 +36,8 @@ export default function ScenePlayer({ dialogue, userRole, title = "Script" }: Pr
           const res = await apiFetch("/api/audio/speak", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: stripFurigana(dialogue[i].text) }), // TTS mustn't read the [readings]
+            // TTS mustn't read the [readings]
+            body: JSON.stringify({ text: stripFurigana(dialogue[i].text), voice: voices?.[dialogue[i].speaker] }),
           });
           return res.ok ? URL.createObjectURL(await res.blob()) : null;
         } catch {
@@ -43,7 +46,15 @@ export default function ScenePlayer({ dialogue, userRole, title = "Script" }: Pr
       })());
     }
     return urls.current.get(i)!;
-  }, [dialogue]);
+  }, [dialogue, voices]);
+
+  // A voice change: drop the lines fetched in the old voices, so the next play uses the new ones.
+  // (The parent memoises `voices`, so this runs only when a choice changes.)
+  useEffect(() => {
+    const old = urls.current;
+    urls.current = new Map();
+    old.forEach(p => p.then(u => u && URL.revokeObjectURL(u)));
+  }, [voices]);
 
   useEffect(() => () => {
     runId.current++;

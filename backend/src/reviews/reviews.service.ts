@@ -540,9 +540,10 @@ export class ReviewsService {
     /**
      * Vocab meaning cards: decide whether each is shown as the bare word or as an AI question
      * for one unproven usage (chooseMeaningForm). The card itself is unchanged; the item carries
-     * `presentAs`, `usageId` and `usageLabel`.
+     * `presentAs`, `usageId` and `usageLabel`. A bare-word card for a word with 2+ usages carries
+     * `usageCount`, so the review screen can say how many meanings to give.
      */
-    private async addMeaningForms<T extends { facet: ReviewFacet }>(items: T[]): Promise<(T & { presentAs?: 'AI-Generated-Question'; usageId?: string; usageLabel?: string })[]> {
+    private async addMeaningForms<T extends { facet: ReviewFacet }>(items: T[]): Promise<(T & { presentAs?: 'AI-Generated-Question'; usageId?: string; usageLabel?: string; usageCount?: number })[]> {
         const meaningKuIds = [...new Set(items.filter(i => i.facet.facetType === 'Content-to-Definition').map(i => i.facet.kuId))];
         if (meaningKuIds.length === 0) return items;
         const docs = await this.db.getAll(...meaningKuIds.map(id => this.db.collection(LESSONS_COLLECTION).doc(id)));
@@ -555,7 +556,7 @@ export class ReviewsService {
         return items.map(item => {
             const usages = item.facet.facetType === 'Content-to-Definition' ? usagesByKu.get(item.facet.kuId) : undefined;
             const form = usages ? chooseMeaningForm(item.facet.srsStage ?? 0, item.facet.provenUsageIds, usages.map(u => u.id)) : null;
-            if (!form) return item;
+            if (!form) return usages && usages.length > 1 ? { ...item, usageCount: usages.length } : item;
             const usage = usages!.find(u => u.id === form.usageId)!;
             return { ...item, ...form, usageLabel: usage.label || usage.meaning };
         });

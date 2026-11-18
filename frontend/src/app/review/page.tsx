@@ -82,6 +82,16 @@ export default function ReviewPage() {
     outcome: "promote" | "hold" | "fail" | "free-fail";
   } | null>(null);
 
+  // Vocab meaning card with 2+ meanings: the correct answers given this round, written to the card
+  // only when the round ends (see handleMeaningRound). Set = the "another meaning" prompt is up;
+  // `done` = the round has ended and the result panel shows.
+  const [meaningRound, setMeaningRound] = useState<{
+    answers: { id: string; label?: string }[];
+    lastAnswer: string;
+    lastLabel?: string;
+    done?: boolean;
+  } | null>(null);
+
   const [levelStatus, setLevelStatus] = useState<{
     direction: "up" | "down";
     newLevel: string;
@@ -280,6 +290,7 @@ export default function ReviewPage() {
       setPendingSrsResult(null);
       setPendingUsage(null);
       setUsageProgress(null);
+      setMeaningRound(null);
       setLevelStatus(null);
       setShowLesson(false);
       setLessonForReview(null);
@@ -567,6 +578,12 @@ export default function ReviewPage() {
           ? { id: currentItem.facet.data.usageId as string, label: currentItem.facet.data.usageLabel as string | undefined }
           : null;
 
+      // A bare-word meaning card for a word with 2+ meanings runs its own round.
+      if (currentItem.facet.facetType === "Content-to-Definition" && usagePreview
+        && await handleMeaningRound(result === "pass" ? usage : null, usagePreview.totalUsages)) {
+        return;
+      }
+
       if (result === "pass") {
         if (isNewAiQuestion(currentItem)) {
           setPendingSrsResult("pass");
@@ -601,6 +618,54 @@ export default function ReviewPage() {
       else setError("An unknown error occurred");
       setAnswerState("unanswered");
     }
+  };
+
+  /**
+   * Vocab meaning card with 2+ meanings. A correct answer that leaves a meaning missing opens the
+   * "another meaning" prompt instead of writing a hold. Nothing is written while the prompt is up,
+   * so Skip or Review lesson leaves the card due. The round ends when the set is complete
+   * (written: it moves up) or on the one miss allowed, a wrong or repeated answer (the answers so
+   * far are written as holds). `usage` is null for a wrong answer, or a pass that matched no usage.
+   * Returns false when the normal flow should handle the answer (first answer wrong, or complete).
+   */
+  const handleMeaningRound = async (usage: { id: string; label?: string } | null, total: number): Promise<boolean> => {
+    if (!currentItem) return false;
+    const answers = meaningRound?.answers ?? [];
+    const known = new Set([...(currentItem.facet.provenUsageIds ?? []), ...answers.map(a => a.id)]);
+    const isNew = !!usage && !known.has(usage.id);
+    const completes = isNew && known.size + 1 >= total;
+
+    const isFirstAnswer = !meaningRound;
+    if (isFirstAnswer && (!usage || completes)) return false;
+
+    const writeRound = async (all: { id: string; label?: string }[]) => {
+      for (const a of all) await handleUpdateSrs("pass", a);
+    };
+
+    // Ask for another: any correct first answer that doesn't complete the set (including one
+    // proven in an earlier session), or a new meaning on a retry that still leaves one missing.
+    if (usage && (isFirstAnswer || (isNew && !completes))) {
+      // The AI's explanation (e.g. which sense the answer matched) stays, shown in the prompt box.
+      setMeaningRound({ answers: [...answers, usage], lastAnswer: userAnswer, lastLabel: usage.label });
+      setUserAnswer("");
+      setAnswerState("unanswered");
+      setTimeout(() => answerInputRef.current?.focus(), FOCUS_TIMEOUT_MS);
+      return true;
+    }
+
+    if (completes && usage) {
+      await writeRound([...answers, usage]);
+      setMeaningRound({ answers: [...answers, usage], lastAnswer: userAnswer, done: true });
+      setAnswerState("correct");
+      return true;
+    }
+
+    // The one miss: keep what was given (holds) and show every meaning.
+    if (usage) setAiExplanation("That's a meaning you've already given.");
+    await writeRound(answers);
+    setMeaningRound({ answers, lastAnswer: userAnswer, done: true });
+    setAnswerState("incorrect");
+    return true;
   };
 
   const handleSkip = () => {
@@ -686,6 +751,7 @@ export default function ReviewPage() {
     setPendingUsage(null);
     setUsageProgress(null);
     setUsageMeanings(null);
+    setMeaningRound(null);
     setShowFeedbackModal(false);
     setLevelStatus(null);
     setShowLesson(false);
@@ -1119,6 +1185,9 @@ export default function ReviewPage() {
                 </div>
               )}
 
+              {currentItem.facet.facetType === "Content-to-Definition" && (currentItem.usageCount ?? 0) > 1 && (
+                <p className="mt-4 text-base text-gray-400">{currentItem.usageCount} meanings</p>
+              )}
               {currentItem.facet.facetType === "Content-to-Definition" && (
                 <div className="mt-6 flex justify-center">
                   <PlayButton
@@ -1130,6 +1199,21 @@ export default function ReviewPage() {
             </>
           )}
         </div>
+
+        {/* Vocab meaning card: a correct answer left a meaning missing */}
+        {meaningRound && !meaningRound.done && (
+          <div className="mb-6 p-4 rounded-lg bg-green-800 border border-green-600 text-white">
+            <p className="text-lg">
+              <span className="font-semibold">Correct:</span> {meaningRound.lastLabel || meaningRound.lastAnswer}.
+            </p>
+            {aiExplanation && aiExplanation !== "Correct!" && (
+              <p className="text-base text-gray-200 italic mt-1">
+                <span className="font-semibold">AI:</span> {aiExplanation}
+              </p>
+            )}
+            <p className="text-lg mt-1">There&apos;s another meaning. Can you think of it?</p>
+          </div>
+        )}
 
         {/* Answer Form */}
         <form onSubmit={handleEvaluateAnswer} className="relative">
@@ -1237,7 +1321,7 @@ export default function ReviewPage() {
           }`}
         >
           <h3 className="text-2xl font-semibold text-white mb-3">
-            {answerState === "correct" ? "Correct" : "Incorrect"}
+            {answerState === "correct" ? "Correct" : meaningRound?.done ? "Not quite" : "Incorrect"}
           </h3>
           <p className="text-lg text-gray-200 mb-2">
             <span className="font-semibold">Your answer:</span> {userAnswer}

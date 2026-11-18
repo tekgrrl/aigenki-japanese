@@ -28,6 +28,7 @@ import { PictureRenderer } from '../pictures/picture-renderer';
 import { PictureBrief } from '../prompts/picture.prompts';
 import { FacetStore } from '../facets/facet-store';
 import { stripFurigana } from '../lib/furigana-text';
+import { CHIRP3_HD_JA_VOICES } from '../audio/google-tts.service';
 import { jlptLevelOf, excludedContentOf } from '../users/user.service';
 
 /** Role Play gate: every Key Vocabulary and Key Grammar item at Familiar (SRS stage 3) or above. */
@@ -938,6 +939,21 @@ export class ScenariosService {
     }
 
     await this.scenariosColRef(uid).doc(id).update(updateData);
+  }
+
+  /** Saves the learner's speaker → voice choices on their scenario doc (see Scenario.voices). */
+  async setVoices(uid: string, id: string, voices: unknown): Promise<void> {
+    if (!voices || typeof voices !== 'object' || Array.isArray(voices)) throw new BadRequestException('voices must be an object');
+    const entries = Object.entries(voices as Record<string, unknown>);
+    if (entries.length > 10) throw new BadRequestException('Too many speakers');
+    for (const [speaker, voice] of entries) {
+      if (!speaker.trim() || typeof voice !== 'string' || !(CHIRP3_HD_JA_VOICES as readonly string[]).includes(voice)) {
+        throw new BadRequestException(`Invalid voice for speaker "${speaker}"`);
+      }
+    }
+    const scenario = await this.getScenario(uid, id);
+    if (!scenario) throw new NotFoundException('Scenario not found');
+    await this.scenariosColRef(uid).doc(id).update({ voices: Object.fromEntries(entries) });
   }
 
   async deactivateScenario(uid: string, id: string): Promise<void> {

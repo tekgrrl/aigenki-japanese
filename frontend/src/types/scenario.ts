@@ -73,6 +73,8 @@ export interface ScenarioEvaluation {
 
 export interface Scenario {
   id: string;
+  /** The learner's voice per speaker (dialogue `speaker` label → voice name); see lib/voices.ts. */
+  voices?: Record<string, string>;
   /** @deprecated - migrating to User state models */
   userId: string;
   title: string;

@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { AudioService } from './audio.service';
 import { PronounceDto } from './dto/pronounce.dto';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { CHIRP3_HD_JA_VOICES } from './google-tts.service';
 
 @Controller('audio')
 export class AudioController {
@@ -13,13 +14,17 @@ export class AudioController {
 
     @Post('speak')
     @UseGuards(FirebaseAuthGuard)
-    async speak(@Body('text') text: string, @Res() res: Response) {
+    async speak(@Body('text') text: string, @Body('voice') voice: string | undefined, @Res() res: Response) {
         if (!text) {
             return res.status(400).send('Text is required');
         }
+        // Optional: a scenario speaker's chosen voice. Only known Chirp3-HD voices are allowed.
+        if (voice !== undefined && !(CHIRP3_HD_JA_VOICES as readonly string[]).includes(voice)) {
+            return res.status(400).send('Unknown voice');
+        }
 
         try {
-            const audioBuffer = await this.audioService.getAudioStream(text);
+            const audioBuffer = await this.audioService.getAudioStream(text, voice);
 
             res.set({
                 'Content-Type': 'audio/mpeg',

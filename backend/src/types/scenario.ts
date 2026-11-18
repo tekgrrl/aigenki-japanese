@@ -114,6 +114,9 @@ export interface Scenario {
     /** Grammar matches mined the same way. */
     liveGrammarMatches?: GrammarMatch[];
 
+    /** The learner's voice choice per speaker (dialogue `speaker` label → Chirp3-HD voice name), set on the scenario page. Speakers without one use the page's default. */
+    voices?: Record<string, string>;
+
     /** @deprecated - migrating to User state models */
     state: ScenarioState;
     /** @deprecated - migrating to User state models */

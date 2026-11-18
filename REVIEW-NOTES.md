@@ -173,6 +173,12 @@ if a change actually breaks the stated intent. New decisions get added here as t
   exception to "global data changes only via the admin dashboard": it's the owner's design, so the
   next attempt matches locally. AI questions already store accepted alternatives on the shared
   Question doc. Forgiven misspellings are never stored.
+- **The "another meaning" prompt** (bare-word meaning card, 2+ usages): a correct answer that leaves a
+  usage missing asks for another at once, with nothing written yet. One miss (wrong, or a meaning
+  already given) ends the round: the answers so far are written as holds. Opening Review lesson or
+  Skip during the prompt writes nothing, so the card stays due and the meaning given before isn't
+  kept. Each answer is written as its own PUT when the round ends. The card shows "N meanings" up
+  front. A stage-0 hold still comes back in 10 minutes (the owner's choice).
 - **A wrong meaning-card answer after a usage is proven** ("free fail") keeps the stage and the proven
   usages but reschedules at the stage's normal interval (the owner's choice), so the card doesn't come
   straight back. Stats forecasts aren't adjusted for it (they're a cache).

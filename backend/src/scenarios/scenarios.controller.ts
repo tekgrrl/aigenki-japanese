@@ -178,6 +178,13 @@ export class ScenariosController {
     return { success: true };
   }
 
+  /** Save the learner's voice per speaker for this scenario's audio (script and Role Play). */
+  @Put(':id/voices')
+  async setVoices(@UserId() uid: string, @Param('id') id: string, @Body('voices') voices: unknown) {
+    await this.scenariosService.setVoices(uid, id, voices);
+    return { success: true };
+  }
+
   @Post(':id/deactivate')
   async deactivateScenario(@UserId() uid: string, @Param('id') id: string) {
     await this.scenariosService.deactivateScenario(uid, id);
