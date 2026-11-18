@@ -565,6 +565,11 @@ export interface ReviewFacet {
   currentQuestionId?: string;
   /** Consecutive failures on this facet (resets on pass). Used for leech detection. */
   consecutiveFailures?: number;
+  /** Every answer recorded on this card, and the wrong ones (seeded from history; see reviews/fail-rate.ts). */
+  reviewCount?: number;
+  failCount?: number;
+  /** failCount / reviewCount, set only from 5 reviews: what "Hardest items" ranks by. */
+  failRate?: number;
   /** @deprecated - failure tracking moved to UserQuestionState.consecutiveFailures */
   questionAttempts?: number;
   /** Which stage in the KU's facet unlock sequence this facet belongs to. */

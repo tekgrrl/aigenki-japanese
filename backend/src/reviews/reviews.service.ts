@@ -27,6 +27,7 @@ import { ReviewOutcomeService } from './review-outcome.service';
 import { LearnerProgressService } from '../learner-progress/learner-progress.service';
 import { slotForms, VerbForm } from '../lib/verb-forms';
 import { chooseVerbFormTarget } from './verb-form-card';
+import { nextFailCounts } from './fail-rate';
 import type { VerbFormTarget } from '@/types';
 
 /**
@@ -101,7 +102,7 @@ export class ReviewsService {
                 // unchanged, but the card waits the stage's normal interval, as a hold does, so it
                 // doesn't come straight back every session.
                 const freeFailNext = new Date(Date.now() + this.INTERVALS[currentSrsStage] * 60 * 60 * 1000);
-                transaction.update(facetRef, { nextReviewAt: freeFailNext, lastReviewAt: new Date() });
+                transaction.update(facetRef, { nextReviewAt: freeFailNext, lastReviewAt: new Date(), ...nextFailCounts(facetData, true) });
                 this.logger.log(`SRS Update [${facetId}]: FAIL not counted (usages already proven at stage ${currentSrsStage}); due again at the stage interval`);
                 return {
                     success: true,
@@ -153,6 +154,7 @@ export class ReviewsService {
                 nextReviewAt: nextReviewDate,
                 lastReviewAt: now,
                 consecutiveFailures: newConsecutiveFailures,
+                ...nextFailCounts(facetData, result === 'fail'),
                 ...(meaning ? { provenUsageIds: meaning.proven } : {}),
                 history: FieldValue.arrayUnion({
                     stage: nextSrsStage,

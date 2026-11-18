@@ -5,6 +5,7 @@ import Lessons from "@/components/Lessons";
 import Reviews from "@/components/Reviews";
 import ReviewSchedule from "@/components/ReviewSchedule";
 import DailyCheckInDialog from "@/components/DailyCheckInDialog";
+import HardestItems from "@/components/HardestItems";
 import { apiFetch } from "@/lib/api-client";
 
 interface DashboardStats {
@@ -136,6 +137,10 @@ export default function DashboardPage() {
             reviewsDue={stats.reviewsDue}
           />
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-8 mb-8">
+        <HardestItems />
       </div>
     </div>
   );
