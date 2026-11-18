@@ -380,7 +380,12 @@ export default function ReviewPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ result, ...(usage ? { usageId: usage.id } : {}) }),
+          body: JSON.stringify({
+            result,
+            ...(usage ? { usageId: usage.id } : {}),
+            // The AI question actually answered, so its result is credited to it (the facet's current one can change).
+            ...(currentItem.facet.facetType === "AI-Generated-Question" && dynamicQuestionId ? { questionId: dynamicQuestionId } : {}),
+          }),
         },
       );
       if (!response.ok) throw new Error("Failed to update SRS data");

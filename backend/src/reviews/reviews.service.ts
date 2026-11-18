@@ -60,7 +60,8 @@ export class ReviewsService {
     ) { }
 
     /** `usageId`: on a Vocab meaning card, the usage a correct answer matched (from evaluateAnswer). */
-    async updateFacetSrs(uid: string, facetId: string, result: 'pass' | 'fail', usageId?: string) {
+    /** `answeredQuestionId`: the AI question the learner actually answered; the facet's current one may have moved on since. */
+    async updateFacetSrs(uid: string, facetId: string, result: 'pass' | 'fail', usageId?: string, answeredQuestionId?: string) {
         const txResult = await this.db.runTransaction(async (transaction) => {
             const facetRef = this.facetStore.doc(uid, facetId);
             const facetDoc = await transaction.get(facetRef);
@@ -181,7 +182,7 @@ export class ReviewsService {
                 // The KU the facet tests; differs from kuId for Kanji-Component-* facets.
                 targetKuId: facetData.kuId,
                 facetType: facetData.facetType,
-                questionId: facetData.facetType === 'AI-Generated-Question' ? facetData.currentQuestionId : undefined,
+                questionId: facetData.facetType === 'AI-Generated-Question' ? (answeredQuestionId ?? facetData.currentQuestionId) : undefined,
                 prevConsecutiveFailures,
                 newConsecutiveFailures,
                 ...usageResult,

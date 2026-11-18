@@ -12,7 +12,7 @@ import {
   FieldValue,
 } from '../firebase/firebase.module';
 import { QuestionItem, UserQuestionState, ConceptKnowledgeUnit, Lesson, VocabUsage, VerbFormTarget } from '@/types';
-import { conjugate, FORM_GROUPS, parseSkillId, patternTails } from '../lib/verb-forms';
+import { conjugate, ConjugationType, FORM_GROUPS, parseSkillId, patternTails } from '../lib/verb-forms';
 import { usagesOf } from '../lessons/vocab-usages';
 import { GeminiService } from '../gemini/gemini.service';
 import { FacetStore } from '../facets/facet-store';
@@ -64,6 +64,9 @@ type GeneratedQuestion = {
   context?: string;
   accepted_alternatives?: string[];
 };
+
+/** Stored drill sentences per verb-form skill and verb before they're reused (see selectVerbFormDrill). */
+const DRILLS_PER_VERB = 3;
 
 @Injectable()
 export class QuestionsService {
@@ -121,6 +124,16 @@ export class QuestionsService {
     // Fail cleanly instead of generating a question and then crashing on the facet write.
     if (facetId && !facetData) throw new NotFoundException(`Facet ${facetId} not found`);
 
+    if (verbForm) {
+      try {
+        return await this.selectVerbFormDrill(uid, kuId, facetId, facetData?.currentQuestionId, verbForm, fits);
+      } catch (e) {
+        // A drill that can't be made (verb data changed, no usable sentence) must not block the card.
+        this.logger.warn(`Verb-form drill failed for KU ${kuId} (${verbForm.skillId}); serving an ordinary question: ${(e as Error).message}`);
+        return this.selectQuestion(uid, kuId, facetId, topic, usageId);
+      }
+    }
+
     // 1. Try to reuse the question already on the facet
     if (facetData?.currentQuestionId) {
       const reused = await this.tryReuseQuestion(uid, facetData.currentQuestionId);
@@ -140,8 +153,25 @@ export class QuestionsService {
 
     // 3. Generate a new question via AI
     this.logger.log(`No suitable questions for KU ${kuId} — generating new one`);
-    if (verbForm) return this.generateVerbFormQuestion(uid, kuId, facetId, verbForm);
     return this.generateAndSave(uid, topic, kuId, facetId, undefined, target?.usage);
+  }
+
+  /**
+   * A drill for one skill and verb. Up to DRILLS_PER_VERB sentences are stored per skill and verb
+   * (shared by all learners), so a learner can't pass a skill by remembering one sentence while the
+   * Gemini cost stays capped. Until there are that many, a new one is made; after that, a random
+   * stored one other than the one shown last time.
+   */
+  private async selectVerbFormDrill(uid: string, kuId: string, facetId: string | undefined, lastShownId: string | undefined, target: VerbFormTarget, fits: (q: QuestionItem) => boolean): Promise<QuestionResponse> {
+    const stored = (await this.db.collection(QUESTIONS_COLLECTION).where('kuId', '==', kuId).get()).docs
+      .map(d => ({ id: d.id, ...d.data() } as QuestionItem))
+      .filter(fits);
+    if (stored.length < DRILLS_PER_VERB) return this.generateVerbFormQuestion(uid, kuId, facetId, target);
+
+    const suitable = await this.findSuitableQuestion(uid, kuId, lastShownId, fits, true);
+    if (!suitable) return this.generateVerbFormQuestion(uid, kuId, facetId, target);
+    if (facetId) await this.facetStore.updateQuestion(uid, facetId, suitable.questionId);
+    return suitable;
   }
 
   /** The usage a meaning card asks about, from the word's lesson; null if it no longer exists. */
@@ -181,6 +211,8 @@ export class QuestionsService {
     kuId: string,
     excludeId?: string,
     fits: (q: QuestionItem) => boolean = () => true,
+    /** Pick at random among the usable ones instead of the first (verb-form drills rotate). */
+    shuffle = false,
   ): Promise<QuestionResponse | null> {
     const snapshot = await this.db.collection(QUESTIONS_COLLECTION)
       .where('kuId', '==', kuId)
@@ -193,6 +225,7 @@ export class QuestionsService {
       .filter(q => q.id !== excludeId && (q.rank ?? 50) >= SUITABLE_RANK_THRESHOLD && fits(q));
 
     if (candidates.length === 0) return null;
+    if (shuffle) candidates.sort(() => Math.random() - 0.5);
 
     const stateDocs = await Promise.all(
       candidates.map(q => this.questionStatesRef(uid).doc(q.id).get())
@@ -426,7 +459,7 @@ export class QuestionsService {
       this.knowledgeUnitsService.findOne(target.verbKuId),
     ]);
     if (grammar.type !== 'Grammar') throw new BadRequestException(`KU ${kuId} is not a Grammar point`);
-    const verbData = verbKu.data as { reading?: string; definition?: string; conjugationType?: 'godan' | 'ichidan' | 'irregular' };
+    const verbData = verbKu.data as { reading?: string; definition?: string; conjugationType?: ConjugationType };
     const form = verbData.conjugationType && verbData.reading
       ? conjugate({ content: verbKu.content, reading: verbData.reading, conjugationType: verbData.conjugationType }, skill.form)
       : null;
@@ -445,7 +478,9 @@ export class QuestionsService {
     const input = { pattern: grammar.content, title: grammar.data.title ?? grammar.content, verb: verbKu.content, meaning, answer, jlptLevel };
     // The blank must be there exactly once and the answer mustn't leak; one retry, then give up.
     let drill = await this.geminiService.generateVerbFormDrill(input, kuId);
-    const valid = (d: typeof drill) => d.sentence.split('＿＿＿').length === 2 && ![answer, ...accepted].some(a => d.sentence.includes(a));
+    // Only answers of 3+ characters are checked for a leak: short ones (き, した) turn up inside ordinary words (好き).
+    const leakable = [answer, ...accepted].filter(a => a.length >= 3);
+    const valid = (d: typeof drill) => d.sentence.split('＿＿＿').length === 2 && !leakable.some(a => d.sentence.includes(a));
     if (!valid(drill)) drill = await this.geminiService.generateVerbFormDrill(input, kuId);
     if (!valid(drill)) throw new Error(`Verb-form drill for ${grammar.content} / ${verbKu.content}: no usable sentence after a retry`);
 

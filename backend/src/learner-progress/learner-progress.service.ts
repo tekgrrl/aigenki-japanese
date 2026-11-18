@@ -4,7 +4,7 @@ import { FIRESTORE_CONNECTION, KNOWLEDGE_UNITS_COLLECTION, QUESTIONS_COLLECTION,
 import type { QuestionItem } from '../types';
 import { FacetStore } from '../facets/facet-store';
 import { UserKnowledgeUnitsService } from '../user-knowledge-units/user-knowledge-units.service';
-import { conjugate, FORM_GROUPS, parseSkillId, skillId, slotForms, VerbForm, Verb } from '../lib/verb-forms';
+import { conjugate, FORM_GROUPS, parseSkillId, skillId, slotForms, VERB_FORMS, VerbForm, Verb } from '../lib/verb-forms';
 import { SkillAttempt, SkillState, skillState } from './skill-rules';
 
 export const SKILL_EVIDENCE_SUBCOLLECTION = 'skill-evidence';
@@ -130,7 +130,7 @@ export class LearnerProgressService {
 
   /** The verb-form grid for the admin progress page: every form and group, with evidence and verbs available. */
   async verbFormGrid(uid: string): Promise<{ form: VerbForm; groups: VerbFormGroupRow[] }[]> {
-    const forms = Object.keys(FORM_GROUPS) as VerbForm[];
+    const forms = VERB_FORMS;
     const [progress, pools] = await Promise.all([
       this.skills(uid, this.verbFormSkillIds(forms)),
       this.verbPools(uid, forms),
