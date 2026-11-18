@@ -2,11 +2,24 @@ import { BadRequestException, Injectable, Inject, Logger } from '@nestjs/common'
 import { FieldValue, Firestore, Timestamp, Transaction } from 'firebase-admin/firestore';
 import {
     FIRESTORE_CONNECTION,
+    KNOWLEDGE_UNITS_COLLECTION,
     USER_KUS_SUBCOLLECTION,
     SCENARIOS_COLLECTION,
 } from '../firebase/firebase.module';
 import { ADMIN_USER_ID } from '../lib/constants';
 import { FacetStore } from '../facets/facet-store';
+import { ReviewFacet } from '../types';
+
+/** One row of the dashboard's "Hardest items": a card (facetType set) or a whole KU (all its cards added up). */
+export interface HardestItem {
+    kuId: string;
+    content: string;
+    kuType: string;
+    facetType?: string;
+    reviewCount: number;
+    failCount: number;
+    failRate: number;
+}
 
 @Injectable()
 export class StatsService {
@@ -16,6 +29,38 @@ export class StatsService {
         @Inject(FIRESTORE_CONNECTION) private readonly db: Firestore,
         private readonly facetStore: FacetStore,
     ) { }
+
+    /**
+     * The cards (or KUs) with the highest share of wrong answers, for the dashboard. One indexed query:
+     * only cards with a failRate above 0 (5+ reviews and at least one miss, see reviews/fail-rate.ts) are read. By KU, each KU in that
+     * result has all its cards' counts added up.
+     */
+    async getHardest(uid: string, by: 'card' | 'ku', limit = 10): Promise<HardestItem[]> {
+        const snap = await this.facetStore.query(uid).where('failRate', '>', 0).orderBy('failRate', 'desc').limit(30).get();
+        // Audio-first and one-off task cards aren't written answers.
+        const cards = snap.docs
+            .map(d => ({ id: d.id, ...d.data() } as ReviewFacet))
+            .filter(f => f.kuId && f.facetType !== 'picture-choice' && f.facetType !== 'flash');
+        const kuIds = [...new Set(cards.map(f => f.kuId))];
+        const kuDocs = await Promise.all(kuIds.map(id => this.db.collection(KNOWLEDGE_UNITS_COLLECTION).doc(id).get()));
+        const kus = new Map(kuDocs.filter(d => d.exists).map(d => [d.id, d.data()!]));
+        const row = (kuId: string, reviewCount: number, failCount: number, facetType?: string): HardestItem | null => {
+            const ku = kus.get(kuId);
+            if (!ku || reviewCount === 0) return null;
+            return { kuId, content: ku.content, kuType: ku.type, facetType, reviewCount, failCount, failRate: failCount / reviewCount };
+        };
+
+        const rows = by === 'card'
+            ? cards.map(f => row(f.kuId, f.reviewCount ?? 0, f.failCount ?? 0, f.facetType))
+            : await Promise.all(kuIds.map(async kuId => {
+                const all = (await this.facetStore.byKuId(uid, kuId)).filter(f => f.facetType !== 'picture-choice' && f.facetType !== 'flash');
+                return row(kuId, all.reduce((n, f) => n + (f.reviewCount ?? 0), 0), all.reduce((n, f) => n + (f.failCount ?? 0), 0));
+            }));
+        return rows
+            .filter((r): r is HardestItem => r !== null)
+            .sort((a, b) => b.failRate - a.failRate || b.failCount - a.failCount)
+            .slice(0, limit);
+    }
 
     async getDashboardStats(uid: string) {
         // ... existing queries ...

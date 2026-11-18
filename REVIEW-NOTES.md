@@ -127,6 +127,12 @@ if a change actually breaks the stated intent. New decisions get added here as t
 - **Existing reading cards for words without kanji** (Content-to-Reading on katakana words, made
   before the no-kanji rule) are left alone, not deleted by a migration. Only new cards are stopped.
 
+- **"Hardest items" counts** (`reviewCount`/`failCount`/`failRate` on each facet, `reviews/fail-rate.ts`):
+  an older card is seeded from its `history` on its next review, not by a migration, so it appears only
+  after that review. `failRate` is set from 5 reviews. A free fail counts as a fail; a wrong retry in the
+  "another meaning" prompt adds none (the round is written as holds). Per card on purpose; the by-word
+  view adds up a KU's cards at read time, for the KUs in the top 30 cards only. The owner's choices.
+
 ## AI questions and the admin Questions page
 - **Admin edits change the shared question** for every learner whose card shows it (global data, changed
   through the admin dashboard). Reassigning moves it to another word and drops its usage.
