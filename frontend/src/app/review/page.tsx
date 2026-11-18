@@ -83,13 +83,15 @@ export default function ReviewPage() {
   } | null>(null);
 
   // Vocab meaning card with 2+ meanings: the correct answers given this round, written to the card
-  // only when the round ends (see handleMeaningRound). Set = the "another meaning" prompt is up;
+  // only when the round ends or Review lesson is opened (see handleMeaningRound). Set = the "another meaning" prompt is up;
   // `done` = the round has ended and the result panel shows.
   const [meaningRound, setMeaningRound] = useState<{
     answers: { id: string; label?: string }[];
     lastAnswer: string;
     lastLabel?: string;
     done?: boolean;
+    /** The round ended on a repeated meaning (not a wrong one): the result panel is neutral, not red. */
+    repeat?: boolean;
   } | null>(null);
 
   const [levelStatus, setLevelStatus] = useState<{
@@ -623,11 +625,16 @@ export default function ReviewPage() {
   /**
    * Vocab meaning card with 2+ meanings. A correct answer that leaves a meaning missing opens the
    * "another meaning" prompt instead of writing a hold. Nothing is written while the prompt is up,
-   * so Skip or Review lesson leaves the card due. The round ends when the set is complete
+   * so Skip leaves the card due; opening Review lesson writes the answers so far as holds. The round ends when the set is complete
    * (written: it moves up) or on the one miss allowed, a wrong or repeated answer (the answers so
    * far are written as holds). `usage` is null for a wrong answer, or a pass that matched no usage.
    * Returns false when the normal flow should handle the answer (first answer wrong, or complete).
    */
+  /** Writes a meaning round's answers, one PUT each in order (each a hold, or the last one a promotion). */
+  const writeRound = async (all: { id: string; label?: string }[]) => {
+    for (const a of all) await handleUpdateSrs("pass", a);
+  };
+
   const handleMeaningRound = async (usage: { id: string; label?: string } | null, total: number): Promise<boolean> => {
     if (!currentItem) return false;
     const answers = meaningRound?.answers ?? [];
@@ -637,10 +644,6 @@ export default function ReviewPage() {
 
     const isFirstAnswer = !meaningRound;
     if (isFirstAnswer && (!usage || completes)) return false;
-
-    const writeRound = async (all: { id: string; label?: string }[]) => {
-      for (const a of all) await handleUpdateSrs("pass", a);
-    };
 
     // Ask for another: any correct first answer that doesn't complete the set (including one
     // proven in an earlier session), or a new meaning on a retry that still leaves one missing.
@@ -660,10 +663,11 @@ export default function ReviewPage() {
       return true;
     }
 
-    // The one miss: keep what was given (holds) and show every meaning.
-    if (usage) setAiExplanation("That's a meaning you've already given.");
+    // The one miss: keep what was given (holds) and show every meaning. A repeated meaning is a
+    // correct answer, so its panel is neutral rather than red (the owner's choice).
+    if (usage) setAiExplanation(`"${userAnswer}" is the same meaning as one you've already given${usage.label ? ` (${usage.label})` : ""}.`);
     await writeRound(answers);
-    setMeaningRound({ answers, lastAnswer: userAnswer, done: true });
+    setMeaningRound({ answers, lastAnswer: userAnswer, done: true, repeat: !!usage });
     setAnswerState("incorrect");
     return true;
   };
@@ -689,8 +693,15 @@ export default function ReviewPage() {
     // The card locks only once the lesson is actually on screen (not if the fetch fails).
     // Custom cards leave answerState at "unanswered", so a lesson opened after their own
     // answer sets the flag too. Harmless: they have nothing left to submit by then.
+    // On the "another meaning" prompt, the meanings given so far are saved as holds, so the card
+    // asks only for the missing ones next time (the owner's choice). Skip alone still saves nothing.
     const lockIfUnanswered = () => {
-      if (answerState === "unanswered") setPeekedLesson(true);
+      if (answerState !== "unanswered") return;
+      setPeekedLesson(true);
+      if (meaningRound && !meaningRound.done && meaningRound.answers.length > 0) {
+        setMeaningRound({ ...meaningRound, done: true });
+        void writeRound(meaningRound.answers);
+      }
     };
     if (lessonForReview) {
       lockIfUnanswered();
@@ -1317,18 +1328,20 @@ export default function ReviewPage() {
           className={`mt-8 p-6 rounded-lg ${
             answerState === "correct"
               ? "bg-green-800 border-green-600"
-              : "bg-red-800 border-red-600"
+              : meaningRound?.repeat
+                ? "bg-slate-700 border-slate-500"
+                : "bg-red-800 border-red-600"
           }`}
         >
           <h3 className="text-2xl font-semibold text-white mb-3">
-            {answerState === "correct" ? "Correct" : meaningRound?.done ? "Not quite" : "Incorrect"}
+            {answerState === "correct" ? "Correct" : meaningRound?.repeat ? "Same meaning as before" : meaningRound?.done ? "Not quite" : "Incorrect"}
           </h3>
           <p className="text-lg text-gray-200 mb-2">
             <span className="font-semibold">Your answer:</span> {userAnswer}
           </p>
           {answerState === "incorrect" && (
             <p className="text-lg text-gray-200 mb-4">
-              <span className="font-semibold">Correct answer:</span>{" "}
+              <span className="font-semibold">{meaningRound?.repeat ? "Meanings:" : "Correct answer:"}</span>{" "}
               {(usageMeanings ?? getExpectedAnswer(currentItem)).join(" / ")}
             </p>
           )}
