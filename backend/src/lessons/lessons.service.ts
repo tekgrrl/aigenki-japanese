@@ -136,9 +136,7 @@ export class LessonsService {
       return applyKuOverrides(lessonJson, ku);
     }
 
-    // TODO: pass ku.data.corpusNotes into buildVocabLessonMessage so Vocab corpus
-    // notes are injected into the prompt, mirroring how Grammar uses corpusNotes.
-    userMessage = buildVocabLessonMessage(ku.content, !!cachedContentName, jlptLevel);
+    userMessage = buildVocabLessonMessage(ku.content, !!cachedContentName, jlptLevel, ku.type === 'Vocab' ? ku.data.corpusNotes : undefined);
 
     const lessonString = await this.geminiService.generateLesson(
       userMessage,

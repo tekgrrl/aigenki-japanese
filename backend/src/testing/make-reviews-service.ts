@@ -9,6 +9,7 @@ type Deps = {
   kanji: unknown;
   scenarioFlash: unknown;
   reviewOutcome: unknown;
+  learnerProgress: unknown;
 };
 
 /**
@@ -17,5 +18,5 @@ type Deps = {
  */
 export function makeReviewsService(db: FakeFirestore, deps: Partial<Deps> = {}, fallback: unknown = {}): ReviewsService {
   const d = (k: keyof Deps) => (deps[k] ?? fallback) as any;
-  return new ReviewsService(db as any, new FacetStore(db as any), d('gemini'), d('questions'), d('stats'), d('kanji'), d('scenarioFlash'), d('reviewOutcome'));
+  return new ReviewsService(db as any, new FacetStore(db as any), d('gemini'), d('questions'), d('stats'), d('kanji'), d('scenarioFlash'), d('reviewOutcome'), d('learnerProgress'));
 }

@@ -35,8 +35,10 @@ async function requestQuestion(item: ReviewItem): Promise<ScoutedQuestion> {
   const topic = item.facet.data?.topic || item.facet.data?.content || "";
   // A Vocab meaning card shown as an AI question asks about one usage.
   const usageId = item.facet.data?.usageId as string | undefined;
+  // A Grammar card shown as a verb-form drill asks about one skill with one verb.
+  const verb = item.verbForm;
   const response = await apiFetch(
-    `/api/questions/generate?topic=${encodeURIComponent(topic)}&facetId=${item.facet.id}&kuId=${item.facet.kuId}${usageId ? `&usageId=${encodeURIComponent(usageId)}` : ""}`,
+    `/api/questions/generate?topic=${encodeURIComponent(topic)}&facetId=${item.facet.id}&kuId=${item.facet.kuId}${usageId ? `&usageId=${encodeURIComponent(usageId)}` : ""}${verb ? `&verbSkill=${encodeURIComponent(verb.skillId)}&verbKuId=${encodeURIComponent(verb.verbKuId)}` : ""}`,
   );
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));

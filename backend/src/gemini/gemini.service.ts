@@ -17,6 +17,7 @@ import { buildScenarioEvaluatorPrompt, ScenarioEvalContext } from '../prompts/ev
 import { buildSegmentationPrompt, SEGMENTATION_RESPONSE_SCHEMA } from '../prompts/pronunciation.prompts';
 import { buildScriptVocabPrompt, SCRIPT_VOCAB_SCHEMA } from '../prompts/scenario.prompts';
 import { buildFuriganaMessage } from '../prompts/grammar.prompts';
+import { buildVerbFormDrillPrompt, VerbFormDrillInput } from '../prompts/quiz.prompts';
 import {
   PictureBrief,
   PictureBriefInput,
@@ -376,6 +377,28 @@ export class GeminiService implements OnModuleInit {
       }
       return { result: parsedJson.annotated, responseData: { rawText: response.text, parsedJson } };
     });
+  }
+
+  /** The sentence around a verb-form drill: code has already chosen the verb and the form (buildVerbFormDrillPrompt). */
+  async generateVerbFormDrill(input: VerbFormDrillInput, kuId: string): Promise<{ situation: string; sentence: string; translation: string }> {
+    const systemPrompt = buildVerbFormDrillPrompt(input);
+    return this.logged('/questions/verb-form', this.modelName, { userMessage: 'Write the drill.', systemPrompt, kuId, topic: input.pattern }, async () => {
+      const response = await this.generate({
+        model: this.modelName,
+        contents: [{ parts: [{ text: 'Write the drill.' }] }],
+        config: {
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: { situation: { type: 'STRING' }, sentence: { type: 'STRING' }, translation: { type: 'STRING' } },
+            required: ['situation', 'sentence', 'translation'],
+          } as any,
+        },
+      });
+      const parsedJson = this.parseJson<{ situation: string; sentence: string; translation: string }>(this.textOf(response));
+      return { result: parsedJson, responseData: { rawText: response.text, parsedJson } };
+    }).catch(error => { throw this.serverError(error); });
   }
 
   /** The content words in a scenario script that aren't its Key Vocabulary (a pool scenario's script words). */

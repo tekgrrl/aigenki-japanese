@@ -621,6 +621,8 @@ export interface ReviewItem {
   presentAs?: "AI-Generated-Question";
   usageId?: string;
   usageLabel?: string;
+  /** A Grammar AI-question card the backend chose to show as a verb-form drill: the skill and verb it tests. */
+  verbForm?: { skillId: string; verbKuId: string; verb?: string };
 }
 
 // This represents the structure of our old db.json

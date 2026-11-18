@@ -22,6 +22,7 @@ import FacetDebugPanel from "@/components/review/FacetDebugPanel";
 import ReportContentIssue, { lessonLabel } from "@/components/lessons/ReportContentIssue";
 import ReviewActionButtons from "@/components/review/ReviewActionButtons";
 import KanjiWordsLine from "@/components/review/KanjiWordsLine";
+import WaniKaniLink from "@/components/WaniKaniLink";
 import LessonSlideStack from "@/components/learn/LessonSlideStack";
 import { audioFirstPictures } from "@/lib/pictures";
 import { completeLesson } from "@/components/learn/LessonSlides";
@@ -379,7 +380,12 @@ export default function ReviewPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ result, ...(usage ? { usageId: usage.id } : {}) }),
+          body: JSON.stringify({
+            result,
+            ...(usage ? { usageId: usage.id } : {}),
+            // The AI question actually answered, so its result is credited to it (the facet's current one can change).
+            ...(currentItem.facet.facetType === "AI-Generated-Question" && dynamicQuestionId ? { questionId: dynamicQuestionId } : {}),
+          }),
         },
       );
       if (!response.ok) throw new Error("Failed to update SRS data");
@@ -1274,6 +1280,11 @@ export default function ReviewPage() {
             </p>
           )}
           {usageProgress && <UsageProgressLine progress={usageProgress} />}
+          {getQuestionType(currentItem).startsWith("Kanji") && currentItem.facet.data?.content && (
+            <p className="mt-3">
+              <WaniKaniLink kanji={currentItem.facet.data.content} className="text-base text-gray-200 hover:text-white" />
+            </p>
+          )}
 
           {answerState === "incorrect" && currentItem && (
             <div className="mt-4">

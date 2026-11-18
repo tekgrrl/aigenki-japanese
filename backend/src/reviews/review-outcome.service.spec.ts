@@ -18,10 +18,11 @@ function setup(ku: Record<string, any> = { type: 'Vocab', content: '川', data: 
     tutorContext: { updateLeech: log('leech') },
     dailyPlan: { recordPromotion: log('promotion') },
     flash: { start: log('flash') },
+    learnerProgress: { recordDrillAnswer: log('drillEvidence') },
   };
   const service = new ReviewOutcomeService(
     deps.learningProgress as any, deps.reviewProgress as any, deps.ukus as any, deps.scenarios as any,
-    deps.kus as any, deps.tutorContext as any, deps.dailyPlan as any, deps.flash as any,
+    deps.kus as any, deps.tutorContext as any, deps.dailyPlan as any, deps.flash as any, deps.learnerProgress as any,
   );
   return { service, calls, deps };
 }

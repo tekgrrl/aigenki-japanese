@@ -30,8 +30,9 @@ import { PicturesModule } from './pictures/pictures.module';
 import { FacetsModule } from './facets/facets.module';
 
 import { JourneysModule } from './journeys/journeys.module';
+import { LearnerProgressModule } from './learner-progress/learner-progress.module';
 @Module({
-  imports: [ValidationModule, ReviewsModule, FirebaseModule, FacetsModule, GeminiModule, ClaudeModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, TutorContextModule, DailyPlanModule, LearnerFlagsModule, GrammarSectionsModule, PicturesModule, JourneysModule],
+  imports: [ValidationModule, ReviewsModule, FirebaseModule, FacetsModule, GeminiModule, ClaudeModule, ConfigModule.forRoot(), QuestionsModule, ApilogModule, LessonsModule, KnowledgeUnitsModule, StatsModule, KanjiModule, ScenariosModule, AudioModule, AuthModule, UserModule, UserKnowledgeUnitsModule, ConceptsModule, LearningProgressModule, ReviewProgressModule, TutorModule, TutorContextModule, DailyPlanModule, LearnerFlagsModule, GrammarSectionsModule, PicturesModule, JourneysModule, LearnerProgressModule],
   controllers: [AppController],
   providers: [AppService],
 })

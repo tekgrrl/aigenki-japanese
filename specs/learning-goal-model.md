@@ -161,7 +161,7 @@ can be migrated by a script.
 | Audio and picture cards feeding the meaning goal | Pinned |
 | Definition-to-Content | Pinned |
 | The text to add to audio cards | Not decided |
-| Applying the model to Grammar, Concept and Kanji | Not discussed |
+| Applying the model to Grammar, Concept and Kanji | Grammar started: verb forms (below) |
 
 ## Open questions
 
@@ -170,6 +170,26 @@ can be migrated by a script.
   is decided as that goal is designed.
 - **SRS tuning.** Once this is built, the SRS will be tuned to make the best use of it, including
   nudging the learner towards other usages. Not designed yet.
+
+## Grammar: verb forms as skills (2026-11-16)
+
+Decided by the owner: a Grammar point that needs a verb form (`{V-te}ください`) can't be learned from its
+examples alone, because they never cover every godan ending and the irregulars. Actions are too many to
+learn one by one, so what's taught and assessed is the **abstract rule**.
+
+- A **skill** is one verb form + one ending group: "て-form of godan verbs in む/ぶ/ぬ". Forms and groups
+  are data in `backend/src/lib/verb-forms.ts`; groups differ per form (ない only splits う from the rest).
+- **Evidence** is stored raw per learner and skill (`users/{uid}/skill-evidence`): each answer with its
+  verb and Grammar point. **What counts as learned is found by experiment**: the rule lives only in
+  `backend/src/learner-progress/skill-rules.ts`, so changing it re-judges everything without losing data.
+- `LearnerProgressService` is the one place to ask where a learner is with a KU or a skill. Existing
+  services (status, gates, sequence) aren't moved onto it yet.
+- **The drill is an AI question kind** on the Grammar point's AI-question card: code picks the verb (one
+  the learner studies first, any corpus verb otherwise) and computes the form; Gemini only writes the
+  sentence. Answers are checked locally.
+- **Record only for now**: evidence gates nothing and changes no SRS stage.
+- The owner's Verb-form Progress page (`/admin/progress`) shows the evidence per form and group, for
+  judging the rule.
 
 ## Related
 - `DATA-MODEL.md`: today's facets, UKUs, lessons and pictures.
