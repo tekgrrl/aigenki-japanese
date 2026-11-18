@@ -336,6 +336,11 @@ export class ReviewsService {
         if (questionId && facetType === 'AI-Generated-Question') {
             const q = (await this.db.collection(QUESTIONS_COLLECTION).doc(questionId).get()).data() as QuestionItem | undefined;
             if (q?.kind === 'verb-form') {
+                // The stored answers are authoritative (the client normally sends them too).
+                if (matchesLocally([q.data.answer, ...(q.data.acceptedAlternatives ?? [])])) {
+                    await this.questionsService.recordAnswer(uid, questionId, kuId, 'pass', facetType);
+                    return { result: 'pass', explanation: 'Correct!' };
+                }
                 await this.questionsService.recordAnswer(uid, questionId, kuId, 'fail', facetType);
                 return { result: 'fail', explanation: QuestionsService.verbFormExplanation(q) };
             }
