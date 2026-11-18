@@ -621,6 +621,8 @@ export interface ReviewItem {
   presentAs?: "AI-Generated-Question";
   usageId?: string;
   usageLabel?: string;
+  /** Vocab meaning card shown as the bare word: how many meanings (usages) the word has, when 2+. */
+  usageCount?: number;
   /** A Grammar AI-question card the backend chose to show as a verb-form drill: the skill and verb it tests. */
   verbForm?: { skillId: string; verbKuId: string; verb?: string };
 }
