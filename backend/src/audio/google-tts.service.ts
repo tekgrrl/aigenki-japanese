@@ -68,16 +68,17 @@ export class GoogleTtsService implements ITtsProvider {
     }
 
     /**
-     * App audio (`/audio/speak`): the default Chirp3-HD voice, falling back once to Neural2.
+     * App audio (`/audio/speak`): the default Chirp3-HD voice (or `voice`, e.g. a scenario speaker's),
+     * falling back once to Neural2.
      * Text without closing punctuation gets a 。: given a bare kana word (e.g. a reading like
      * こうきょうりょうきん), Chirp3-HD sometimes inserts a ~0.7s phrase break mid-word, which
      * the full stop prevents (measured: 4 of 11 bare-kana renders paused, 0 of 6 with 。).
      */
-    async generateAudio(text: string): Promise<Buffer> {
+    async generateAudio(text: string, voice?: string): Promise<Buffer> {
         const trimmed = text.trim();
         const input = /[。．.！!？?…」』）)]$/.test(trimmed) ? trimmed : `${trimmed}。`;
         try {
-            return (await this.synthesize({ text: input })).audio;
+            return (await this.synthesize({ text: input }, voice ? { voiceName: voice } : {})).audio;
         } catch (error) {
             this.logger.error(`Failed to generate audio for text: "${text.substring(0, 20)}..."`, error);
             throw error;

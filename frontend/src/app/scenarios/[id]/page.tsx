@@ -11,6 +11,9 @@ import { useAuth } from "@/providers/AuthProvider";
 import ScenePicture from "@/components/scenarios/ScenePicture";
 import GrammarPatternDisplay from "@/components/lessons/GrammarPatternDisplay";
 import ScenePlayer from "@/components/scenarios/ScenePlayer";
+import ScenarioVoices from "@/components/scenarios/ScenarioVoices";
+import { scenarioVoices } from "@/lib/voices";
+import { stripFurigana } from "@/lib/furigana";
 
 const API_BASE_URL = "/api";
 
@@ -70,13 +73,49 @@ export default function ScenarioPage({
   } = useSpeechRecognition();
   const historyLengthRef = useRef(0);
 
-  // Helper to play TTS
-  const playTts = async (text: string) => {
+  // Each speaker's voice: the saved choice, else a default by order of appearance (lib/voices.ts).
+  const voices = useMemo(() => scenarioVoices(scenario?.dialogue, scenario?.voices), [scenario?.dialogue, scenario?.voices]);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+
+  /** The voice for a Role Play reply: its role's voice, else the first non-learner speaker's. */
+  const voiceForRole = (roleName?: string): string | undefined => {
+    if (roleName && voices[roleName]) return voices[roleName];
+    const other = scenario?.dialogue?.find((l) =>
+      l.speakerRole ? l.speakerRole === "ai" : l.speaker !== scenario?.roles?.user,
+    );
+    return other ? voices[other.speaker] : undefined;
+  };
+
+  /** Saves one speaker's new voice (with the others as shown), updating the page first. */
+  const changeVoice = async (speaker: string, voice: string) => {
+    const next = { ...voices, [speaker]: voice };
+    setScenario((prev) => (prev ? { ...prev, voices: next } : prev));
+    setVoiceError(null);
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/scenarios/${id}/voices`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voices: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setVoiceError("Couldn't save the voice. It will reset when you reload the page.");
+    }
+  };
+
+  /** Plays a speaker's first script line in their current voice. */
+  const sampleVoice = (speaker: string) => {
+    const line = scenario?.dialogue?.find((l) => l.speaker === speaker);
+    if (line) playTts(stripFurigana(line.text), voices[speaker]);
+  };
+
+  // Helper to play TTS. `voice`: a speaker's voice; the app's voice when absent.
+  const playTts = async (text: string, voice?: string) => {
     try {
       const res = await apiFetch(`${API_BASE_URL}/audio/speak`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, voice }),
       });
       if (!res.ok) throw new Error("TTS fetch failed");
       const blob = await res.blob();
@@ -93,7 +132,7 @@ export default function ScenarioPage({
       // Only play if it's AI (or not user/system) and we are in simulation
       // adjusting condition to be safe: speaker !== 'user'
       if (lastMsg.speaker !== "user" && scenario?.state === "simulate") {
-        playTts(lastMsg.text);
+        playTts(lastMsg.text, voiceForRole(lastMsg.roleName));
       }
       historyLengthRef.current = chatHistory.length;
     }
@@ -551,7 +590,8 @@ export default function ScenarioPage({
         <details className="rounded-xl border border-slate-200 bg-white p-4">
           <summary className="cursor-pointer font-medium text-slate-700">Watch the scene again</summary>
           <div className="mt-4">
-            <ScenePlayer dialogue={scenario.dialogue} userRole={scenario.roles?.user} title="The scene" />
+            <ScenarioVoices voices={voices} onChange={changeVoice} onSample={sampleVoice} error={voiceError} />
+            <ScenePlayer dialogue={scenario.dialogue} userRole={scenario.roles?.user} title="The scene" voices={voices} />
           </div>
         </details>
       )}
@@ -770,7 +810,7 @@ export default function ScenarioPage({
                     <span>{msg.speaker === "user" ? (scenario.roles?.user ?? "You") : (msg.roleName ?? (Array.isArray(scenario.roles?.ai) ? scenario.roles.ai[0] : scenario.roles?.ai) ?? "AI")}</span>
                     {msg.speaker !== "user" && (
                       <button
-                        onClick={() => playTts(msg.text)}
+                        onClick={() => playTts(msg.text, voiceForRole(msg.roleName))}
                         className="opacity-50 hover:opacity-100 hover:bg-black/10 rounded p-0.5 transition-all"
                         title="Replay Audio"
                       >
@@ -861,7 +901,8 @@ export default function ScenarioPage({
       ) : (
         <>
           {/* Main Stage: the play-through */}
-          <ScenePlayer dialogue={scenario.dialogue} userRole={scenario.roles?.user} />
+          <ScenarioVoices voices={voices} onChange={changeVoice} onSample={sampleVoice} error={voiceError} />
+          <ScenePlayer dialogue={scenario.dialogue} userRole={scenario.roles?.user} voices={voices} />
 
           {/* Grammar Notes (Genki Style) */}
           {scenario.grammarNotes && scenario.grammarNotes.length > 0 && (

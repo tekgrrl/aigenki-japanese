@@ -5,6 +5,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-client";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { getEntry, putEntry, historyKey } from "@/lib/pronunciationHistory";
+import { VOICES, DEFAULT_VOICE } from "@/lib/voices";
 
 const PAUSE_OPTIONS = [
   { label: "Short", ms: 200 },
@@ -12,17 +13,6 @@ const PAUSE_OPTIONS = [
   { label: "Long", ms: 700 },
 ];
 
-// Every ja-JP Chirp3-HD voice (confirmed available via listVoices) — mirrors
-// CHIRP3_HD_JA_VOICES in backend/src/audio/google-tts.service.ts.
-const VOICES = [
-  "Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede", "Autonoe",
-  "Callirrhoe", "Charon", "Despina", "Enceladus", "Erinome", "Fenrir",
-  "Gacrux", "Iapetus", "Kore", "Laomedeia", "Leda", "Orus", "Puck",
-  "Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar",
-  "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
-].map((name) => ({ label: name, id: `ja-JP-Chirp3-HD-${name}` }));
-
-const DEFAULT_VOICE = "ja-JP-Chirp3-HD-Orus";
 const VOICE_STORAGE_KEY = "pronounceVoice";
 
 export default function PronouncePage() {

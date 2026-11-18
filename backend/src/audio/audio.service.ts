@@ -24,10 +24,11 @@ export class AudioService {
         private readonly geminiService: GeminiService,
     ) { }
 
-    async getAudioStream(text: string): Promise<Buffer> {
+    /** `voice`: a scenario speaker's chosen voice (validated by the controller); the app's voice when absent. */
+    async getAudioStream(text: string, voice?: string): Promise<Buffer> {
         this.logger.log(`Generating audio for text: "${text.substring(0, 50)}..."`);
         try {
-            return await this.ttsProvider.generateAudio(text);
+            return await this.ttsProvider.generateAudio(text, voice);
         } catch (error) {
             this.logger.error('Failed to generate audio stream', error);
             throw error;
