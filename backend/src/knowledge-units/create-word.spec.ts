@@ -43,6 +43,16 @@ describe('KnowledgeUnitsController.create', () => {
     expect(kus.update).toHaveBeenCalledWith('ku1', { 'data.corpusNotes': 'いちにち reading only' });
   });
 
+  it('adds the note after one already stored, and skips a note that is already there', async () => {
+    const { controller, kus } = setup({ existing: { id: 'ku1', data: { corpusNotes: 'いちにち reading only' } }, admin: true });
+    await controller.create('admin', { type: 'Vocab', content: '一日', data: { corpusNotes: 'counter sense too' } });
+    expect(kus.update).toHaveBeenCalledWith('ku1', { 'data.corpusNotes': 'いちにち reading only\ncounter sense too' });
+    kus.update.mockClear();
+    expect(await controller.create('admin', { type: 'Vocab', content: '一日', data: { corpusNotes: 'いちにち reading only' } }))
+      .toEqual({ id: 'ku1', isNew: false, noteAdded: false });
+    expect(kus.update).not.toHaveBeenCalled();
+  });
+
   it("ignores a learner's corpus note on an existing word", async () => {
     const { controller, kus } = setup({ existing: { id: 'ku1' }, admin: false });
     const body = { type: 'Vocab', content: '一日', data: { corpusNotes: 'note' } };

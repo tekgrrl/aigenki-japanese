@@ -164,11 +164,12 @@ export class KnowledgeUnitsController {
             kuId = existing.id;
             isNewKu = false;
             // An admin re-adding an existing word may bring a corpus note (e.g. which reading is
-            // meant); store it rather than drop it. Other typed fields never overwrite stored ones.
+            // meant); add it after any stored note rather than drop it. Other typed fields never
+            // overwrite stored ones.
             const note = typeof body.data?.corpusNotes === 'string' ? body.data.corpusNotes.trim() : '';
             const stored = existing.data && 'corpusNotes' in existing.data ? existing.data.corpusNotes : undefined;
-            if (note && note !== stored && (await this.userService.isAdmin(uid))) {
-                await this.knowledgeUnitsService.update(kuId, { 'data.corpusNotes': note });
+            if (note && !stored?.includes(note) && (await this.userService.isAdmin(uid))) {
+                await this.knowledgeUnitsService.update(kuId, { 'data.corpusNotes': stored ? `${stored}\n${note}` : note });
                 noteAdded = true;
             }
         } else {
